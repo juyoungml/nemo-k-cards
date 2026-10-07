@@ -2,10 +2,12 @@
 # One-time OpenShell setup for AGENT_RUNNER=openshell (BACKEND §6, §0.3).
 #
 #   ANTHROPIC_API_KEY=... scripts/openshell_setup.sh
+#   CLAUDE_CODE_OAUTH_TOKEN=... scripts/openshell_setup.sh    # Claude subscription (`claude setup-token`)
+#   scripts/openshell_setup.sh                                # or either one set in backend/.env
 #
 # 1. builds the agent image (infra/sandbox/Dockerfile)
 # 2. imports the claude-code provider profile (policies/openshell/providers/claude-code.yaml)
-# 3. creates the `claude-code` provider from ANTHROPIC_API_KEY — the key lives in the gateway; sandboxes
+# 3. creates the `claude-code` provider from ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN — the key lives in the gateway; sandboxes
 #    only ever see a placeholder, and it is sent to api.anthropic.com only.
 #
 # Gateway: on hosts with Linux < 6.2 or Docker < 28 (e.g. Ubuntu 22.04), run sandboxes as microVMs:
@@ -25,8 +27,15 @@ else
   openshell profile import -f "$profile"
 fi
 
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "ANTHROPIC_API_KEY is not set; skipping provider creation" >&2
+# Fall back to backend/.env (gitignored) for the credential; only these two keys are read from it.
+if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f backend/.env ]; then
+  for k in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN; do
+    v=$(sed -n "s/^${k}=//p" backend/.env | tail -1 | sed -e 's/^["'\'']//' -e 's/["'\'']$//')
+    [ -n "$v" ] && export "$k=$v"
+  done
+fi
+if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  echo "set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to create the provider" >&2
   exit 1
 fi
 if openshell provider get claude-code >/dev/null 2>&1; then
