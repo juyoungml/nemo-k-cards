@@ -30,7 +30,7 @@ from app.schemas import (
     ReviewVerdict,
     VerificationReport,
 )
-from app.services import image_host, link_checker, publisher, visual_qa
+from app.services import image_host, link_checker, photos, publisher, visual_qa
 
 log = logging.getLogger("orchestrator")
 KST = ZoneInfo("Asia/Seoul")
@@ -181,6 +181,15 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                     "Every source for this event failed link verification — add the official event page in "
                     "Brainstorm and generate again.")))
 
+        # Photos (host): vet the researcher's candidates; events without one get the Poster style.
+        vetted: dict[str, photos.Vetted] = {}
+        if any(b.images for b in included):
+            vetted, photo_log = await photos.collect(included, ok_urls, settings.output_dir / job.id)
+            for line in photo_log:
+                r.log("verify", line, "info" if "photo ok" in line else "warn")
+        r.log("verify", f"photos: {len(vetted)}/{len(included)} events have a usable photo"
+              + (f" · {len(included) - len(vetted)} poster" if len(included) > len(vetted) else ""))
+
         # 3. Outline & copy (sandbox) ----------------------------------------------------------
         current = "copy"
         r.step("copy", "running")
@@ -200,6 +209,9 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
             deck = (_deck_from_draft(draft, included[0].id if included else None) if draft
                     else CardDeck.model_validate(fx("deck.json")))
         deck.job_id = job.id
+        for sl in deck.slides:
+            if sl.layout == "event" and sl.event_id in vetted and not sl.image:
+                sl.image = vetted[sl.event_id].asset
         job.deck = deck
         n_tags = len(visual_qa.HASHTAG.findall(deck.caption))
         r.log("copy", f"CardDeck {len(deck.slides)} slides · caption {n_tags} hashtags")
