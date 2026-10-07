@@ -1,0 +1,33 @@
+# Claude Code provider profile for the agent sandbox, adapted from OpenShell's example
+# (https://github.com/NVIDIA/OpenShell/blob/v0.1.2/providers/claude-code.yaml).
+#
+#   openshell profile import -f policies/openshell/providers/claude-code.yaml
+#   openshell provider create --name claude-code --type claude-code --from-existing   # reads ANTHROPIC_API_KEY
+#
+# Changes from the example:
+# - binaries: only the real path the image installs (infra/sandbox/Dockerfile).
+# - endpoints: inference only. statsig.anthropic.com / sentry.io are dropped; the image sets
+#   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 so the CLI doesn't try them.
+# The key is sent as x-api-key to api.anthropic.com and nowhere else; the sandbox sees a placeholder.
+
+id: claude-code
+display_name: Claude Code
+description: Claude Code CLI (What's On Korea agent image)
+category: agent
+inference_capable: true
+credentials:
+  - name: api_key
+    description: Anthropic API key used by Claude Code
+    env_vars: [ANTHROPIC_API_KEY, CLAUDE_API_KEY]
+    required: true
+    auth_style: header
+    header_name: x-api-key
+discovery:
+  credentials: [api_key]
+endpoints:
+  - host: api.anthropic.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+binaries: [/usr/local/bin/claude]

@@ -7,13 +7,20 @@ with pydantic on the host.
 
 import asyncio
 import json
+import logging
 import re
+import secrets
 import shutil
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, ClassVar, Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
+from app import store
 from app.config import settings
+from app.services import policy_log
+
+log = logging.getLogger("agent_runner")
 
 # Tools each subagent may use inside its session (the OpenShell policy is the real boundary).
 TOOLS = {
@@ -33,14 +40,15 @@ class AgentOutputError(AgentError):
 
 
 class AgentRunner(Protocol):
-    async def run(self, agent: str, task: str, payload: dict, schema: dict) -> Any: ...
+    async def run(self, agent: str, task: str, payload: dict, schema: dict,
+                  files: list[Path], job_id: str | None) -> Any: ...
 
 
-def _cli_args(agent: str, task: str, schema: dict) -> list[str]:
+def _cli_args(agent: str, task: str, schema: dict, add_dirs: list[str] = ()) -> list[str]:
     args = ["-p", task, "--agent", agent, "--output-format", "json",
             "--json-schema", json.dumps(schema), "--allowedTools", *TOOLS.get(agent, ["Read"])]
-    if agent == "reviewer":
-        args += ["--add-dir", str(settings.output_dir)]
+    for d in add_dirs:
+        args += ["--add-dir", d]
     if settings.agent_model:
         args += ["--model", settings.agent_model]
     return args
@@ -81,12 +89,14 @@ def _parse(stdout: bytes) -> Any:
 class LocalClaudeRunner:
     """Dev only: `claude -p` on the host with cwd=agent/. No sandbox."""
 
-    async def run(self, agent: str, task: str, payload: dict, schema: dict) -> Any:
+    async def run(self, agent: str, task: str, payload: dict, schema: dict,
+                  files: list[Path], job_id: str | None) -> Any:
         claude = shutil.which("claude")
         if not claude:
             raise AgentError("claude CLI not found on PATH")
+        dirs = sorted({str(f.parent) for f in files})
         proc = await asyncio.create_subprocess_exec(
-            claude, *_cli_args(agent, task, schema), cwd=settings.agent_dir,
+            claude, *_cli_args(agent, task, schema, dirs), cwd=settings.agent_dir,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -101,36 +111,109 @@ class LocalClaudeRunner:
 
 
 class OpenShellRunner:
-    """`openshell sandbox create --policy ... --provider claude-code --no-keep -- claude -p ...`"""
+    """One fresh OpenShell sandbox per stage (BACKEND §6):
 
-    async def run(self, agent: str, task: str, payload: dict, schema: dict) -> Any:
-        openshell = shutil.which("openshell")
-        if not openshell:
-            raise AgentError("openshell CLI not found — install OpenShell or use AGENT_RUNNER=local")
-        cmd = [openshell, "sandbox", "create", "--from", settings.openshell_image,
-               "--policy", str(settings.openshell_policy), "--no-keep",
-               *[a for p in settings.openshell_providers for a in ("--provider", p)],
-               "--", "claude", *_cli_args(agent, task, schema)]
+    create --detach → upload input files → exec `claude -p` (payload on stdin) → collect the sandbox's
+    policy log → delete. The sandbox is kept until its log is read (a `--no-keep` sandbox takes its log
+    with it). Uploads land in /tmp/input because the policy keeps /sandbox/input read-only even for uploads.
+    """
+
+    SANDBOX_INPUT = "/tmp/input"
+    # Image ENV doesn't reach VM sandboxes, so the CLI settings the image relies on are passed per exec.
+    CLAUDE_ENV: ClassVar[dict[str, str]] = {"CLAUDE_CONFIG_DIR": "/tmp/claude", "DISABLE_AUTOUPDATER": "1",
+                  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+
+    def __init__(self) -> None:
+        self.openshell = shutil.which("openshell") or ""
+
+    async def _cli(self, *args: str, stdin: bytes | None = None, timeout: float = 120) -> tuple[int, bytes, bytes]:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            self.openshell, *args, stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(json.dumps(payload, ensure_ascii=False, default=str).encode()),
-                timeout=settings.agent_timeout_s)
-        except TimeoutError as e:
+            out, err = await asyncio.wait_for(proc.communicate(stdin), timeout=timeout)
+        except TimeoutError:
             proc.kill()
-            raise AgentError(f"{agent} timed out in sandbox") from e
-        if proc.returncode != 0 and not stdout:
-            raise AgentError(f"sandbox exited {proc.returncode}: {stderr.decode()[-300:]}")
-        return _parse(stdout)
+            await proc.wait()
+            raise
+        return proc.returncode or 0, out, err
+
+    async def run(self, agent: str, task: str, payload: dict, schema: dict,
+                  files: list[Path], job_id: str | None) -> Any:
+        if not self.openshell:
+            raise AgentError("openshell CLI not found — install OpenShell or use AGENT_RUNNER=local")
+        # OpenShell caps sandbox names at 19 chars: e.g. "revi-0bb413-a1b2".
+        job = re.sub(r"[^a-z0-9]", "", (job_id or "adhoc").lower())[-8:]
+        name = f"{agent[:4]}-{job}-{secrets.token_hex(2)}"
+        rc, _, err = await self._cli(
+            "sandbox", "create", "--name", name, "--detach", "--no-tty", "--from", settings.openshell_image,
+            "--policy", str(settings.openshell_policy),
+            *[a for p in settings.openshell_providers for a in ("--provider", p)],
+            "--label", f"stage={agent}", *(["--label", f"job={job_id}"] if job_id else []), timeout=300)
+        if rc != 0:
+            await self._delete(name)
+            raise AgentError(f"sandbox create failed: {err.decode()[-300:]}")
+        try:
+            remap = {}
+            for d in sorted({f.parent for f in files}):
+                rc, _, err = await self._cli("sandbox", "upload", name, str(d), self.SANDBOX_INPUT)
+                if rc != 0:
+                    raise AgentError(f"upload to sandbox failed: {err.decode()[-300:]}")
+                remap.update({str(f): f"{self.SANDBOX_INPUT}/{d.name}/{f.name}" for f in files if f.parent == d})
+            env = [a for k, v in self.CLAUDE_ENV.items() for a in ("--env", f"{k}={v}")]
+            dirs = [self.SANDBOX_INPUT] if files else []
+            try:
+                rc, stdout, err = await self._cli(
+                    "sandbox", "exec", "-n", name, "--workdir", "/sandbox/agent", "--no-tty", *env,
+                    "--", "claude", *_cli_args(agent, task, schema, dirs),
+                    stdin=json.dumps(_remap(payload, remap), ensure_ascii=False, default=str).encode(),
+                    timeout=settings.agent_timeout_s)
+            except TimeoutError as e:
+                raise AgentError(f"{agent} timed out in sandbox after {settings.agent_timeout_s}s") from e
+            if rc != 0 and not stdout:
+                raise AgentError(f"sandbox exec exited {rc}: {err.decode()[-300:]}")
+            return _parse(stdout)
+        finally:
+            await self._collect_policy_events(name, job_id)
+            await self._delete(name)
+
+    async def _collect_policy_events(self, name: str, job_id: str | None) -> None:
+        try:
+            rc, out, _ = await self._cli("logs", name, "--source", "sandbox", "-n", "5000", "--color", "never")
+            if rc == 0 and (events := policy_log.parse(out.decode(errors="replace"), name, job_id)):
+                store.add_policy_events(events)
+        except Exception:  # a missing log must not fail the stage
+            log.exception("could not collect policy log for %s", name)
+
+    async def _delete(self, name: str) -> None:
+        try:
+            await self._cli("sandbox", "delete", name)
+        except Exception:
+            log.exception("could not delete sandbox %s", name)
+
+
+def _remap(value: Any, paths: dict[str, str]) -> Any:
+    """Swap host file paths in the payload for where they were uploaded in the sandbox."""
+    if isinstance(value, str):
+        return paths.get(value, value)
+    if isinstance(value, list):
+        return [_remap(v, paths) for v in value]
+    if isinstance(value, dict):
+        return {k: _remap(v, paths) for k, v in value.items()}
+    return value
 
 
 def get_runner() -> AgentRunner:
     return OpenShellRunner() if settings.agent_runner == "openshell" else LocalClaudeRunner()
 
 
-async def run_stage[T](agent: str, task: str, payload: dict, out_type: type[T]) -> T:
-    """Run one subagent; retry once with the validation error appended (BACKEND §6)."""
+async def run_stage[T](agent: str, task: str, payload: dict, out_type: type[T], *,
+                       files: list[Path] = (), job_id: str | None = None) -> T:
+    """Run one subagent; retry once with the validation error appended (BACKEND §6).
+
+    `files` are host files the agent must read (rendered slides); `job_id` tags the sandbox and its
+    policy events.
+    """
     adapter = TypeAdapter(out_type)
     schema = adapter.json_schema()
     if schema.get("type") != "object":  # --json-schema needs an object at the root
@@ -146,7 +229,7 @@ async def run_stage[T](agent: str, task: str, payload: dict, out_type: type[T]) 
     for attempt in range(2):
         t = task if attempt == 0 else f"{task}\n\nYour previous output failed validation:\n{last_err}\nFix it."
         try:
-            raw = await runner.run(agent, t, payload, schema)
+            raw = await runner.run(agent, t, payload, schema, list(files), job_id)
             if wrap and isinstance(raw, list):  # agent returned the bare list
                 raw = {"items": raw}
             return adapter.validate_python(raw["items"] if wrap else raw)

