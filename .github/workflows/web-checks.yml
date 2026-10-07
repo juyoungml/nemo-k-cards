@@ -1,0 +1,32 @@
+name: Web checks
+on:
+  push:
+    branches: [main]
+    paths: ['apps/web/**', '.github/workflows/web-checks.yml']
+  pull_request:
+    paths: ['apps/web/**', '.github/workflows/web-checks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm lint
+      # Mock API build: proves the Admin compiles without any backend or secrets.
+      - run: pnpm build

@@ -79,6 +79,8 @@ Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `review
 
 ## Checks
 
+Safe to run next to a live server: tests use a temp data dir, fixture mode and blanked credentials (`backend/tests/conftest.py` refuses to start otherwise), run in-process with no ports, and don't trigger `--reload`. Don't run `pnpm build` in `apps/web` while `pnpm dev` is running (they share `.next/`); CI builds it.
+
 ```bash
 cd backend && uv run pytest -q                       # unit + API tests
 cd backend && uv run python -m app.renderer.preview  # renders demo deck → backend/.data/preview, reports overflow
