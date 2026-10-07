@@ -29,5 +29,11 @@ class Settings(BaseSettings):
     ig_access_token: str = ""
     public_asset_base_url: str = ""
 
+    # Public image hosting for Instagram (host-only secrets)
+    image_host: Literal["supabase", "local"] = "local"
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    supabase_bucket: str = "slides"
+
 
 settings = Settings()
