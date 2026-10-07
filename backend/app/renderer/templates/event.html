@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{# Required on event slides (SPEC §6): name EN + 한글, dates, venue + nearest station, price, booking, why-go, source. #}
+{% block content %}
+  <div style="display:flex;align-items:flex-end;gap:3cqw">
+    <span class="num">{{ event_no }}</span>
+    <div style="min-width:0">
+      <span class="kicker" data-qa="event.kicker">{{ event.category | upper }} · {{ event.venue_en }}</span>
+      <div class="ttl" style="font-size:7.4cqw" data-qa="event.heading">{{ slide.heading or event.title_en }}</div>
+      <div class="ko" data-qa="event.title_ko">{{ event.title_ko }}</div>
+    </div>
+  </div>
+  {% include "_photo.html" %}
+  <dl class="kv" data-qa="event.facts">
+    <dt>When</dt><dd>{{ event.start_date | daterange(event.end_date) }}</dd>
+    {% if event.nearest_station %}<dt>Where</dt><dd>{{ event.nearest_station }}</dd>{% endif %}
+    {% if event.price %}<dt>Price</dt><dd>{{ event.price }}</dd>{% endif %}
+    {% if event.booking %}<dt>Entry</dt><dd>{{ event.booking }}</dd>{% endif %}
+  </dl>
+  {% if badges %}
+  <div class="chips" data-qa="event.access">
+    {% for b in badges %}<span class="chip{% if b.warn %} warn{% endif %}"><i></i>{{ b.text }}</span>{% endfor %}
+  </div>
+  {% endif %}
+  {% if slide.body or event.why_go %}<div class="sub" style="font-size:3.8cqw" data-qa="event.body">{{ slide.body or event.why_go }}</div>{% endif %}
+{% endblock %}

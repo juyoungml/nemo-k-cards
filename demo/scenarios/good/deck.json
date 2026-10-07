@@ -1,0 +1,14 @@
+{
+  "job_id": "sample-good",
+  "title": "This weekend in Seoul: 3 picks worth it",
+  "caption": "3 things foreigners can actually enjoy in Seoul this weekend. Free or cheap, English-friendly, close to the subway. Save this before Friday! Details & links in bio.\n#seoul #thingstodoinseoul #seoulpopup #koreatravel #whatsonkorea",
+  "slides": [
+    {"index": 0, "layout": "cover", "heading": "This weekend in Seoul", "body": "3 picks foreigners can actually enjoy · sample data"},
+    {"index": 1, "layout": "event", "heading": "Seongsu Stationery Pop-up", "body": "", "event_id": "ev-seongsu-stationery"},
+    {"index": 2, "layout": "event", "heading": "Seoul Lantern Walk", "body": "", "event_id": "ev-lantern-walk"},
+    {"index": 3, "layout": "event", "heading": "Modern Hanbok Exhibition", "body": "", "event_id": "ev-modern-hanbok"},
+    {"index": 4, "layout": "tips", "heading": "How locals do it", "body": "Pop-ups: join the waitlist first, then wander until you're called\nLanterns: arrive at sunset and start from Cheonggye Plaza\nCarry a little cash for street-food stalls\nLast trains leave central Seoul around 23:30"},
+    {"index": 5, "layout": "map", "heading": "Start at Cheonggye Plaza", "body": "All three spots are within 20 minutes by subway.", "event_id": "ev-lantern-walk"},
+    {"index": 6, "layout": "cta", "heading": "Save this for Friday", "body": "Tag a friend you're going with."}
+  ]
+}

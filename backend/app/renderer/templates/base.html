@@ -5,7 +5,15 @@
 <style>
   /* 1080x1350 card canvas. Brand: SPEC §6. Mark measurable text with data-qa="<layout>.<field>". */
   body { width: 1080px; height: 1350px; margin: 0; overflow: hidden; }
+{% include "_cards.css" %}
 </style>
 </head>
-<body>{% block content %}{% endblock %}</body>
+<body class="theme-{{ theme }} layout-{{ slide.layout }}" style="{{ palette_css }}">
+<div class="slide">
+  {% if theme == "pop" %}<span class="blob b1"></span><span class="blob b2"></span>{% endif %}
+  <div class="pad">{% block content %}{% endblock %}</div>
+  <span class="acct">{{ account }}</span>
+  <span class="pg" data-qa="{{ slide.layout }}.page">{{ slide.index + 1 }} / {{ total }}</span>
+</div>
+</body>
 </html>
