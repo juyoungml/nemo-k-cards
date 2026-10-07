@@ -145,8 +145,8 @@ export function NewJobView() {
           </div>
         )
       ) : (
-        <div className="flex items-stretch gap-4">
-          <section className="w-[420px] shrink-0 rounded-xl border bg-card p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+          <section className="w-full rounded-xl border bg-card p-4 md:p-5 lg:w-[420px] lg:shrink-0">
             <div className="flex items-center gap-2 pb-3">
               <h2 className="flex-1 text-base font-semibold">Pipeline · job {job.id}</h2>
               <JobStatusBadge status={job.status} mock={!!job.published_url?.includes("/p/MOCK")} />

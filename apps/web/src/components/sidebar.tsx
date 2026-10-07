@@ -42,15 +42,64 @@ function ActiveNav() {
   return <NavLinks pathname={usePathname()} />;
 }
 
+function Brand() {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="relative size-7 rounded-[8px] after:absolute after:inset-[8px] after:rounded-full after:bg-card after:content-[''] bg-[conic-gradient(from_200deg,var(--taegeuk-red)_0_50%,var(--taegeuk-blue)_50%_100%)]" />
+      <div className="leading-tight">
+        <p className="font-heading text-[16px] font-extrabold tracking-[-0.01em]">What&apos;s On Korea</p>
+        <p className="text-[11px] text-muted-foreground">@whatsonkorea · Admin</p>
+      </div>
+    </div>
+  );
+}
+
+function TabLinks({ pathname }: { pathname: string | null }) {
+  const isActive = (href: string) => pathname !== null && (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  return (
+    <nav className="grid grid-cols-4">
+      {NAV.map(({ href, label, icon: Icon }) => (
+        <Link
+          key={href}
+          href={href}
+          className={cn(
+            "flex flex-col items-center gap-1 py-2 text-[11px] text-muted-foreground",
+            isActive(href) && "font-semibold text-primary",
+          )}
+        >
+          <Icon className="size-5" />
+          {label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+function ActiveTabs() {
+  return <TabLinks pathname={usePathname()} />;
+}
+
+/** Phones: brand bar on top, tab bar at the bottom (the sidebar is md+ only). */
+export function MobileNav() {
+  return (
+    <>
+      <header className="sticky top-0 z-30 border-b bg-card/95 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3 backdrop-blur md:hidden">
+        <Brand />
+      </header>
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+        <Suspense fallback={<TabLinks pathname={null} />}>
+          <ActiveTabs />
+        </Suspense>
+      </div>
+    </>
+  );
+}
+
 export function Sidebar() {
   return (
-    <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-card px-4 py-6">
-      <div className="flex items-center gap-2.5 px-2 pb-6">
-        <div className="relative size-7 rounded-[8px] after:absolute after:inset-[8px] after:rounded-full after:bg-card after:content-[''] bg-[conic-gradient(from_200deg,var(--taegeuk-red)_0_50%,var(--taegeuk-blue)_50%_100%)]" />
-        <div className="leading-tight">
-          <p className="font-heading text-[16px] font-extrabold tracking-[-0.01em]">What&apos;s On Korea</p>
-          <p className="text-[11px] text-muted-foreground">@whatsonkorea · Admin</p>
-        </div>
+    <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card px-4 py-6 md:flex">
+      <div className="px-2 pb-6">
+        <Brand />
       </div>
       <Suspense fallback={<NavLinks pathname={null} />}>
         <ActiveNav />
