@@ -220,3 +220,6 @@ __marimo__/
 .streamlit/secrets.toml
 # Python template ignores lib/ — keep the web app source
 !apps/web/src/lib/
+
+# Backend runtime data (rendered slides, SQLite)
+backend/.data/

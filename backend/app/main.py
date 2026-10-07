@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.schemas import CreateJobRequest, Job
@@ -9,6 +10,10 @@ from app.schemas import CreateJobRequest, Job
 app = FastAPI(title="What's On Korea API")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"],
                    allow_methods=["*"], allow_headers=["*"])
+
+# Rendered slides, publicly reachable via PUBLIC_ASSET_BASE_URL so Instagram can fetch them.
+settings.output_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/assets", StaticFiles(directory=settings.output_dir), name="assets")
 
 
 @app.get("/health")
