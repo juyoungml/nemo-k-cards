@@ -46,9 +46,9 @@ export function Sidebar() {
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-card px-4 py-6">
       <div className="flex items-center gap-2.5 px-2 pb-6">
-        <div className="size-7 rounded-[8px] bg-[linear-gradient(90deg,var(--brand-red)_50%,var(--primary)_50%)]" />
+        <div className="relative size-7 rounded-[8px] after:absolute after:inset-[8px] after:rounded-full after:bg-card after:content-[''] bg-[conic-gradient(from_200deg,var(--taegeuk-red)_0_50%,var(--taegeuk-blue)_50%_100%)]" />
         <div className="leading-tight">
-          <p className="text-[15px] font-bold">What&apos;s On Korea</p>
+          <p className="font-heading text-[16px] font-extrabold tracking-[-0.01em]">What&apos;s On Korea</p>
           <p className="text-[11px] text-muted-foreground">@whatsonkorea · Admin</p>
         </div>
       </div>

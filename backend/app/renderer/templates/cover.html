@@ -1,25 +1,11 @@
 {% extends "base.html" %}
+{# Magazine cover: issue line, huge Hangul place name as graphic, headline + posting-weekend date. #}
+{% block outside %}<div class="hangul" aria-hidden="true">{{ hangul }}</div>{% endblock %}
 {% block content %}
-  <div class="cover-head">
-    <div class="txt">
-      <span class="eyebrow" data-qa="cover.kicker">{{ kicker_place }}</span>
-      <div class="title{% if slide.heading | length < 34 %} xl{% endif %}" data-qa="cover.heading">{{ slide.heading }}</div>
-    </div>
-    <div class="cal" data-qa="cover.date">
-      <div class="mo">{{ cal.month }}</div>
-      <div class="d">{{ cal.days }}</div>
-      <div class="w">{{ cal.weekday }}</div>
-    </div>
+  <span class="issue" data-qa="cover.kicker">Weekend Issue No. {{ issue_no }}</span>
+  <div class="cover-hd">
+    <span class="date" data-qa="cover.date">{{ weekend | upper }}</span>
+    <div class="title{% if slide.heading | length > 30 %} long{% endif %}" data-qa="cover.heading">{{ slide.heading }}</div>
+    {% if slide.body %}<div class="lead" data-qa="cover.body">{{ slide.body }}</div>{% endif %}
   </div>
-  {% if slide.body %}<div class="lead" data-qa="cover.body">{{ slide.body }}</div>{% endif %}
-  {% if preview %}
-  <div class="preview" data-qa="cover.preview">
-    <ul>
-      {% for p in preview %}
-      <li><span class="n">{{ "%02d" | format(p.no) }}</span><span class="t">{{ p.title }}</span>
-        <span class="chip" style="--cat: {{ p.color }}"><i></i>{{ p.category }}</span></li>
-      {% endfor %}
-    </ul>
-  </div>
-  {% endif %}
 {% endblock %}

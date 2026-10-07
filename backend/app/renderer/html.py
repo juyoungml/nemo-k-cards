@@ -19,32 +19,30 @@ from app.schemas import CardDeck, EventBrief, Slide
 HERE = Path(__file__).parent
 FONT_DIR = HERE / "fonts"
 
-Theme = Literal["bold", "clean", "pop"]
-Mood = Literal["autumn", "night", "bright"]
-THEMES: tuple[Theme, ...] = ("bold", "clean", "pop")
+Theme = Literal["bold", "clean", "pop"]  # kept for config compatibility; one brand look (DESIGN.md)
+THEMES: tuple[Theme, ...] = ("clean",)
 
-# Theme backgrounds that change with the season/mood. Everything else lives in _cards.css.
-MOODS: dict[str, dict[str, str]] = {
-    "autumn": {"bold-bg": "#0B2F6B", "pop-bg": "#FFE2C7", "blob1": "#FF9F43", "blob2": "#E85D4A"},
-    "night": {"bold-bg": "#14123A", "pop-bg": "#E3DBFF", "blob1": "#7B3FE4", "blob2": "#00C2A8"},
-    "bright": {"bold-bg": "#0047A0", "pop-bg": "#DDF4FF", "blob1": "#FFD166", "blob2": "#4CC9F0"},
+# Category -> (label, Seoul Metro line no., line color, poster text, poster title). DESIGN.md "Category colors".
+CATEGORY = {
+    "popup": ("Pop-up", "8", "#E6186C", "#111418", "#FFFFFF"),
+    "exhibition": ("Exhibition", "1", "#0052A4", "#FFFFFF", "#FFFFFF"),
+    "festival": ("Festival", "3", "#EF7C1C", "#111418", "#FFFFFF"),
+    "performance": ("Performance", "5", "#996CAC", "#FFFFFF", "#FFFFFF"),
+    "experience": ("Experience", "2", "#00A84D", "#FFFFFF", "#FFFFFF"),
+    "other": ("Event", "9", "#BDB092", "#111418", "#111418"),
 }
-CATEGORY = {"popup": ("Pop-up", "#E0457B"), "festival": ("Festival", "#D97706"), "exhibition": ("Exhibition", "#0047A0"),
-            "performance": ("Performance", "#7C3AED"), "experience": ("Experience", "#0F8A6A"), "other": ("Event", "#475569")}
-# Photo placeholder gradient per event category (used when a slide has no licensed image).
-PLACEHOLDER = {
-    "popup": ("#FF8FB1", "#FFE3EC"), "festival": ("#1B1F4B", "#F28C38"),
-    "exhibition": ("#E9DFC8", "#8A6A3B"), "performance": ("#2D0F3F", "#00E0B8"),
-    "experience": ("#0F2A3D", "#E8B04B"), "other": ("#24324A", "#7FA7D9"),
-}
+# Neighborhood -> Hangul set huge on the cover. Falls back to 서울.
+HANGUL = {"seongsu": "성수", "hongdae": "홍대", "itaewon": "이태원", "myeongdong": "명동", "jongno": "종로",
+          "gangnam": "강남", "insadong": "인사동", "mangwon": "망원", "euljiro": "을지로", "yeonnam": "연남",
+          "hannam": "한남", "jamsil": "잠실", "bukchon": "북촌", "ikseon": "익선", "yeouido": "여의도", "busan": "부산"}
 
 # Auto-fit: if the column overflows, shrink text blocks together (5% steps) down to a readable floor.
 # Photos already shrink first (flex: 1 1 0). Anything still overflowing at the floor is caught by QA.
 FIT_JS = """
 () => {
   const pad = document.querySelector('.pad');
-  const blocks = [...pad.querySelectorAll('.title, .lead, .facts, ul.tips, .why, .src, .taxi, .route, .preview, .ko, .row')];
-  const floor = el => el.classList.contains('title') ? 56 : 30;
+  const blocks = [...pad.querySelectorAll('.title, .lead, .facts, ul.tips, .why, .src, .taxi, .route, .ko, .row, .num')];
+  const floor = el => el.classList.contains('title') ? 56 : el.classList.contains('num') ? 120 : 30;
   const overflowing = () => pad.scrollHeight > pad.clientHeight + 1;
   let steps = 0;
   while (overflowing() && steps < 30) {
@@ -52,7 +50,7 @@ FIT_JS = """
     for (const el of blocks) {
       const fs = parseFloat(getComputedStyle(el).fontSize);
       if (fs > floor(el)) { el.style.fontSize = Math.max(floor(el), fs * 0.95) + 'px'; shrunk = true; }
-      el.querySelectorAll('.v, li, .addr, .chip, .stop').forEach(c => {
+      el.querySelectorAll('dd, dt, li, .addr, .chip, .stop').forEach(c => {
         const f = parseFloat(getComputedStyle(c).fontSize);
         if (f > 30) { c.style.fontSize = Math.max(30, f * 0.95) + 'px'; shrunk = true; }
       });
@@ -133,21 +131,14 @@ def slide_image(slide: Slide) -> dict | None:
 
 
 class HtmlRenderer:
-    def __init__(self, theme: Theme = "clean", mood: Mood = "autumn",
+    def __init__(self, theme: Theme = "clean",
                  account: str = "@whatsonkorea", as_of: date | None = None) -> None:
-        self.theme, self.mood, self.account = theme, mood, account
+        self.theme, self.account = theme, account
         self.today = as_of or datetime.now(ZoneInfo("Asia/Seoul")).date()
         self.as_of = self.today.strftime("%Y.%m.%d")
         self.env = Environment(loader=FileSystemLoader(HERE / "templates"),
                                autoescape=select_autoescape(["html"]), undefined=StrictUndefined)
         self.env.filters["daterange"] = daterange
-
-    def cat_color(self, hex_color: str) -> str:
-        """Category colors are tuned for light cards; on the dark theme mix toward white so they stay legible."""
-        if self.theme != "bold":
-            return hex_color
-        r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
-        return "#{:02X}{:02X}{:02X}".format(*(int(c + (255 - c) * 0.45) for c in (r, g, b)))
 
     def context(self, deck: CardDeck, slide: Slide, briefs: dict[str, EventBrief]) -> dict:
         event = briefs.get(slide.event_id) if slide.event_id else None
@@ -160,30 +151,31 @@ class HtmlRenderer:
         img = slide_image(slide)
         sat = self.today + timedelta(days=(5 - self.today.weekday()) % 7) if self.today.weekday() < 5 else (
             self.today - timedelta(days=self.today.weekday() - 5))
-        sun = sat + timedelta(days=1)
-        cat = (event.category if event else "other")
-        preview = [{"no": i + 1, "title": (briefs[s.event_id].title_en if s.event_id in briefs else s.heading),
-                    "category": CATEGORY[briefs[s.event_id].category][0] if s.event_id in briefs else "Event",
-                    "color": self.cat_color(CATEGORY[briefs[s.event_id].category][1] if s.event_id in briefs
-                                            else CATEGORY["other"][1])}
-                   for i, s in enumerate(event_slides[:5])]
+        cat = event.category if event and event.category in CATEGORY else "other"
+        label, line, color, poster_fg, poster_title = CATEGORY[cat]
         ends_soon = event and (event.end_date - self.today).days <= 14
-        place = next((b.venue_en.split(",")[0] for b in in_deck if b.venue_en), "Seoul")
+        photo = img if img and img.get("url") and img.get("allow_overlay") else None
+        # Cover Hangul: the place the headline names, else a neighborhood every event shares, else 서울.
+        def place(text: str) -> str | None:
+            return next((ko for en, ko in HANGUL.items() if en in text.lower()), None)
+        venues = {place(b.venue_en or "") for b in in_deck}
+        hangul = place(deck.slides[0].heading) or (venues.pop() if len(venues) == 1 and None not in venues else "서울")
+        if slide.layout in ("cover", "cta"):
+            slide_class = "dark" + (" has-photo" if photo else "")
+        elif slide.layout == "event" and event:
+            slide_class = "mag" if photo else "poster"
+        else:
+            slide_class = ""
         return {
             "deck": deck, "slide": slide, "event": event, "theme": self.theme,
             "total": len(deck.slides), "account": self.account, "as_of": self.as_of,
-            "font_dir": FONT_DIR.as_uri(),
-            "palette_css": ";".join(f"--{k}:{v}" for k, v in {**MOODS[self.mood],
-                                                               "cat": self.cat_color(CATEGORY[cat][1])}.items()),
-            # Only licensed images that allow text overlay go full-bleed; never a placeholder.
-            "photo": img if img and img.get("url") and img.get("allow_overlay") else None,
-            "kicker": f"{weekend_label(self.today)} · {self.account}",
-            "kicker_place": f"What's on · {place}" if len(in_deck) == 1 else "What's on · Seoul",
-            "cal": {"month": f"{sat:%b}".upper(), "days": f"{sat.day}–{sun.day}" if sat.month == sun.month
-                    else f"{sat.day}–{sun:%-d}", "weekday": "SAT – SUN"},
-            "preview": preview if slide.layout == "cover" else [],
+            "font_dir": FONT_DIR.as_uri(), "slide_class": slide_class,
+            "palette_css": f"--cat:{color};--poster-fg:{poster_fg};--poster-title:{poster_title}",
+            # Only licensed images that allow text overlay are used; never a placeholder.
+            "photo": photo,
+            "weekend": weekend_label(self.today), "issue_no": f"{sat.isocalendar().week:02d}", "hangul": hangul,
             "event_no": event_ids.index(slide.event_id) + 1 if slide.event_id in event_ids else 1,
-            "cat_label": CATEGORY[cat][0], "cat_color": self.cat_color(CATEGORY[cat][1]),
+            "cat_label": label, "cat_line": line, "cat_color": color,
             "until": f"{event.end_date:%b} {event.end_date.day}" if ends_soon else None,
             "badges": access_badges(event),
             "source_hosts": hosts, "credits": credits,

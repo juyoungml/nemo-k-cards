@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="save">
-    <svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z"/></svg>
-    <div class="title" data-qa="cta.heading">{{ slide.heading }}</div>
-  </div>
+  <svg class="save" viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z"/></svg>
+  <div class="title" data-qa="cta.heading">{{ slide.heading }}</div>
   {% if slide.body %}<div class="lead" data-qa="cta.body">{{ slide.body }}</div>{% endif %}
   <span class="stamp" data-qa="cta.verified">✓ Links checked {{ as_of }}</span>
   <div class="src" data-qa="cta.sources">

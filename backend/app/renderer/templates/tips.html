@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {# body: one tip per line #}
 {% block content %}
-  <span class="eyebrow">Know before you go</span>
+  <span class="label">{{ "Know before you go" if "local" in slide.heading | lower else "How locals do it" }}</span>
   <div class="title" data-qa="tips.heading">{{ slide.heading }}</div>
   <ul class="tips" data-qa="tips.body">
     {% for line in slide.body.split("\n") if line.strip() %}

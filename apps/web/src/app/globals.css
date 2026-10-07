@@ -7,9 +7,16 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans), var(--font-noto-kr), sans-serif;
+  --font-sans: var(--font-pretendard), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-sans), var(--font-noto-kr), sans-serif;
+  --font-heading: var(--font-cabinet), var(--font-pretendard), sans-serif;
+  --color-taegeuk-blue: var(--taegeuk-blue);
+  --color-cat-popup: #E6186C;
+  --color-cat-exhibition: #0052A4;
+  --color-cat-festival: #EF7C1C;
+  --color-cat-performance: #996CAC;
+  --color-cat-experience: #00A84D;
+  --color-cat-other: #BDB092;
   --color-canvas: var(--canvas);
   --color-brand-red: var(--brand-red);
   --color-brand-soft: var(--brand-soft);
@@ -60,23 +67,23 @@
 
 :root {
   --background: oklch(1 0 0);
-  --foreground: #111827;
+  --foreground: #111418;
   --card: oklch(1 0 0);
-  --card-foreground: #111827;
+  --card-foreground: #111418;
   --popover: oklch(1 0 0);
-  --popover-foreground: #111827;
-  --primary: #0047A0;
+  --popover-foreground: #111418;
+  --primary: #111418;
   --primary-foreground: #FFFFFF;
-  --secondary: #F1F2F4;
-  --secondary-foreground: #111827;
-  --muted: #F1F2F4;
-  --muted-foreground: #6B7280;
-  --accent: #E6EEF8;
-  --accent-foreground: #0047A0;
-  --destructive: #B91C1C;
-  --border: #E4E4E7;
-  --input: #E4E4E7;
-  --ring: #0047A0;
+  --secondary: #F2F3F5;
+  --secondary-foreground: #111418;
+  --muted: #F2F3F5;
+  --muted-foreground: #5E6573;
+  --accent: #F2F3F5;
+  --accent-foreground: #111418;
+  --destructive: #E4002B;
+  --border: #E2E5EA;
+  --input: #E2E5EA;
+  --ring: #111418;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -91,9 +98,11 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
-  --canvas: #F7F7F5;
-  --brand-red: #CD2E3A;
-  --brand-soft: #E6EEF8;
+  --canvas: #F6F7F9;
+  --brand-red: #E4002B;
+  --taegeuk-red: #CD2E3A;
+  --taegeuk-blue: #0047A0;
+  --brand-soft: #FDE6EA;
   --success: #15803D;
   --success-soft: #DCFCE7;
   --warning: #B45309;
@@ -146,5 +155,10 @@
   }
   html {
     @apply font-sans;
+  }
+  h1 {
+    font-family: var(--font-heading);
+    font-weight: 800;
+    letter-spacing: -0.02em;
   }
 }

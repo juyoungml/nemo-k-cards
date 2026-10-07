@@ -3,20 +3,21 @@
 <head>
 <meta charset="utf-8">
 <style>
-  /* 1080x1350 card canvas. Brand: SPEC §6. Mark measurable text with data-qa="<layout>.<field>". */
+  /* 1080x1350 card canvas. Brand: DESIGN.md. Mark measurable text with data-qa="<layout>.<field>". */
   body { width: 1080px; height: 1350px; margin: 0; overflow: hidden; }
 {% include "_cards.css" %}
 </style>
 </head>
-<body class="theme-{{ theme }} layout-{{ slide.layout }}" style="{{ palette_css }}">
-<div class="slide{% if photo %} has-photo{% endif %}">
-  {% if photo %}<div class="bleed"><img src="{{ photo.url }}" alt=""></div>
-  {% if photo.credit %}<span class="credit" data-qa="{{ slide.layout }}.credit">{{ photo.credit }}</span>{% endif %}{% endif %}
+<body class="layout-{{ slide.layout }}" style="{{ palette_css }}">
+<div class="slide {{ slide_class }}">
+  {% block media %}{% if photo %}<div class="bleed"><img src="{{ photo.url }}" alt=""></div>
+  {% if photo.credit %}<span class="credit" data-qa="{{ slide.layout }}.credit">{{ photo.credit }}</span>{% endif %}{% endif %}{% endblock %}
   <header class="top">
     <span class="mark"></span>
-    <span class="brand">What's On Korea</span>
-    <span class="counter" data-qa="{{ slide.layout }}.page"><b>{{ "%02d" | format(slide.index + 1) }}</b> / {{ "%02d" | format(total) }}</span>
+    <span class="brand">WHAT'S ON KOREA</span>
+    <span class="counter" data-qa="{{ slide.layout }}.page">{{ "%02d" | format(slide.index + 1) }} / {{ "%02d" | format(total) }}</span>
   </header>
+  {% block outside %}{% endblock %}
   <div class="pad">{% block content %}{% endblock %}</div>
   <footer class="bottom">
     <span class="acct">{{ account }}</span>

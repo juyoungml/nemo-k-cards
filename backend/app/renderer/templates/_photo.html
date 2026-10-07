@@ -1,9 +1,0 @@
-{# Photo slot. `img` = {"url", "credit", "allow_overlay"} or None → gradient placeholder from the palette. #}
-{% if img and img.url %}
-<div class="photo{% if not img.allow_overlay %} framed{% endif %}" data-qa="{{ slide.layout }}.photo">
-  <img src="{{ img.url }}" alt="">
-  {% if img.credit %}<span class="cr" data-qa="{{ slide.layout }}.credit">{{ img.credit }}</span>{% endif %}
-</div>
-{% else %}
-<div class="photo" data-qa="{{ slide.layout }}.photo"></div>
-{% endif %}

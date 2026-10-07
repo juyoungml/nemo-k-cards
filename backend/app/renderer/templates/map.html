@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {# Getting there. Korean address is shown large so readers can show it to a taxi driver. #}
 {% block content %}
-  <span class="eyebrow">Getting there</span>
+  <span class="label">Getting there</span>
   <div class="title" data-qa="map.heading">{{ slide.heading }}</div>
   {% if slide.body %}<div class="lead" data-qa="map.body">{{ slide.body }}</div>{% endif %}
   {% if event %}

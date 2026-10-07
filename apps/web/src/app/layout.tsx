@@ -1,23 +1,28 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Noto_Sans_KR } from "next/font/google";
+import { Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 
 import { Sidebar } from "@/components/sidebar";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// Brand type (DESIGN.md): Pretendard for UI and Korean, Cabinet Grotesk 800 for page titles.
+const pretendard = localFont({
+  variable: "--font-pretendard",
+  src: [
+    { path: "./fonts/Pretendard-Regular.woff2", weight: "400" },
+    { path: "./fonts/Pretendard-Bold.woff2", weight: "700" },
+    { path: "./fonts/Pretendard-Black.woff2", weight: "900" },
+  ],
+});
+
+const cabinet = localFont({
+  variable: "--font-cabinet",
+  src: [{ path: "./fonts/CabinetGrotesk-Extrabold.woff2", weight: "800" }],
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
-});
-
-const notoKr = Noto_Sans_KR({
-  variable: "--font-noto-kr",
-  weight: ["400", "700"],
-  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -29,7 +34,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${notoKr.variable} h-full antialiased`}
+      className={`${pretendard.variable} ${cabinet.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full bg-canvas">
         <Sidebar />
