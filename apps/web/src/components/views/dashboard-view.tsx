@@ -65,7 +65,7 @@ export function DashboardView() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobs.data.slice(0, 8).map((j) => (
+              {jobs.data.filter((j) => j.status !== "FAILED").slice(0, 8).map((j) => (
                 <TableRow key={j.id}>
                   <TableCell className="whitespace-normal">
                     <Link href={`/review/${j.id}`} className="hover:underline">
