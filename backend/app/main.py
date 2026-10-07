@@ -173,7 +173,9 @@ def reject(job_id: str, req: RejectRequest) -> Job:
 
 @app.post("/drafts", response_model=Draft, status_code=201)
 def create_draft(req: CreateDraftRequest | None = None) -> Draft:
-    return drafts.create(req.sample if req else True)
+    # The Mangwon sample (its facts are marked verified against a page that doesn't exist) is for demos only;
+    # a live server starts every Brainstorm from an empty board.
+    return drafts.create((req.sample if req else True) and settings.demo_mode == "fixture")
 
 
 @app.get("/drafts/{draft_id}", response_model=Draft)

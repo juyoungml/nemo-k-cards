@@ -31,7 +31,8 @@ function StepDot({ step, n }: { step: PipelineStep; n: number }) {
 }
 
 export function NewJobView() {
-  const [prompt, setPrompt] = useState(presets[1].prompt);
+  // Starts empty (the placeholder shows an example); presets fill it on click.
+  const [prompt, setPrompt] = useState("");
   const [scenario, setScenario] = useState<Scenario>("good");
   const [job, setJob] = useState<Job>();
   const [error, setError] = useState<string>();
