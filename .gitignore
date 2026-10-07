@@ -223,3 +223,6 @@ __marimo__/
 
 # Backend runtime data (rendered slides, SQLite)
 backend/.data/
+
+# Local research notes (not part of the submission)
+/docs/research/

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+  <span class="kicker" data-qa="cover.kicker">{{ kicker }}</span>
+  <div class="ttl" data-qa="cover.heading">{{ slide.heading }}</div>
+  {% if slide.body %}<div class="sub" data-qa="cover.body">{{ slide.body }}</div>{% endif %}
+  {% include "_photo.html" %}
+{% endblock %}

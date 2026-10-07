@@ -231,7 +231,7 @@ class DraftUpdate(BaseModel):         # planner 출력
 - **구성**: `cover` → `event` × N (3~5) → `tips` (외국인 맥락/준비물) → `cta` ("Save this for the weekend · Follow @whatsonkorea")
 - **event 슬라이드 필수 필드**: 행사명(EN + 한글), 날짜, 장소 + 가까운 역, 가격, 예약 여부, why-go 한 줄, 출처 표기
 - **브랜드**: 친절하고 신뢰감 있는 설명형 톤. 태극 컬러를 포인트로 쓰고 캘린더 모티프를 사용. 폰트는 Pretendard(한글) + Inter(영문)를 **로컬 번들로 임베드**해서 tofu를 방지
-- **캡션**: 요약 3줄 + 행사별 링크 안내("link in bio") + 해시태그 10개 이하
+- **캡션**: 요약 3줄 + 행사별 링크 안내("link in bio") + 해시태그 **5개 이하** (Instagram 제한, BACKEND.md §11)
 
 ---
 

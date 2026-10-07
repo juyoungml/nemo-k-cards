@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{# Getting there. Korean address is shown so readers can show it to a taxi driver. #}
+{% block content %}
+  <span class="kicker">Getting there</span>
+  <div class="ttl" style="font-size:8.5cqw" data-qa="map.heading">{{ slide.heading }}</div>
+  {% if slide.body %}<div class="sub" data-qa="map.body">{{ slide.body }}</div>{% endif %}
+  {% if event %}
+  <div class="place" data-qa="map.place">
+    <span class="kicker">{{ event.venue_en }}</span>
+    <span class="addr" data-qa="map.address_ko">{{ event.address_ko }}</span>
+    <span class="muted" style="font-size:3.2cqw">Show this address to a taxi driver</span>
+    {% if event.nearest_station %}
+    <div class="route" data-qa="map.route"><span class="dot"></span><span>{{ event.nearest_station }}</span><span class="line"></span><span class="dot"></span><span>{{ event.venue_en }}</span></div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% include "_photo.html" %}
+{% endblock %}

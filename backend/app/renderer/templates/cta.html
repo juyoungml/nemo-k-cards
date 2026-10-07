@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+  <span class="kicker">Save this for the weekend</span>
+  <div class="ttl" style="font-size:8.5cqw" data-qa="cta.heading">{{ slide.heading }}</div>
+  <span class="stamp" data-qa="cta.verified">Verified {{ as_of }}</span>
+  {% if slide.body %}<div class="sub" data-qa="cta.body">{{ slide.body }}</div>{% endif %}
+  <div class="src" data-qa="cta.sources">
+    Sources: {{ source_hosts | join(" · ") }}<br>
+    {% if credits %}Photos: {{ credits | join(" · ") }}<br>{% endif %}
+    Schedules can change. Check the official page before you go.
+  </div>
+  <div class="follow">Follow <b>{{ account }}</b> for what's on in Korea, every Thursday.</div>
+{% endblock %}

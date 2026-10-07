@@ -1,0 +1,84 @@
+/* ---- Bundled fonts (SIL OFL, see renderer/fonts/OFL-*.txt). No network at render time. ---- */
+@font-face { font-family: "Pretendard"; font-weight: 400; src: url("{{ font_dir }}/Pretendard-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Pretendard"; font-weight: 700; src: url("{{ font_dir }}/Pretendard-Bold.woff2") format("woff2"); }
+@font-face { font-family: "Pretendard"; font-weight: 900; src: url("{{ font_dir }}/Pretendard-Black.woff2") format("woff2"); }
+@font-face { font-family: "Black Han Sans"; src: url("{{ font_dir }}/BlackHanSans-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Do Hyeon"; src: url("{{ font_dir }}/DoHyeon-Regular.ttf") format("truetype"); }
+
+* { box-sizing: border-box; }
+/* The canvas is 1080px wide, so 1cqw = 10.8px. Minimum text size is 3cqw ≈ 32px (QA floor: 30px). */
+.slide { position: relative; width: 1080px; height: 1350px; overflow: hidden; container-type: inline-size;
+  font-family: "Pretendard", sans-serif; word-break: keep-all; overflow-wrap: break-word;
+  background: var(--bg); color: var(--fg); }
+.pad { position: absolute; inset: 0; padding: 7cqw 7cqw 11cqw; display: flex; flex-direction: column; gap: 3cqw; }
+.acct, .pg { position: absolute; bottom: 4.5cqw; font-size: 3cqw; font-weight: 700; opacity: .8; }
+.acct { left: 7cqw; } .pg { right: 7cqw; font-variant-numeric: tabular-nums; }
+
+.kicker { font-size: 3.4cqw; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.ttl { font-size: 9.5cqw; line-height: 1.08; font-weight: 900; letter-spacing: -.02em; color: var(--title); }
+.sub { font-size: 4.2cqw; line-height: 1.4; }
+.ko { font-size: 4cqw; opacity: .85; }
+.muted { opacity: .8; }
+
+.photo { position: relative; flex: 1 1 auto; min-height: 18cqw; border-radius: 3cqw; overflow: hidden;
+  background: radial-gradient(120% 90% at 20% 15%, var(--ph2) 0%, transparent 55%),
+              radial-gradient(90% 80% at 85% 90%, var(--ph2) 0%, transparent 60%),
+              linear-gradient(160deg, var(--ph1), var(--ph1)); }
+.photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo .cr { position: absolute; left: 2.5cqw; bottom: 2cqw; font-size: 3cqw; padding: .6cqw 1.6cqw;
+  border-radius: 2cqw; background: rgba(0,0,0,.5); color: #fff; }
+/* KOGL Type 3 / ND images: no text overlay, show framed */
+.photo.framed { background: var(--frame); padding: 2cqw; } .photo.framed img { border-radius: 2cqw; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 1.6cqw; }
+.chip { font-size: 3cqw; font-weight: 700; padding: 1.2cqw 2.6cqw; border-radius: 5cqw; white-space: nowrap;
+  background: var(--chip-bg); color: var(--chip-fg); }
+.chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.chip i { display: inline-block; width: 1.6cqw; height: 1.6cqw; border-radius: 50%; background: currentColor; margin-right: 1.2cqw; vertical-align: .3cqw; }
+
+.num { font-size: 14cqw; line-height: .9; font-weight: 900; color: var(--accent); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2cqw 3.5cqw; margin: 0; align-items: baseline; }
+.kv dt { font-size: 3cqw; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.kv dd { margin: 0; font-size: 3.9cqw; font-weight: 500; }
+
+ul.list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3cqw; font-size: 4.3cqw; line-height: 1.4; }
+ul.list li { display: grid; grid-template-columns: 6cqw 1fr; gap: 2cqw; align-items: start; }
+ul.list .n { font-size: 3.6cqw; font-weight: 900; color: var(--accent); padding-top: .4cqw; }
+
+.place { border-radius: 3cqw; padding: 4cqw; background: var(--panel); display: flex; flex-direction: column; gap: 2cqw; }
+.place .addr { font-size: 4.2cqw; font-weight: 700; }
+.route { display: flex; align-items: center; gap: 2cqw; font-size: 3.4cqw; font-weight: 700; }
+.route .dot { width: 3cqw; height: 3cqw; border-radius: 50%; background: var(--accent); flex: none; }
+.route .line { flex: 1; height: .6cqw; background: repeating-linear-gradient(90deg, var(--accent) 0 2cqw, transparent 2cqw 3.4cqw); }
+
+.stamp { align-self: flex-start; font-size: 3.2cqw; font-weight: 700; padding: 1.4cqw 2.8cqw; border-radius: 2cqw;
+  background: var(--stamp-bg); color: var(--stamp-fg); }
+.src { font-size: 3cqw; line-height: 1.55; opacity: .9; }
+.follow { margin-top: auto; font-size: 4.2cqw; }
+
+/* ================= Themes ================= */
+/* A · Bold Editorial: flag-blue field, heavy display type, red accents */
+.theme-bold { --bg: var(--bold-bg); --fg: #fff; --title: #fff; --accent: #FF6B74; --chip-bg: rgba(255,255,255,.14); --chip-fg: #fff;
+  --warn-bg: #FFD166; --warn-fg: #2B1D00; --panel: rgba(255,255,255,.1); --stamp-bg: #CD2E3A; --stamp-fg: #fff; --frame: rgba(255,255,255,.12); }
+.theme-bold .ttl, .theme-bold .num { font-family: "Black Han Sans", "Pretendard", sans-serif; font-weight: 400; }
+.theme-bold.layout-cover .ttl { font-size: 12.5cqw; }
+
+/* B · Clean Info: white sheet, label chips, taegeuk rule */
+.theme-clean { --bg: #fff; --fg: #121826; --title: #0B2F6B; --accent: #CD2E3A; --chip-bg: #E8EEF8; --chip-fg: #0B2F6B;
+  --warn-bg: #FFF0D6; --warn-fg: #7A4A00; --panel: #F2F5FA; --stamp-bg: #0B2F6B; --stamp-fg: #fff; --frame: #EEF2F8; }
+.theme-clean .slide::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2cqw; z-index: 1;
+  background: linear-gradient(90deg, #CD2E3A 0 50%, #0047A0 50%); }
+.theme-clean .ttl { font-weight: 700; line-height: 1.18; }
+.theme-clean .num { color: #0047A0; font-weight: 700; }
+.theme-clean.layout-cover .slide { background: #F4F7FC; }
+
+/* C · Playful Pop: pastel field, rounded display face, sticker chips */
+.theme-pop { --bg: var(--pop-bg); --fg: #2A1A3A; --title: #2A1A3A; --accent: #7B3FE4; --chip-bg: #fff; --chip-fg: #2A1A3A;
+  --warn-bg: #FFE066; --warn-fg: #2A1A3A; --panel: rgba(255,255,255,.7); --stamp-bg: #7B3FE4; --stamp-fg: #fff; --frame: #fff; }
+.theme-pop .ttl, .theme-pop .num { font-family: "Do Hyeon", "Pretendard", sans-serif; font-weight: 400; }
+.theme-pop .chip { border: .4cqw solid #2A1A3A; }
+.theme-pop .photo { border: .6cqw solid #2A1A3A; }
+.theme-pop .stamp { transform: rotate(-3deg); }
+.theme-pop .blob { position: absolute; border-radius: 50%; opacity: .55; pointer-events: none; }
+.theme-pop .b1 { width: 40cqw; height: 40cqw; right: -12cqw; top: -10cqw; background: var(--blob1); }
+.theme-pop .b2 { width: 28cqw; height: 28cqw; left: -10cqw; bottom: -8cqw; background: var(--blob2); }
