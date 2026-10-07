@@ -5,9 +5,9 @@
 
 <p align="center"><a href="README.en.md">English</a> · <a href="https://www.instagram.com/whatsonkorea/">Instagram</a> · <a href="https://juyoung.site/nemo-k-cards/Nemo-K-Cards-Presentation.pdf">발표 PDF</a> · <a href="CONTRIBUTING.md">기여하기</a></p>
 
-**Nemo K Cards는 한국 행사 정보를 조사하고 출처를 확인해 영어 Instagram 카드뉴스로 만드는 에이전트입니다. 운영자가 결과를 검토하고 승인하면 백엔드가 게시합니다.**
+Nemo K Cards는 한국 행사 정보를 조사하고 출처를 확인해, Instagram에 올릴 영어 카드뉴스를 만드는 AI 에이전트입니다. 운영자가 카드를 검토하고 승인하면 백엔드가 게시합니다.
 
-**[@whatsonkorea](https://www.instagram.com/whatsonkorea/)**는 독자가 만나는 계정이고, Nemo K Cards는 콘텐츠를 만드는 소프트웨어입니다. Claude Code가 조사와 기획, 작성, 검수를 맡고 NVIDIA OpenShell이 에이전트의 파일과 네트워크 접근을 제한합니다. 게시 토큰은 백엔드가 보관합니다.
+카드뉴스는 [@whatsonkorea](https://www.instagram.com/whatsonkorea/)에 게시합니다. Claude Code가 조사·기획·작성·검수를 맡고, NVIDIA OpenShell이 에이전트의 파일과 네트워크 접근을 제한합니다. 게시 토큰은 백엔드에서 관리합니다.
 
 Fastcampus × NVIDIA Agentic AI Hackathon 2026에서 시작한 초기 프로젝트입니다.
 
@@ -19,11 +19,11 @@ Fastcampus × NVIDIA Agentic AI Hackathon 2026에서 시작한 초기 프로젝�
   <a href="https://www.instagram.com/p/DeL2e1vmXz4/"><img src="docs/assets/cards/seongsu.jpg" width="31%" alt="크리에이티브 성수 행사 카드"></a>
 </p>
 
-2026년 10월 7일 게시 작업에 사용한 결과물입니다. 출력 형태를 보여주는 예시이며, 모든 카드가 자동 파이프라인으로 만들어졌다는 뜻은 아닙니다. [출처와 검증 범위](docs/SHOWCASE.md).
+2026년 10월 7일 게시한 카드뉴스입니다. 모든 카드가 자동 파이프라인으로 만들어진 것은 아닙니다. 제작에 사용한 자료와 확인한 내용은 [출처와 검증 범위](docs/SHOWCASE.md)에 정리했습니다.
 
 ## 무엇을 해결하나요?
 
-한국어 행사 정보를 찾아다니는 수고를 줄이고, 날짜와 장소, 참가 조건을 영어로 정리해 익숙한 Instagram에서 발견하고 저장하게 하는 것이 목표입니다. 본인 인증이나 예약, 결제 문제까지 해결하는 서비스는 아닙니다.
+한국어 행사 정보를 찾아다니는 수고를 줄이기 위해 날짜와 장소, 참가 조건을 영어로 정리합니다. 외국인이 Instagram에서 행사 소식을 읽고 저장할 수 있도록 합니다. 본인 인증이나 예약, 결제 문제까지 해결하는 서비스는 아닙니다.
 
 운영자는 한 줄 요청으로 시작하거나, 행사 URL을 넣고 대화하며 카드 구성을 정할 수 있습니다. 결과 화면에서는 카드뿐 아니라 출처, 제외된 정보, 수정할 표현을 확인합니다.
 
@@ -31,7 +31,7 @@ Fastcampus × NVIDIA Agentic AI Hackathon 2026에서 시작한 초기 프로젝�
 
 | 접속 대상 | 주소 | 제공하는 기능 |
 |---|---|---|
-| 체험 안내 | [안내 페이지](https://juyoung.site/nemo-k-cards/try/) | 예시 요청과 기획 데모 진입 |
+| 체험 안내 | [안내 페이지](https://juyoung.site/nemo-k-cards/try/) | 예시 요청과 기획 데모 |
 | 웹 발표 | [발표 페이지](https://juyoung.site/nemo-k-cards/) | 웹 슬라이드와 최신 공개 PDF 링크 |
 
 <p align="center">
@@ -60,7 +60,7 @@ pnpm install --frozen-lockfile
 NEXT_PUBLIC_API_URL=http://localhost:8000 pnpm dev
 ```
 
-**http://localhost:3000**에서 New Job을 열고 요청을 입력하세요. 이 설정에서는 에이전트 응답을 샘플 데이터로 재현하고, 카드 렌더링과 검사는 백엔드에서 실행합니다. 모델이나 Instagram 인증 정보 없이 시작할 수 있고 실제 게시도 하지 않습니다.
+[http://localhost:3000](http://localhost:3000)에서 New Job을 열고 요청을 입력하세요. 이 설정에서는 에이전트 응답을 샘플 데이터로 재현하고, 카드 렌더링과 검사는 백엔드에서 실행합니다. 모델이나 Instagram 인증 정보 없이 시작할 수 있고 실제 게시도 하지 않습니다.
 
 `NEXT_PUBLIC_API_URL`을 빼면 백엔드와 별개의 UI mock이 동작합니다. [실행 모드와 배포 안내](docs/GETTING_STARTED.md)를 참고하세요.
 
@@ -70,7 +70,7 @@ UI만 먼저 살펴보려면 `apps/web`에서 `pnpm install --frozen-lockfile` �
 
 ![카드와 검수 근거를 함께 보여주는 관리자 화면](docs/assets/screenshots/review-mock.jpg)
 
-위 화면은 시연용 데이터입니다. 현재 구현에서 대부분의 검수 경고는 운영자의 판단을 돕는 정보이며, 경고가 있다고 무조건 게시를 차단하지는 않습니다. 자격증명으로 의심되는 내용과 서버 설정을 넘어서는 게시 모드 요청은 승인 API에서 차단합니다.
+위 화면은 시연용 데이터입니다. 운영자는 검수 경고를 확인한 뒤 게시 여부를 결정합니다. 대부분의 경고는 게시를 자동으로 막지 않지만, 자격증명으로 의심되는 내용과 서버 설정을 넘어서는 게시 모드 요청은 승인 API에서 차단합니다.
 
 - OpenShell은 에이전트의 실행 프로그램, 대상 호스트, 허용 요청을 검사합니다.
 - Instagram API는 에이전트에게 읽기 전용으로 허용합니다. 게시 토큰은 에이전트에게 전달하지 않습니다.
@@ -82,7 +82,7 @@ UI만 먼저 살펴보려면 `apps/web`에서 `pnpm install --frozen-lockfile` �
 
 ![실제 Admin의 정책 로그 화면](docs/assets/screenshots/policy-log.jpg)
 
-실제 사이트에서 관찰한 요청 거부 기록입니다. 특정 테스트의 결과이며, 모든 공격을 차단한다는 보장은 아닙니다. 저장소의 [probe 로그](backend/tests/data/openshell-probe.txt)와 [파서 테스트](backend/tests/test_policy_log.py)도 함께 확인할 수 있습니다.
+실제 Admin에 표시된 테스트 요청의 거부 기록입니다. 해당 요청이 거부됐음을 보여주며, 다른 공격까지 모두 차단한다는 뜻은 아닙니다. 저장소의 [probe 로그](backend/tests/data/openshell-probe.txt)와 [파서 테스트](backend/tests/test_policy_log.py)도 함께 확인할 수 있습니다.
 
 ## 실행 모드
 
@@ -105,7 +105,7 @@ uv run python -m app.renderer.preview
 
 위 테스트는 실제 OpenShell 샌드박스를 실행하지 않습니다. 실행 환경의 권한 제한은 별도로 설정한 환경에서 `scripts/openshell_probe.sh`로 확인합니다.
 
-행사 출처 추가, 날짜가 충돌하는 테스트 자료, 보안 검증의 재현성, 카드 접근성, 설치 경험 개선을 환영합니다. [기여 안내](CONTRIBUTING.md)와 [다음 과제](docs/ROADMAP.md)를 확인해 주세요. 유용했다면 스타로 프로젝트를 알려주시고, 문제가 있다면 재현 방법과 함께 이슈를 남겨주세요.
+행사 출처를 추가하거나 날짜가 충돌하는 테스트 자료를 만드는 기여를 환영합니다. 정책 검증을 재현하기 쉽게 만들거나, 카드 가독성과 설치 과정을 개선하는 작업도 도움이 됩니다. [기여 안내](CONTRIBUTING.md)와 [다음 과제](docs/ROADMAP.md)를 확인해 주세요. 유용했다면 스타로 프로젝트를 알려주시고, 문제가 있다면 재현 방법과 함께 이슈를 남겨주세요.
 
 ## 문서와 라이선스
 
