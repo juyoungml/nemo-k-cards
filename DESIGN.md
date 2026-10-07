@@ -2,7 +2,7 @@
 
 Approved 2026-10-07. Reference page: https://claude.ai/artifact/AUcknG2V77ewNMXrw2H152
 
-**North star:** "this feels like a Seoul magazine." Every carousel is a weekend issue for tourists. It's photo-led, confident type, generous white, and minimal decoration.
+**North star:** "this feels like a Seoul magazine." Every carousel is a weekend issue for tourists. It's photo-led, confident type, generous white, and minimal decoration. Event slides come in two approved styles: **Photo overlay** (Kinfolk-style, when there's a usable photo) and **Poster** (when there isn't).
 
 Applies to the Instagram cards (`backend/app/renderer/`) and the Admin (`apps/web/`).
 
@@ -36,6 +36,7 @@ Source of truth: `CATEGORY` in `backend/app/renderer/html.py`, plus `--color-cat
 
 - **Display:** Cabinet Grotesk 800 (Fontshare, ITF Free Font License). Used for English headlines, numerals, the wordmark, and Admin page titles (`h1`).
 - **Korean, body, UI:** Pretendard 400/700/900 (SIL OFL). Hangul display uses Pretendard 900.
+- **Photo overlay serif:** Cormorant Garamond (OFL) for headlines, numerals and values, with the last word in italic. Gowun Batang (OFL) for Korean on these slides only.
 - Card scale (px at 1080w): label 30 (tracked .14em, uppercase) · body 36–40 · event title 76–108 · cover title 104–132 · numerals 210–330.
 - **Floor: 30px on cards.** Visual QA warns below it, and FIT_JS shrinks blocks to it before giving up.
 - Fonts are bundled. The renderer loads them from `renderer/fonts/` and the Admin uses `next/font/local` with `src/app/fonts/`. No network at render time.
@@ -45,7 +46,7 @@ Source of truth: `CATEGORY` in `backend/app/renderer/html.py`, plus `--color-cat
 | Slide | Style |
 |---|---|
 | Cover | Ink, or a licensed photo under a scrim. "Weekend Issue No. NN" (ISO week of the posting weekend), a huge translucent Hangul place name (성수 / 서울) behind the headline, posting-weekend date in red |
-| Event, with licensed photo | **Magazine**: photo top 560px, giant white numeral overlapping it, metro line badge, info grid (WHEN / WHERE / PRICE / ENTRY) on white |
+| Event, with usable photo | **Photo overlay (Kinfolk)**: full-bleed photo graded muted and warm with light grain, soft dark gradient under the text. Italic serif "No. 01", tiny tracked category and area, a 108px thin serif headline with the last word in italic, Korean name in Gowun Batang, and a 2×2 WHEN / WHERE / PRICE / ENTRY grid under a hairline. No why-go line (the caption carries it). Credit above the footer |
 | Event, no photo | **Poster**: the category color fills the card, with a giant numeral, a big headline, and the info grid pinned to the bottom |
 | Tips | White, red Cabinet numerals, hairline rules |
 | Map | White, metro-colored route line, ink taxi box with the Korean address large |
@@ -54,6 +55,16 @@ Source of truth: `CATEGORY` in `backend/app/renderer/html.py`, plus `--color-cat
 Chrome on every slide: taegeuk mark + `WHAT'S ON KOREA` (top left), `01 / 07` (top right), `@whatsonkorea` and `Swipe →` (bottom).
 
 Photos are used only when the license allows overlay (`ImageAsset.allow_overlay`), and the credit is always shown. There are never placeholder photos. Without a photo, the poster style is the design.
+
+**Photo sourcing order** (per event):
+1. Official or public-license photos: KTO photo gallery (관광사진갤러리), 공공누리 Type 1, city or festival press photos. Credit plus source link in the brief.
+2. Official promo image when reuse is allowed, with credit and link.
+3. AI-generated, only for mood: close-ups with no recognisable landmark, never a fake wide shot of a real named place. Always labelled `Image · AI-generated`.
+4. Nothing: use the Poster style.
+
+Never use other creators' photos.
+
+The Magazine layout (photo top, white info panel) is parked, not approved. It's in git history (`58c16e6`).
 
 ## Admin
 

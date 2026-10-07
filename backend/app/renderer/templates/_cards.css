@@ -1,6 +1,9 @@
 /* ---- Bundled fonts (see renderer/fonts/*LICENSE*). No network at render time. ---- */
 @font-face { font-family: "Cabinet Grotesk"; font-weight: 800; src: url("{{ font_dir }}/CabinetGrotesk-Extrabold.woff2") format("woff2"); }
 @font-face { font-family: "Cabinet Grotesk"; font-weight: 500; src: url("{{ font_dir }}/CabinetGrotesk-Medium.woff2") format("woff2"); }
+@font-face { font-family: "Cormorant Garamond"; font-weight: 300 700; font-style: normal; src: url("{{ font_dir }}/CormorantGaramond-VF.woff2") format("woff2"); }
+@font-face { font-family: "Cormorant Garamond"; font-weight: 300 700; font-style: italic; src: url("{{ font_dir }}/CormorantGaramond-Italic-VF.woff2") format("woff2"); }
+@font-face { font-family: "Gowun Batang"; font-weight: 400; src: url("{{ font_dir }}/GowunBatang-Regular.woff2") format("woff2"); }
 @font-face { font-family: "Pretendard"; font-weight: 400; src: url("{{ font_dir }}/Pretendard-Regular.woff2") format("woff2"); }
 @font-face { font-family: "Pretendard"; font-weight: 700; src: url("{{ font_dir }}/Pretendard-Bold.woff2") format("woff2"); }
 @font-face { font-family: "Pretendard"; font-weight: 900; src: url("{{ font_dir }}/Pretendard-Black.woff2") format("woff2"); }
@@ -8,7 +11,7 @@
 /* What's On Korea card system (DESIGN.md). Editorial "Seoul magazine".
    Canvas 1080×1350 · 80px margins · 8px spacing · Cabinet Grotesk 800 display + Pretendard.
    Ink on white, one Seoul Red; categories wear their Seoul Metro line color.
-   Event slides: photo-led magazine when a licensed photo exists, category poster when not. */
+   Event slides: Kinfolk-style photo overlay when a usable photo exists, category poster when not. */
 :root {
   --ink: #111418; --paper: #FFFFFF; --mist: #F2F3F5; --muted: #5E6573; --red: #E4002B;
   --tg-red: #CD2E3A; --tg-blue: #0047A0;
@@ -77,19 +80,30 @@
   text-shadow: 0 1px 6px rgba(0, 0, 0, .5); }
 .has-photo .credit { bottom: 108px; }
 
-/* ---------- Event · magazine (licensed photo on top, info panel below) ---------- */
-.mag .ph { position: absolute; left: 0; right: 0; top: 0; height: 560px; z-index: 0; overflow: hidden; }
-.mag .ph img { width: 100%; height: 100%; object-fit: cover; }
-.mag .ph::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10, 12, 16, .5), rgba(10, 12, 16, 0) 30%); }
-.mag .credit { top: 136px; }
-.mag { --chrome: var(--fg); }
-.mag .top { color: #fff; --hole: #fff; }
-.mag .pad { top: 600px; gap: 18px; }
-.mag .num-row { display: flex; align-items: flex-end; gap: 28px; margin-top: -150px; }
-.mag .num { font: 800 210px/0.8 var(--display); letter-spacing: -0.05em; color: #fff; text-shadow: 0 2px 12px rgba(0, 0, 0, .18); }
-.mag .num-row .line-badge { margin-bottom: 18px; }
-.mag .title { font-size: 76px; }
-.mag .ko { font-size: 34px; }
+/* ---------- Event · photo overlay (Kinfolk-style: full-bleed photo, thin serif, tiny tracked labels) ---------- */
+.kf { --fg: #fff; --sub: rgba(255, 255, 255, .85); --rule: rgba(255, 255, 255, .55); --hole: #2a2622; --serif: "Cormorant Garamond", "Gowun Batang", serif; background: #2a2622; }
+.kf .ph { position: absolute; inset: 0; z-index: 0; }
+.kf .ph img { width: 100%; height: 100%; object-fit: cover; filter: saturate(.62) contrast(.88) brightness(1.06) sepia(.14); }
+.kf .ph::before { content: ""; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(180deg, rgba(24, 20, 16, .5) 0%, rgba(24, 20, 16, 0) 24%, rgba(24, 20, 16, .12) 38%, rgba(24, 20, 16, .62) 62%, rgba(24, 20, 16, .86) 100%); }
+.kf .ph::after { content: ""; position: absolute; inset: 0; z-index: 2; opacity: .16; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.kf .top { font: 500 30px "Pretendard", sans-serif; letter-spacing: .3em; }
+.kf .bottom { font-weight: 500; letter-spacing: .08em; }
+.kf .credit { bottom: 104px; letter-spacing: .16em; text-transform: uppercase; opacity: .75; white-space: nowrap; text-shadow: none; }
+.kf .pad { gap: 22px; bottom: 168px; text-shadow: 0 1px 14px rgba(0, 0, 0, .35); }
+.kf .num { font: italic 400 84px/1 var(--serif); color: #fff; }
+.kf .kb { margin-top: auto; display: flex; flex-direction: column; gap: 22px; }
+.kf .cap { font-size: 30px; font-weight: 500; letter-spacing: .28em; text-transform: uppercase; color: var(--sub); }
+.kf .title { font: 400 108px/1.1 var(--serif); letter-spacing: -0.01em; }
+.kf .title em { font-style: italic; }
+.kf .ko { font: 400 38px "Gowun Batang", serif; color: var(--sub); }
+.kf .why { font: italic 400 42px/1.3 var(--serif); color: var(--sub); }
+.kf .chip { border-width: 2px; font-weight: 500; }
+.kf .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 36px; border-top: 3px solid var(--rule); }
+.kf .grid div { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.kf .grid dt { font-weight: 500; letter-spacing: .24em; color: var(--sub); padding: 0; }
+.kf .grid dd { font: 500 40px/1.2 var(--serif); }
 
 /* ---------- Event · poster (no photo: category color is the image) ---------- */
 .poster { --bg: var(--cat); --fg: var(--poster-fg); --sub: var(--poster-fg); --rule: var(--poster-fg); --chrome: var(--poster-fg); --hole: var(--cat); }
@@ -104,7 +118,8 @@
 .until { position: absolute; right: var(--m); top: 176px; z-index: 3; text-align: right; font: 800 32px var(--display); letter-spacing: .08em;
   color: var(--poster-title, var(--red)); }
 .until b { display: block; font-size: 64px; letter-spacing: -0.01em; }
-.mag .until { top: 440px; color: #fff; }
+.kf .until { text-shadow: 0 1px 14px rgba(0, 0, 0, .45); color: #fff; font-family: "Pretendard", sans-serif; font-weight: 500; letter-spacing: .24em; }
+.kf .until b { font: italic 400 64px var(--serif); letter-spacing: 0; }
 
 /* ---------- Tips ---------- */
 .tips { padding: 0; display: flex; flex-direction: column; }

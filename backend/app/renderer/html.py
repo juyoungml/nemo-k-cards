@@ -163,7 +163,7 @@ class HtmlRenderer:
         if slide.layout in ("cover", "cta"):
             slide_class = "dark" + (" has-photo" if photo else "")
         elif slide.layout == "event" and event:
-            slide_class = "mag" if photo else "poster"
+            slide_class = "kf" if photo else "poster"
         else:
             slide_class = ""
         return {
@@ -175,6 +175,7 @@ class HtmlRenderer:
             "photo": photo,
             "weekend": weekend_label(self.today), "issue_no": f"{sat.isocalendar().week:02d}", "hangul": hangul,
             "event_no": event_ids.index(slide.event_id) + 1 if slide.event_id in event_ids else 1,
+            "area": (event.venue_en or "").split(",")[0].split("·")[0].strip()[:18] if event else "",
             "cat_label": label, "cat_line": line, "cat_color": color,
             "until": f"{event.end_date:%b} {event.end_date.day}" if ends_soon else None,
             "badges": access_badges(event),

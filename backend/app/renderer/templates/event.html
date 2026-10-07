@@ -1,23 +1,33 @@
 {% extends "base.html" %}
 {# Required on event slides (SPEC §6): name EN + 한글, dates, venue + nearest station, price, booking, why-go, source.
-   With a licensed photo: magazine (photo top, info panel). Without: category-color poster. #}
+   With a usable photo: Kinfolk-style overlay. Without: category-color poster. #}
 {% block media %}{% if photo %}<div class="ph"><img src="{{ photo.url }}" alt=""></div>
   {% if photo.credit %}<span class="credit" data-qa="event.credit">{{ photo.credit }}</span>{% endif %}{% endif %}{% endblock %}
+{% macro heading(text) %}{% set w = text.rsplit(" ", 1) %}{% if w | length == 2 and text.split() | length >= 3 %}{{ w[0] }} <em>{{ w[1] }}</em>{% else %}{{ text }}{% endif %}{% endmacro %}
 {% block outside %}{% if event and until %}<div class="until" data-qa="event.until">UNTIL<b>{{ until | upper }}</b></div>{% endif %}{% endblock %}
 {% block content %}
-{% if event %}
-  {% if photo %}
-  <div class="num-row"><span class="num">{{ "%02d" | format(event_no) }}</span>
-    <span class="line-badge"><b>{{ cat_line }}</b>{{ cat_label }}</span></div>
-  {% else %}
+{% if event and photo %}
+  <span class="num">No. {{ "%02d" | format(event_no) }}</span>
+  <div class="kb">
+    <span class="cap">{{ cat_label }}{% if area %} · {{ area }}{% endif %}</span>
+    <div class="title" data-qa="event.heading">{{ heading(slide.heading or event.title_en) }}</div>
+    <div class="ko" data-qa="event.title_ko">{{ event.title_ko }}</div>
+    {% if badges %}<div class="chips row" data-qa="event.access">{% for b in badges %}<span class="chip">{{ b.text }}</span>{% endfor %}</div>{% endif %}
+    <dl class="grid facts" data-qa="event.facts">
+      <div><dt>When</dt><dd>{{ event.start_date | daterange(event.end_date) }}</dd></div>
+      <div><dt>Where</dt><dd>{% if event.nearest_station %}{{ event.nearest_station }}{% else %}{{ event.venue_en }}{% endif %}</dd></div>
+      {% if event.price %}<div><dt>Price</dt><dd>{{ event.price }}</dd></div>{% endif %}
+      {% if event.booking %}<div><dt>Entry</dt><dd>{{ event.booking }}</dd></div>{% endif %}
+    </dl>
+  </div>
+{% elif event %}
   <span class="num">{{ "%02d" | format(event_no) }}</span>
-  {% endif %}
   <div class="title" data-qa="event.heading">{{ slide.heading or event.title_en }}</div>
   <div class="ko" data-qa="event.title_ko">{{ event.title_ko }}</div>
   {% if slide.body or event.why_go %}<div class="why" data-qa="event.body">{{ slide.body or event.why_go }}</div>{% endif %}
   {% if badges %}
   <div class="chips row" data-qa="event.access">
-    {% for b in badges %}<span class="chip{{ ' warn' if b.warn and photo }}">{{ b.text }}</span>{% endfor %}
+    {% for b in badges %}<span class="chip">{{ b.text }}</span>{% endfor %}
   </div>
   {% endif %}
   <dl class="grid facts" data-qa="event.facts">
