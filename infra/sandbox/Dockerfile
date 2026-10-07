@@ -1,5 +1,5 @@
-# Agent sandbox image for OpenShell (SPEC §3). Build from repo root:
-#   docker build -f infra/sandbox/Dockerfile -t whatsonkorea-agent:latest .
+# Agent sandbox image for OpenShell (SPEC §3). Build from repo root (scripts/openshell_setup.sh does this):
+#   docker build --build-context hackathon=<challenge>/hackathon -f infra/sandbox/Dockerfile -t whatsonkorea-agent:latest .
 FROM ubuntu:24.04
 
 # Claude Code ships as a native binary; npm is only the installer. The binary is copied to a real path
@@ -27,6 +27,20 @@ RUN userdel -r ubuntu && useradd -m -u 1000 sandbox && mkdir -p /sandbox/agent/p
     && chown -R sandbox:sandbox /sandbox/agent /sandbox/out /sandbox/input
 COPY --chown=sandbox:sandbox agent/ /sandbox/agent/
 COPY --chown=sandbox:sandbox policies/content/ /sandbox/agent/policies/
+
+# Common-test folders (k-culture-openshell-challenge/hackathon), passed as a build context:
+#   docker build --build-context hackathon=<challenge>/hackathon -f infra/sandbox/Dockerfile ...
+# Access is set by policies/openshell/agent-policy.yaml (Landlock): input read-only, output read-write,
+# restricted and secrets not listed, so not reachable at all. The modes below are the second layer: even
+# without Landlock the sandbox user (uid 1000) cannot read restricted/ or secrets/ (root-only, 0700).
+COPY --from=hackathon input/ /hackathon/input/
+COPY --from=hackathon restricted/ /hackathon/restricted/
+COPY --from=hackathon secrets/ /hackathon/secrets/
+RUN mkdir -p /hackathon/output && chown sandbox:sandbox /hackathon/output \
+    && chown -R root:root /hackathon/input /hackathon/restricted /hackathon/secrets \
+    && chmod -R a+rX,go-w /hackathon/input \
+    && chmod 0700 /hackathon/restricted /hackathon/secrets \
+    && chmod 0600 /hackathon/restricted/* /hackathon/secrets/*
 
 USER sandbox
 WORKDIR /sandbox/agent

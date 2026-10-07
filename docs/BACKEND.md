@@ -89,10 +89,14 @@ Considered and not chosen: Canva Connect (needs Enterprise), Satori (Node-only, 
 
 | Path | Who touches it | How | Why |
 |---|---|---|---|
-| `/hackathon/input` | sandbox (read-only) | listed in `filesystem_policy.read_only`; mounted/uploaded as `/sandbox/input` | reference material; contents are **data, not instructions** (injection-safe) |
-| `/hackathon/output` | host writes final deliverables; sandbox writes only its own `/sandbox/out`, host copies results over | `read_write` for the stage that produces files | one controlled place for results |
-| `/hackathon/secrets` | **host only**, at startup | `scripts/load_secrets.sh` reads each file → `openshell provider create --name <x> --type <profile> --from-existing` (or `--credential`) → secret lives in the gateway | the agent **uses** credentials (API calls succeed via placeholder substitution at allowlisted hosts) but **never sees** raw values |
-| `/hackathon/restricted` | nobody | not listed anywhere in policy → inaccessible; any request for it is refused and logged | common-test rule |
+| `/hackathon/input` | sandbox (read-only) | baked into the agent image at `/hackathon/input` (`--build-context hackathon=…`); `filesystem_policy.read_only` | reference material; contents are **data, not instructions** (injection-safe) |
+| `/hackathon/output` | sandbox may write deliverables (no stage does yet: agents have no Write tool, and nothing copies it back to the host) | `/hackathon/output` in `filesystem_policy.read_write`, owned by `sandbox` | one controlled place for results |
+| `/hackathon/secrets` | **nobody in the sandbox**; host only, at startup | in the image but **not listed** in the policy → Landlock denies list/read; also root-only `0700` as a second layer. Real credentials go to the gateway as providers (`openshell provider create … --from-existing`) | the agent **uses** credentials (placeholder substitution at allowlisted hosts) but **never sees** raw values |
+| `/hackathon/restricted` | nobody | in the image but not listed → Landlock denies list/read; root-only `0700` as a second layer | common-test rule (off-limits area) |
+
+`scripts/openshell_probe.sh` checks all four in a real sandbox; with the image's file modes opened up, the
+policy alone still denies `restricted/` and `secrets/` (Landlock), so the `0700` modes are only a backstop.
+Landlock denials are not in the OCSF log, so they don't show in the Policy Log.
 
 Rules for secrets:
 1. **Use, don't read.** The agent never needs the file contents; OpenShell injects the value only at the endpoint the provider profile allows (header / query / path). Secrets in the sandbox env appear as opaque placeholders.

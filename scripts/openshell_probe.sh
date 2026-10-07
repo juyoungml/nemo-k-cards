@@ -21,6 +21,13 @@ t event_page_curl    curl -sS -o /dev/null -w %{http_code} https://culture.seoul
 t public_api         curl -sS -o /dev/null -w %{http_code} https://apis.data.go.kr/
 t write_agent_dir    sh -c "echo x >> /sandbox/agent/CLAUDE.md"
 t new_agent_file     sh -c "echo x > /sandbox/agent/injected.md"
+t hk_read_input      sh -c "head -c 1 /hackathon/input/misc/K_CULTURE_OFFICIAL_FINAL.md >/dev/null && ls /hackathon/input | wc -l"
+t hk_write_input     sh -c "echo x > /hackathon/input/injected.md"
+t hk_write_output    sh -c "echo ok > /hackathon/output/probe.txt"
+t hk_list_restricted sh -c "ls /hackathon/restricted >/dev/null"
+t hk_read_restricted sh -c "head -c 1 /hackathon/restricted/README.md >/dev/null"
+t hk_list_secrets    sh -c "ls /hackathon/secrets >/dev/null"
+t hk_read_secrets    sh -c "head -c 1 /hackathon/secrets/service_key.env >/dev/null"
 t write_out         sh -c "echo ok > /sandbox/out/probe.txt"
 '
 
@@ -53,6 +60,13 @@ check event_page_curl "event pages only for claude, not curl"       '[ "$rc" != 
 check public_api      "public data API reachable (read-only)"       '[[ "$body" =~ ^[1-5][0-9][0-9]$ ]] && [ "$body" != 403 ]'
 check write_agent_dir "agent instructions are read-only"            '[ "$rc" != 0 ]'
 check new_agent_file  "no new files in the agent dir"               '[ "$rc" != 0 ]'
+check hk_read_input      "/hackathon/input is readable"                 '[ "$rc" = 0 ] && [ "$body" -gt 0 ]'
+check hk_write_input     "/hackathon/input is read-only"               '[ "$rc" != 0 ]'
+check hk_write_output    "/hackathon/output is writable"               '[ "$rc" = 0 ]'
+check hk_list_restricted "/hackathon/restricted can't be listed"        '[ "$rc" != 0 ]'
+check hk_read_restricted "/hackathon/restricted can't be read"          '[ "$rc" != 0 ]'
+check hk_list_secrets    "/hackathon/secrets can't be listed"           '[ "$rc" != 0 ]'
+check hk_read_secrets    "/hackathon/secrets can't be read"             '[ "$rc" != 0 ]'
 check write_out      "/sandbox/out is writable"                    '[ "$rc" = 0 ]'
 
 echo

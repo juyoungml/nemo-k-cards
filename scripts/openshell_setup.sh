@@ -17,7 +17,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-docker build -f infra/sandbox/Dockerfile -t whatsonkorea-agent:latest .
+# The common-test folders are baked into the image (/hackathon); HACKATHON_DIR points at them.
+HACKATHON_DIR=${HACKATHON_DIR:-../k-culture-openshell-challenge/hackathon}
+for d in input output restricted secrets; do
+  [ -d "$HACKATHON_DIR/$d" ] || { echo "HACKATHON_DIR=$HACKATHON_DIR has no $d/ (set HACKATHON_DIR)" >&2; exit 1; }
+done
+docker build --build-context hackathon="$HACKATHON_DIR" -f infra/sandbox/Dockerfile -t whatsonkorea-agent:latest .
 
 profile=policies/openshell/providers/claude-code.yaml
 openshell profile lint -f "$profile"
