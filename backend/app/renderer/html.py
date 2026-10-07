@@ -5,10 +5,11 @@ Each slide's HTML is written next to its JPEG for debugging; text marked with da
 for visual QA (overflow, font size).
 """
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
@@ -100,7 +101,7 @@ class HtmlRenderer:
     def __init__(self, theme: Theme = "clean", mood: Mood = "autumn",
                  account: str = "@whatsonkorea", as_of: date | None = None) -> None:
         self.theme, self.mood, self.account = theme, mood, account
-        self.as_of = (as_of or date.today()).strftime("%Y.%m.%d")
+        self.as_of = (as_of or datetime.now(ZoneInfo("Asia/Seoul")).date()).strftime("%Y.%m.%d")
         self.env = Environment(loader=FileSystemLoader(HERE / "templates"),
                                autoescape=select_autoescape(["html"]), undefined=StrictUndefined)
         self.env.filters["daterange"] = daterange
