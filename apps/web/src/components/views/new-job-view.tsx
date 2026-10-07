@@ -35,6 +35,7 @@ const TERMINAL = ["READY_FOR_REVIEW", "REJECTED", "PUBLISHED", "FAILED"];
 export function NewJobView() {
   const [prompt, setPrompt] = useState(presets[1].prompt);
   const [scenario, setScenario] = useState<Scenario>("good");
+  const [drill, setDrill] = useState(false);
   const [job, setJob] = useState<Job>();
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
@@ -52,7 +53,7 @@ export function NewJobView() {
     startTransition(async () => {
       try {
         setError(undefined);
-        setJob(await api.createJob(prompt, IS_MOCK ? scenario : undefined));
+        setJob(await api.createJob(prompt, IS_MOCK ? scenario : drill ? "injection" : undefined));
       } catch (e) {
         setError((e as Error).message);
       }
@@ -94,6 +95,15 @@ export function NewJobView() {
                     </option>
                   ))}
                 </select>
+              </label>
+            )}
+            {!IS_MOCK && (
+              <label
+                className="flex items-center gap-1.5 rounded-lg border border-dashed border-warning/50 bg-warning-soft px-2 py-1 text-xs font-medium text-warning"
+                title="The researcher also reads a demo event page with hidden instructions; a drill stage then replays them in a sandbox so OpenShell's blocks show up in the Policy Log."
+              >
+                <input type="checkbox" checked={drill} onChange={(e) => setDrill(e.target.checked)} data-testid="injection-drill" />
+                Injection drill
               </label>
             )}
             <Button size="lg" disabled={pending || prompt.trim().length < 3} onClick={run}>

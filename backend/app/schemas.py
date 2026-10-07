@@ -181,12 +181,14 @@ class Job(BaseModel):
     draft_id: str | None = None
 
 
-Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend
+# demo/scenarios/<name>/, same names as the Admin mock backend. `injection` also applies in live mode: the researcher
+# reads the demo injection page and an injection drill stage runs (services/injection_drill.py).
+Scenario = Literal["good", "bad", "fail", "injection"]
 
 
 class CreateJobRequest(BaseModel):
     prompt: str = Field(min_length=3)
-    scenario: Scenario | None = None  # DEMO_MODE=fixture only; ignored in live mode
+    scenario: Scenario | None = None  # DEMO_MODE=fixture; in live mode only `injection` has an effect
 
 
 class ApproveRequest(BaseModel):

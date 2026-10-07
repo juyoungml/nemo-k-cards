@@ -55,6 +55,28 @@ async def _supabase_upload(job_id: str, paths: list[Path], on_progress: Callable
     return urls
 
 
+def public_url(obj: str) -> str:
+    """Public URL of an object in the Supabase bucket ("" when Supabase is not configured)."""
+    if not settings.supabase_url:
+        return ""
+    return f"{settings.supabase_url.rstrip('/')}/storage/v1/object/public/{settings.supabase_bucket}/{obj}"
+
+
+async def upload_public(obj: str, data: bytes, content_type: str) -> str:
+    """Upload one object to the public Supabase bucket and return its public URL."""
+    if not (settings.supabase_url and settings.supabase_service_key):
+        raise ImageHostError("SUPABASE_URL / SUPABASE_SERVICE_KEY are not set in backend/.env")
+    key = settings.supabase_service_key
+    async with httpx.AsyncClient(base_url=settings.supabase_url.rstrip("/"), timeout=30,
+                                 headers={"Authorization": f"Bearer {key}", "apikey": key}) as client:
+        await _ensure_bucket(client)
+        r = await client.post(f"/storage/v1/object/{settings.supabase_bucket}/{obj}", content=data,
+                              headers={"Content-Type": content_type, "x-upsert": "true"})
+        if r.status_code not in (200, 201):
+            raise ImageHostError(f"upload {obj} failed: {r.status_code} {r.text[:200]}")
+    return public_url(obj)
+
+
 def _local_urls(job_id: str, paths: list[Path]) -> list[str]:
     if not settings.public_asset_base_url:
         raise ImageHostError("PUBLIC_ASSET_BASE_URL is not set (needed for IMAGE_HOST=local)")

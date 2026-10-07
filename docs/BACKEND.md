@@ -295,7 +295,8 @@ Agent-side keys (`ANTHROPIC_API_KEY`, `TOURAPI_KEY`, `SEOUL_API_KEY`, `KAKAO_KEY
 ```
 good/        briefs verification deck qa review .json + slides/*.jpg   → READY_FOR_REVIEW
 bad/         review.json verdict=fail (tank-day phrasing, tofu slide, PII in caption) → REJECTED
-injection/   event page with hidden instructions + policy_events.json (graph DELETE + pastebin denied)
+injection/   page.html (hidden instructions) + policy_events.json (researcher reads it) + drill_events.json
+             (graph DELETE + pastebin denied, CLAUDE.md write refused). Also runs live: see demo/scenarios/README.md
 brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 ```
 `fixture` mode replays these with realistic delays and emits the same `JobEvent`s as a live run.

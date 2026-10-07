@@ -140,21 +140,24 @@ class OpenShellRunner:
             raise
         return proc.returncode or 0, out, err
 
-    async def run(self, agent: str, task: str, payload: dict, schema: dict,
-                  files: list[Path], job_id: str | None) -> Any:
+    async def _create(self, stage: str, job_id: str | None, providers: list[str]) -> str:
         if not self.openshell:
             raise AgentError("openshell CLI not found — install OpenShell or use AGENT_RUNNER=local")
         # OpenShell caps sandbox names at 19 chars: e.g. "revi-0bb413-a1b2".
         job = re.sub(r"[^a-z0-9]", "", (job_id or "adhoc").lower())[-8:]
-        name = f"{agent[:4]}-{job}-{secrets.token_hex(2)}"
+        name = f"{stage[:4]}-{job}-{secrets.token_hex(2)}"
         rc, _, err = await self._cli(
             "sandbox", "create", "--name", name, "--detach", "--no-tty", "--from", settings.openshell_image,
-            "--policy", str(settings.openshell_policy),
-            *[a for p in settings.openshell_providers for a in ("--provider", p)],
-            "--label", f"stage={agent}", *(["--label", f"job={job_id}"] if job_id else []), timeout=300)
+            "--policy", str(settings.openshell_policy), *[a for p in providers for a in ("--provider", p)],
+            "--label", f"stage={stage}", *(["--label", f"job={job_id}"] if job_id else []), timeout=300)
         if rc != 0:
             await self._delete(name)
             raise AgentError(f"sandbox create failed: {err.decode()[-300:]}")
+        return name
+
+    async def run(self, agent: str, task: str, payload: dict, schema: dict,
+                  files: list[Path], job_id: str | None) -> Any:
+        name = await self._create(agent, job_id, settings.openshell_providers)
         try:
             remap = {}
             for d in sorted({f.parent for f in files}):
@@ -179,7 +182,23 @@ class OpenShellRunner:
             await self._collect_policy_events(name, job_id)
             await self._delete(name)
 
-    async def _collect_policy_events(self, name: str, job_id: str | None) -> None:
+    async def run_script(self, stage: str, script: str, job_id: str | None,
+                         note: str | None = None) -> tuple[str, str]:
+        """Run a shell script (no agent, no providers) in a fresh sandbox under the same policy.
+
+        Returns (sandbox name, stdout); the sandbox's policy events are stored like a stage's, with `note`
+        prefixed to each row's note.
+        """
+        name = await self._create(stage, job_id, [])
+        try:
+            _, stdout, _ = await self._cli("sandbox", "exec", "-n", name, "--workdir", "/sandbox/agent", "--no-tty",
+                                           "--", "sh", "-c", script, timeout=120)
+            return name, stdout.decode(errors="replace")
+        finally:
+            await self._collect_policy_events(name, job_id, note)
+            await self._delete(name)
+
+    async def _collect_policy_events(self, name: str, job_id: str | None, note: str | None = None) -> None:
         # The sandbox ships its log to the gateway asynchronously; a read right after the workload exits
         # misses the last events, so re-read until the log stops growing.
         try:
@@ -191,6 +210,9 @@ class OpenShellRunner:
                     break
                 await asyncio.sleep(1)
             if rc == 0 and (events := policy_log.parse(out.decode(errors="replace"), name, job_id)):
+                if note:
+                    for e in events:
+                        e.note = f"{note} · {e.note}" if e.note else note
                 store.add_policy_events(events)
         except Exception:  # a missing log must not fail the stage
             log.exception("could not collect policy log for %s", name)

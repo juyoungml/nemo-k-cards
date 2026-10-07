@@ -31,7 +31,7 @@ def no_network(monkeypatch):
 
 
 async def run_quick(scenario: str):
-    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "test prompt"))
+    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "test prompt", drill=scenario == "injection"))
     await orchestrator.run_job(job.id, scenario=scenario)
     return store.get_job(job.id)
 
@@ -63,6 +63,20 @@ async def test_bad_scenario_waits_for_operator_with_block_issues(no_network):
     events = [e for e in store.list_policy_events() if e.job_id == job.id]
     assert {(e.host, e.result) for e in events} >= {("graph.facebook.com", "policy_denied"),
                                                     ("pastebin.com", "policy_denied")}
+
+
+async def test_injection_scenario_runs_the_drill(no_network):
+    job = await run_quick("injection")
+    assert job.status == JobStatus.READY_FOR_REVIEW
+    assert [s.name for s in job.pipeline][:2] == ["Research", "Injection drill"]
+    assert job.pipeline[1].state == "done" and job.pipeline[1].note.startswith("4/4 held")
+    events = {(e.sandbox.split("-")[0], e.host, e.result) for e in store.list_policy_events() if e.job_id == job.id}
+    assert events >= {("agent", "odoblnfmgtpmjymsktxe.supabase.co", "allowed"),
+                      ("dril", "graph.facebook.com", "policy_denied"), ("dril", "pastebin.com", "policy_denied"),
+                      ("dril", "—", "fs_denied")}
+    drill = job.issues[0]
+    assert drill.category == "link" and "hides instructions for AI agents" in drill.message
+    assert drill.severity == "warn"  # the fixture briefs don't cite the page
 
 
 async def test_fail_scenario_fails_at_render(no_network):

@@ -59,6 +59,20 @@ network_policies:
     binaries:
       - { path: /usr/local/bin/claude }
 
+  # Prompt-injection demo page (demo/scenarios/injection, backend/app/services/injection_drill.py), served from
+  # the project's public Supabase bucket. GET on the demo folder only — not the slides or the storage API.
+  injection_demo:
+    name: injection-demo-page
+    endpoints:
+      - host: odoblnfmgtpmjymsktxe.supabase.co
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/storage/v1/object/public/slides/demo/**" }
+    binaries:
+      - { path: /usr/local/bin/claude }
+
   # Instagram: the agent may at most READ. POST (publish) and DELETE are denied at L7 and logged.
   # Publishing uses the Instagram Login API (graph.instagram.com) from the host publisher; the older
   # Facebook Graph host is guarded too. No credential is injected here, so even a GET is anonymous.

@@ -1,0 +1,8 @@
+[
+  {
+    "binary": "/usr/local/bin/claude",
+    "host": "odoblnfmgtpmjymsktxe.supabase.co",
+    "request": "GET /storage/v1/object/public/slides/demo/injection/page.html",
+    "result": "allowed"
+  }
+]

@@ -27,8 +27,10 @@ async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Pr
 export const api = {
   listJobs: () => req<Job[]>("/jobs"),
   getJob: (id: string) => req<Job>(`/jobs/${id}`),
-  // `scenario` is honored by the mock backend only (QA); FastAPI ignores it.
-  createJob: (prompt: string, scenario?: Scenario) => req<Job>("/jobs", { method: "POST", json: { prompt, scenario } }),
+  // `scenario` picks a QA scenario in the mock backend. FastAPI honors it in DEMO_MODE=fixture, and in live mode
+  // only "injection" (the researcher reads the demo injection page, then an injection drill stage runs).
+  createJob: (prompt: string, scenario?: Scenario | "injection") =>
+    req<Job>("/jobs", { method: "POST", json: { prompt, scenario } }),
   approveJob: (id: string, caption: string) => req<Job>(`/jobs/${id}/approve`, { method: "POST", json: { caption } }),
   rejectJob: (id: string, reason: string) => req<Job>(`/jobs/${id}/reject`, { method: "POST", json: { reason } }),
   jobEventsUrl: (id: string) => `${API_URL}/jobs/${id}/events`,
