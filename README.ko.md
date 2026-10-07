@@ -3,7 +3,7 @@
   <img src="docs/assets/brand/hero-light.svg" alt="Nemo K Cards: 한국 문화 정보를 영어 카드뉴스로" width="100%">
 </picture>
 
-<p align="center"><a href="README.md">English</a> · <a href="https://www.instagram.com/whatsonkorea/">Instagram</a> · <a href="https://juyoung.site/nemo-k-cards/Nemo-K-Cards-Presentation.pdf">발표 PDF</a> · <a href="CONTRIBUTING.md">기여하기</a></p>
+<p align="center"><a href="README.en.md">English</a> · <a href="https://www.instagram.com/whatsonkorea/">Instagram</a> · <a href="https://juyoung.site/nemo-k-cards/Nemo-K-Cards-Presentation.pdf">발표 PDF</a> · <a href="CONTRIBUTING.md">기여하기</a></p>
 
 **Nemo K Cards는 한국 행사 정보를 조사하고 출처를 확인해 영어 Instagram 카드뉴스로 만드는 에이전트입니다. 운영자가 결과를 검토하고 승인하면 백엔드가 게시합니다.**
 
@@ -32,15 +32,13 @@ Fastcampus × NVIDIA Agentic AI Hackathon 2026에서 시작한 초기 프로젝�
 | 접속 대상 | 주소 | 제공하는 기능 |
 |---|---|---|
 | 체험 안내 | [안내 페이지](https://juyoung.site/nemo-k-cards/try/) | 예시 요청과 기획 데모 진입 |
-| 공개 Admin | [Railway Admin](https://admin-production-3db0.up.railway.app/) | 2026.10.07 확인 기준 시연용 UI mock |
 | 웹 발표 | [발표 페이지](https://juyoung.site/nemo-k-cards/) | 웹 슬라이드와 최신 공개 PDF 링크 |
 
 <p align="center">
   <a href="https://juyoung.site/nemo-k-cards/try/"><img src="docs/assets/try-qr.png" width="160" height="160" alt="모바일 체험 안내 QR"></a>
-  <a href="https://admin-production-3db0.up.railway.app/"><img src="docs/assets/admin-qr.png" width="160" height="160" alt="공개 Admin mock QR"></a>
 </p>
 
-[체험 QR SVG](docs/assets/try-qr.svg)와 [Admin QR SVG](docs/assets/admin-qr.svg)를 내려받을 수 있습니다. 공개 Railway mock과 현장 시연에 사용한 인증된 실제 백엔드는 별개입니다.
+[체험 안내 QR의 SVG 파일](docs/assets/try-qr.svg)을 내려받을 수 있습니다. 안내 페이지에서 이용 가능한 체험을 확인하세요.
 
 ## 바로 실행하기
 
