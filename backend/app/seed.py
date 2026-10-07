@@ -1,6 +1,37 @@
 """Dashboard + policy seed data (BACKEND §11: IG Insights for @whatsonkorea later, rest is seed)."""
 
+import time
+
+import httpx
+
+from app.config import settings
 from app.schemas import Channel, Job, JobStatus, Metric, PolicyEvent
+
+_ig_cache: dict = {"at": 0.0, "data": None}
+
+
+def ig_account() -> dict | None:
+    """Live @whatsonkorea stats from the Instagram API (host-only token), cached 5 minutes."""
+    if not (settings.ig_access_token and settings.ig_user_id):
+        return None
+    if time.time() - _ig_cache["at"] < 300:
+        return _ig_cache["data"]
+    try:
+        r = httpx.get("https://graph.instagram.com/v24.0/me", timeout=5,
+                      params={"fields": "username,followers_count,media_count",
+                              "access_token": settings.ig_access_token})
+        data = r.json() if r.status_code == 200 else None
+    except httpx.HTTPError:
+        data = None
+    _ig_cache.update(at=time.time(), data=data)
+    return data
+
+
+def channels() -> list[Channel]:
+    ig = ig_account()
+    live = [Channel(handle=f"@{ig.get('username', 'whatsonkorea')}", platform="Instagram",
+                    followers=int(ig.get("followers_count", 0)), live=True)] if ig else [CHANNELS[0]]
+    return live + CHANNELS[1:]
 
 CHANNELS = [
     Channel(handle="@whatsonkorea", platform="Instagram", followers=12480, live=True),
@@ -28,8 +59,12 @@ POLICY_SEED = [
 def metrics(jobs: list[Job]) -> list[Metric]:
     published = sum(j.status == JobStatus.PUBLISHED and "/p/MOCK" not in (j.published_url or "") for j in jobs)
     waiting = sum(j.status == JobStatus.READY_FOR_REVIEW for j in jobs)
+    ig = ig_account()
+    followers = (Metric(label="Followers", value=f"{ig.get('followers_count', 0):,}",
+                        delta=f"{ig.get('media_count', 0)} posts · live from Instagram") if ig
+                 else Metric(label="Followers", value="12,480", delta="seed data (no IG token)"))
     return [
-        Metric(label="Followers", value="12,480", delta="+4.2% vs last week"),
+        followers,
         Metric(label="Reach (7d)", value="48.2K", delta="+11.8% vs last week"),
         Metric(label="Avg. saves / post", value="312", delta="+38 vs last week"),
         Metric(label="Published this week", value=str(published), delta=f"{waiting} waiting for review"),

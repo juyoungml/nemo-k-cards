@@ -194,7 +194,7 @@ def metrics() -> list[Metric]:
 
 @app.get("/channels", response_model=list[Channel])
 def channels() -> list[Channel]:
-    return seed.CHANNELS
+    return seed.channels()
 
 
 @app.get("/policy-events")
