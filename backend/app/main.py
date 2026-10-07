@@ -1,6 +1,7 @@
 """FastAPI entrypoint. Routes follow SPEC §12 / BACKEND §4 and match apps/web/src/lib/api.ts."""
 
 import asyncio
+import hashlib
 import secrets
 from contextlib import asynccontextmanager
 
@@ -198,8 +199,12 @@ def channels() -> list[Channel]:
 
 @app.get("/policy-events")
 def policy_events() -> dict:
-    events = store.list_policy_events() + seed.POLICY_SEED
-    return {"stats": seed.policy_stats(events, len(store.list_jobs(200))),
+    events = store.list_policy_events() + (seed.POLICY_SEED if settings.demo_mode == "fixture" else [])
+    try:
+        version = hashlib.sha256(settings.openshell_policy.read_bytes()).hexdigest()[:7]
+    except OSError:
+        version = "—"
+    return {"stats": seed.policy_stats(events, version),
             "events": [e.model_dump() for e in events]}
 
 

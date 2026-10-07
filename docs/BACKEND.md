@@ -1,6 +1,7 @@
 # Backend Spec: What's On Korea
 
-> Status: **FROZEN v1.1** (2026-10-07; v1.1: no auto-reject — the operator decides). Changes after this point need a team heads-up in Slack + a version bump here.
+> Status: **FROZEN v1.2** (2026-10-07; v1.1: no auto-reject — the operator decides). Changes after this point need a team heads-up in Slack + a version bump here.
+> v1.2: §6 runner flow and #13 updated from running OpenShell 0.1.2 for real (MicroVM driver, native Claude Code binary).
 > Builds on [SPEC.md](SPEC.md) **v0.3** (incl. Brainstorm §4-1) and the [Admin Figma mockups](https://www.figma.com/design/OrkSDRFk7FwMzJ5WFxgYDY) (5 screens). Where they disagree, **Figma wins for UI behavior** and this doc wins for the backend contract.
 
 ---
@@ -258,11 +259,15 @@ After 6: orchestrator builds `checks` + merged `issues` → `READY_FOR_REVIEW` o
 claude -p "<task naming the subagent>" --output-format json      cwd: /sandbox/agent
 stdin: JSON payload  →  stdout: {"result": "<json>"}  →  TypeAdapter(T).validate_json(result)
 ```
-- `LocalClaudeRunner` (dev, no sandbox) and `OpenShellRunner`:
-  `openshell sandbox create --from whatsonkorea-agent:latest --policy policies/openshell/agent-policy.yaml --provider <only what this stage needs> --no-keep -- claude -p …`
-- Files (page text, rendered slides for the reviewer) → `/sandbox/input` via create → `openshell sandbox upload` → `exec` (`--upload` can't be combined with a trailing command).
+- `LocalClaudeRunner` (dev, no sandbox) and `OpenShellRunner`, one fresh sandbox per stage:
+  1. `openshell sandbox create --name <stage>-<job>-<rand> --detach --from whatsonkorea-agent:latest --policy policies/openshell/agent-policy.yaml --provider claude-code`
+  2. files (rendered slides for the reviewer) → `openshell sandbox upload <sb> <dir> /tmp/input`. Uploads run under the policy, so read-only `/sandbox/input` can't receive them; payload paths are rewritten to `/tmp/input/…`.
+  3. `openshell sandbox exec -n <sb> --workdir /sandbox/agent --env HOME=/sandbox --env CLAUDE_CONFIG_DIR=/tmp/claude … -- claude -p …` with the payload on stdin. VM sandboxes don't apply image `ENV`, so the runner passes it. `HOME` is pinned because the Docker driver sets it to the workdir, and Claude Code ignores `.claude/agents` when the project is `$HOME`.
+  4. `openshell logs <sb> --source sandbox` → `services/policy_log.py` → `PolicyEvent[]` (stored with `job_id`), then `openshell sandbox delete`. (`--no-keep` would delete the log with the sandbox.) The log reaches the gateway asynchronously, so the runner re-reads it until it stops growing.
+- Sandbox names are capped at 19 characters by OpenShell.
+- Setup: `scripts/openshell_setup.sh` builds the image, imports `policies/openshell/providers/claude-code.yaml` and creates the `claude-code` provider from `ANTHROPIC_API_KEY`.
+- Host requirements: Landlock ABI 3 (Linux ≥ 6.2) and Docker ≥ 28 for the Docker driver. On older hosts (our Brev box: Ubuntu 22.04, 5.15, Docker 27) use the MicroVM driver (`compute_driver = "vm"`, user in `kvm` group); the guest kernel is 6.12. The Docker driver (verified on Linux 6.8 / Docker 29, arm64) also requires the image `WORKDIR` to be writable by the sandbox user; Landlock still keeps it read-only at runtime.
 - Invalid JSON → 1 retry with the validation error appended → else `FAILED`.
-- After each run: `openshell logs <sb> --source sandbox` → `PolicyEvent[]` (stored with `job_id`).
 - Subagent selection: name it in the task text ("Use the researcher subagent…"); don't depend on a CLI flag.
 
 ---
@@ -313,7 +318,7 @@ brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 | 10 | Policy Log: poll every 5 s |
 | 11 | Hashtags ≤ 5 (SPEC §6 updated) |
 | 12 | Secrets: used via OpenShell providers, never read by the agent; secret scanner on all outputs |
-| 13 | Policy `binaries`: real paths (`/usr/bin/node` for Claude Code), `enforcement: enforce` everywhere, `DISABLE_AUTOUPDATER=1` in the image |
+| 13 | Policy `binaries`: real paths (`/usr/local/bin/claude` — Claude Code ships a native binary, no Node), `enforcement: enforce` everywhere, `DISABLE_AUTOUPDATER=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` |
 
 ## 12. Build order & owners (SPEC §13 roles)
 

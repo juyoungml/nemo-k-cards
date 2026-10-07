@@ -131,7 +131,7 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                     "Use the researcher subagent. Research events for this request and return EventBrief items. "
                     f"Today is {datetime.now(KST):%Y-%m-%d} (Asia/Seoul). Request: {job.prompt}",
                     {"prompt": job.prompt, "today": datetime.now(KST).date().isoformat()},
-                    list[EventBrief])
+                    list[EventBrief], job_id=job.id)
             else:
                 await asyncio.sleep(FIXTURE_DELAY)
                 fixture_fail("research")
@@ -194,7 +194,7 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                 "into a CardDeck for foreigners in Korea.",
                 {"briefs": [b.model_dump(mode="json") for b in included], "constraints": constraints,
                  "prompt": job.prompt},
-                CardDeck)
+                CardDeck, job_id=job.id)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
             deck = (_deck_from_draft(draft, included[0].id if included else None) if draft
@@ -244,7 +244,7 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                  .read_text(encoding="utf-8"),
                  "today": datetime.now(KST).date().isoformat(),
                  "cover_label": weekend_label(datetime.now(KST).date())},
-                ReviewVerdict)
+                ReviewVerdict, files=[s.path for s in rendered], job_id=job.id)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
             verdict = ReviewVerdict.model_validate(fx("review.json") or {"verdict": "pass"})
