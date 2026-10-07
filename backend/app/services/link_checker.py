@@ -12,7 +12,7 @@ from app.schemas import EventBrief, LinkCheck, VerificationReport
 SHORTENERS = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "han.gl", "me2.do", "url.kr", "vo.la", "is.gd"}
 RISKY_TLDS = {"xyz", "top", "click", "zip", "icu", "rest", "cam", "monster", "gq", "tk"}
 # Known official/organizer domains; a near-miss of one of these is a lookalike.
-OFFICIAL = {"visitkorea.or.kr", "seoul.go.kr", "go.kr", "or.kr", "interpark.com", "yes24.com",
+OFFICIAL = {"visitkorea.or.kr", "seoul.go.kr", "visitseoul.net", "visitbusan.net", "korea.net", "go.kr", "or.kr", "interpark.com", "yes24.com",
             "popply.co.kr", "popga.co.kr", "naver.com", "kakao.com", "instagram.com"}
 UA = {"User-Agent": "Mozilla/5.0 (WhatsOnKorea link checker; +https://github.com/juyoungml/nemo-k-cards)"}
 
@@ -52,7 +52,8 @@ def suspicious_reason(url: str) -> str | None:
         label = reg.split(".")[0]
         for off in OFFICIAL:
             name = off.split(".")[0]
-            if len(name) > 4 and (name in host.replace(reg, "") or name in label) and reg != off:
+            # brand inside a different domain with a hyphen/odd TLD, e.g. visitkorea-tickets.xyz
+            if len(name) > 4 and name in label and reg != off and "-" in label:
                 return f"lookalike of {off}"
             if len(name) > 4 and 0 < _lev(label, name) <= 2:
                 return f"lookalike of {off}"
@@ -71,6 +72,9 @@ async def check_url(url: str, client: httpx.AsyncClient | None = None) -> LinkCh
         if resp.status_code in (403, 405) or resp.status_code >= 500:
             resp = await client.get(url)
         final = str(resp.url)
+        if resp.status_code in (401, 403, 429):
+            return LinkCheck(url=url, status="ok", http_code=resp.status_code, final_url=final,
+                             reason="reachable; blocks automated checks")
         if resp.status_code >= 400:
             return LinkCheck(url=url, status="dead", http_code=resp.status_code, final_url=final)
         if _registrable(urlparse(final).hostname or "") != _registrable(urlparse(url).hostname or ""):

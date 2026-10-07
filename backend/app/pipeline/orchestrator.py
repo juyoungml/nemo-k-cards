@@ -139,6 +139,11 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
         sus = sum(c.status == "suspicious" for c in bad)
         r.step("verify", "done", f"{dead} dead · {sus} lookalike → {len(report.excluded_event_ids)} excluded"
                if bad else f"{len(report.checks)} links ok")
+        ok_urls = {c.url for c in report.checks if c.status == "ok"}
+        for b in job.briefs:
+            for src in b.sources:
+                if str(src.url) in ok_urls:
+                    src.fetched_at = datetime.now(UTC)
         included = [b for b in job.briefs if b.id not in report.excluded_event_ids]
 
         # 3. Outline & copy (sandbox) ----------------------------------------------------------
@@ -189,11 +194,13 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
             verdict = await run_stage(
                 "reviewer",
                 "Use the reviewer subagent. Review this card deck before a human approves it. Check facts against "
-                "the briefs, sensitive dates/phrasing (policies/sensitive_topics.yaml), PII and tone. "
+                "the briefs, sensitive dates/phrasing (rules in `sensitive_topics_yaml`), PII and tone. "
                 "Look at the rendered slide images listed in `slide_paths`.",
                 {"deck": deck.model_dump(mode="json"), "briefs": [b.model_dump(mode="json") for b in included],
                  "qa_issues": [i.model_dump() for i in qa.issues],
                  "slide_paths": [str(s.path) for s in rendered],
+                 "sensitive_topics_yaml": (settings.agent_dir.parent / "policies/content/sensitive_topics.yaml")
+                 .read_text(encoding="utf-8"),
                  "today": datetime.now(KST).date().isoformat()},
                 ReviewVerdict)
         else:

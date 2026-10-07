@@ -20,7 +20,7 @@
 .ko { font-size: 4cqw; opacity: .85; }
 .muted { opacity: .8; }
 
-.photo { position: relative; flex: 1 1 auto; min-height: 18cqw; border-radius: 3cqw; overflow: hidden;
+.photo { position: relative; flex: 1 1 0; min-height: 0; border-radius: 3cqw; overflow: hidden;
   background: radial-gradient(120% 90% at 20% 15%, var(--ph2) 0%, transparent 55%),
               radial-gradient(90% 80% at 85% 90%, var(--ph2) 0%, transparent 60%),
               linear-gradient(160deg, var(--ph1), var(--ph1)); }

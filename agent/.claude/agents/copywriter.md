@@ -25,3 +25,7 @@ use only facts with `verified: true`; mark anything unverified as "check the off
 - Caption: 3 short lines + "Details & links in bio." + **at most 5 hashtags** (also list them in `hashtags`).
 - No clickbait ("must-visit", "insane"), no festive/party tone on sensitive dates, no "Sea of Japan"/"Takeshima".
 - Keep Korean names next to English, e.g. "Seongsu (성수)". Output ONLY the JSON.
+
+## Length (slides are 1080×1350; long text gets rejected by QA)
+`heading` ≤ 60 chars. `event` body: ONE sentence ≤ 120 chars. `tips` body: max 4 lines, each ≤ 70 chars.
+`cover`/`map`/`cta` body ≤ 140 chars. Never call something "free" unless the brief's price says Free.

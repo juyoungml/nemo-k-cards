@@ -7,6 +7,7 @@ with pydantic on the host.
 
 import asyncio
 import json
+import re
 import shutil
 from typing import Any, Protocol
 
@@ -27,6 +28,10 @@ class AgentError(RuntimeError):
     pass
 
 
+class AgentOutputError(AgentError):
+    """The agent ran but its output wasn't usable JSON — worth one retry."""
+
+
 class AgentRunner(Protocol):
     async def run(self, agent: str, task: str, payload: dict, schema: dict) -> Any: ...
 
@@ -41,6 +46,26 @@ def _cli_args(agent: str, task: str, schema: dict) -> list[str]:
     return args
 
 
+def _extract_json(text: str) -> Any:
+    """Accept bare JSON, fenced JSON, or JSON embedded in prose."""
+    text = (text or "").strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        starts = [i for i in (text.find("{"), text.find("[")) if i != -1]
+        if starts:
+            start = min(starts)
+            end = max(text.rfind("}"), text.rfind("]"))
+            try:
+                return json.loads(text[start:end + 1])
+            except json.JSONDecodeError:
+                pass
+    raise AgentOutputError(f"no JSON in agent output: {text[:200]!r}")
+
+
 def _parse(stdout: bytes) -> Any:
     try:
         out = json.loads(stdout)
@@ -50,7 +75,7 @@ def _parse(stdout: bytes) -> Any:
         raise AgentError(f"agent error: {out.get('result') or out.get('subtype')}")
     if out.get("structured_output") is not None:
         return out["structured_output"]
-    return json.loads(out.get("result", "null"))
+    return _extract_json(out.get("result", ""))
 
 
 class LocalClaudeRunner:
@@ -109,16 +134,22 @@ async def run_stage[T](agent: str, task: str, payload: dict, out_type: type[T]) 
     adapter = TypeAdapter(out_type)
     schema = adapter.json_schema()
     if schema.get("type") != "object":  # --json-schema needs an object at the root
-        schema = {"type": "object", "properties": {"items": schema}, "required": ["items"]}
+        defs = schema.pop("$defs", {})  # keep $refs resolvable from the new root
+        schema = {"type": "object", "properties": {"items": schema}, "required": ["items"], "$defs": defs}
         wrap = True
     else:
         wrap = False
+    # --json-schema is not always enforced for custom agents, so the contract also goes in the task text.
+    task = (f"{task}\n\nReturn ONLY a JSON value that validates against this JSON Schema. Field names must match "
+            f"exactly; no extra keys, no prose, no code fences.\n{json.dumps(schema, separators=(',', ':'))}")
     runner, last_err = get_runner(), None
     for attempt in range(2):
         t = task if attempt == 0 else f"{task}\n\nYour previous output failed validation:\n{last_err}\nFix it."
-        raw = await runner.run(agent, t, payload, schema)
         try:
+            raw = await runner.run(agent, t, payload, schema)
+            if wrap and isinstance(raw, list):  # agent returned the bare list
+                raw = {"items": raw}
             return adapter.validate_python(raw["items"] if wrap else raw)
-        except (ValidationError, KeyError, TypeError) as e:
+        except (ValidationError, KeyError, TypeError, AgentOutputError) as e:
             last_err = str(e)[:1500]
     raise AgentError(f"{agent}: output failed validation twice: {last_err}")

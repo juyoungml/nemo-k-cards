@@ -36,6 +36,32 @@ PLACEHOLDER = {
     "experience": ("#0F2A3D", "#E8B04B"), "other": ("#24324A", "#7FA7D9"),
 }
 
+# Auto-fit: if the column overflows, shrink text blocks together (5% steps) down to a readable floor.
+# Photos already shrink first (flex: 1 1 0). Anything still overflowing at the floor is caught by QA.
+FIT_JS = """
+() => {
+  const pad = document.querySelector('.pad');
+  const blocks = [...pad.querySelectorAll('.ttl, .sub, .kv, ul.list, .src, .place, .chips, .ko')];
+  const floor = el => el.classList.contains('ttl') ? 52 : 30;
+  const overflowing = () => pad.scrollHeight > pad.clientHeight + 1;
+  let steps = 0;
+  while (overflowing() && steps < 30) {
+    let shrunk = false;
+    for (const el of blocks) {
+      const fs = parseFloat(getComputedStyle(el).fontSize);
+      if (fs > floor(el)) { el.style.fontSize = Math.max(floor(el), fs * 0.95) + 'px'; shrunk = true; }
+      el.querySelectorAll('dd, li, .addr, .chip').forEach(c => {
+        const f = parseFloat(getComputedStyle(c).fontSize);
+        if (f > 30) { c.style.fontSize = Math.max(30, f * 0.95) + 'px'; shrunk = true; }
+      });
+    }
+    if (!shrunk) break;
+    steps++;
+  }
+  return steps;
+}
+"""
+
 MEASURE_JS = """
 () => [...document.querySelectorAll('[data-qa]')].map(el => {
   const cs = getComputedStyle(el), r = el.getBoundingClientRect();
@@ -136,6 +162,7 @@ class HtmlRenderer:
         from playwright.async_api import async_playwright
 
         by_id = {b.id: b for b in (briefs or [])}
+        out_dir = out_dir.resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         rendered: list[RenderedSlide] = []
         async with async_playwright() as p:
@@ -146,6 +173,7 @@ class HtmlRenderer:
                 html_path.write_text(self.html(deck, slide, by_id), encoding="utf-8")
                 await page.goto(html_path.as_uri())
                 await page.evaluate("document.fonts.ready")
+                await page.evaluate(FIT_JS)
                 measures = [TextMeasure(**m) for m in await page.evaluate(MEASURE_JS)]
                 jpg = out_dir / f"slide-{slide.index:02d}.jpg"
                 await page.screenshot(path=str(jpg), type="jpeg", quality=90)
