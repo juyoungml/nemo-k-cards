@@ -12,9 +12,9 @@ export function PageHeader({
   children?: React.ReactNode;
 }) {
   return (
-    <header className="flex items-center gap-4">
+    <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <div className="min-w-0 flex-1 space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        <h1 className="text-xl font-bold tracking-tight break-words md:text-2xl">{title}</h1>
         {description && <p className="text-sm text-muted-foreground">{description}</p>}
       </div>
       {children}
@@ -25,9 +25,9 @@ export function PageHeader({
 /** Mirrors the Figma "StatCard" component. */
 export function StatCard({ label, value, delta }: Metric) {
   return (
-    <div className="flex-1 space-y-1.5 rounded-xl border bg-card p-5">
+    <div className="min-w-0 flex-1 space-y-1.5 rounded-xl border bg-card p-4 md:p-5">
       <p className="text-[13px] font-medium text-muted-foreground">{label}</p>
-      <p className="text-[28px] leading-none font-bold">{value}</p>
+      <p className="text-[22px] leading-none font-bold md:text-[28px]">{value}</p>
       <p className="text-xs font-medium text-success">{delta}</p>
     </div>
   );
@@ -35,7 +35,7 @@ export function StatCard({ label, value, delta }: Metric) {
 
 export function StatRow({ metrics }: { metrics: Metric[] }) {
   return (
-    <div className="flex gap-4">
+    <div className="grid grid-cols-2 gap-3 md:flex md:gap-4">
       {metrics.map((m) => (
         <StatCard key={m.label} {...m} />
       ))}
@@ -51,7 +51,7 @@ export function Panel({ title, description, action, className, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <section className={cn("rounded-xl border bg-card p-5", className)}>
+    <section className={cn("min-w-0 rounded-xl border bg-card p-4 md:p-5", className)}>
       {(title || action) && (
         <div className="mb-3 flex items-start gap-2">
           <div className="flex-1">

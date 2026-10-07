@@ -28,7 +28,7 @@ export function SlidePreview({
   const img = images?.[current];
 
   return (
-    <div className="w-[400px] shrink-0 space-y-3">
+    <div className="mx-auto w-full max-w-[400px] space-y-3 lg:mx-0 lg:w-[400px] lg:shrink-0">
       {img ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={img} alt={`Slide ${current + 1}: ${slide.heading}`} className="aspect-[4/5] w-full rounded-xl border object-cover" />

@@ -128,7 +128,7 @@ export function ReviewDetailView({ id }: { id: string }) {
 
       <PublishToast job={job} />
 
-      <div className="flex items-start gap-5">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
         {deck && deck.slides.length > 0 && (
           <SlidePreview slides={deck.slides} images={job.slide_urls?.map(assetUrl)} current={slide} onSelect={setSlide} />
         )}

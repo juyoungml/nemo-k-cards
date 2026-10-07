@@ -50,12 +50,14 @@ def save_job(job: Job) -> Job:
 
 
 def get_job(job_id: str) -> Job | None:
-    row = _db.execute("select json from jobs where id = ?", (job_id,)).fetchone()
+    with _lock:  # one shared connection: reads must not interleave with writes
+        row = _db.execute("select json from jobs where id = ?", (job_id,)).fetchone()
     return _load(Job, row[0]) if row else None
 
 
 def list_jobs(limit: int = 50) -> list[Job]:
-    rows = _db.execute("select json from jobs order by created_at desc limit ?", (limit,)).fetchall()
+    with _lock:  # one shared connection: reads must not interleave with writes
+        rows = _db.execute("select json from jobs order by created_at desc limit ?", (limit,)).fetchall()
     return [j for r in rows if (j := _load(Job, r[0]))]
 
 
@@ -65,7 +67,8 @@ def save_draft(draft: Draft) -> Draft:
 
 
 def get_draft(draft_id: str) -> Draft | None:
-    row = _db.execute("select json from drafts where id = ?", (draft_id,)).fetchone()
+    with _lock:  # one shared connection: reads must not interleave with writes
+        row = _db.execute("select json from drafts where id = ?", (draft_id,)).fetchone()
     return _load(Draft, row[0]) if row else None
 
 
@@ -77,5 +80,6 @@ def add_policy_events(events: list[PolicyEvent]) -> None:
 
 
 def list_policy_events(limit: int = 200) -> list[PolicyEvent]:
-    rows = _db.execute("select json from policy_events order by rowid desc limit ?", (limit,)).fetchall()
+    with _lock:  # one shared connection: reads must not interleave with writes
+        rows = _db.execute("select json from policy_events order by rowid desc limit ?", (limit,)).fetchall()
     return [e for r in rows if (e := _load(PolicyEvent, r[0]))]

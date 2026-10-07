@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { Job } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const STATUS_NOTE: Partial<Record<Job["status"], string>> = {
   PUBLISHING: "Approved — the host is publishing to Instagram…",
@@ -45,9 +46,9 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
       </section>
 
       {/* Decision bar stays reachable at the bottom of the viewport; publish progress shows in the toast + top line. */}
-      <div className="sticky bottom-4 z-10 rounded-xl border bg-card/95 p-4 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] backdrop-blur supports-[backdrop-filter]:bg-card/80">
-          <div className="flex items-center gap-2.5">
-            <p className={error ? "flex-1 text-xs text-destructive" : "flex-1 text-xs text-muted-foreground"}>
+      <div className="sticky bottom-20 z-10 rounded-xl md:bottom-4 border bg-card/95 p-4 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] backdrop-blur supports-[backdrop-filter]:bg-card/80">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <p className={cn("w-full text-xs md:w-auto md:flex-1", error ? "text-destructive" : "text-muted-foreground")}>
               {error ??
                 STATUS_NOTE[job.status] ??
                 (blocks > 0

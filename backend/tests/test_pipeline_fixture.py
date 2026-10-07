@@ -199,3 +199,17 @@ def test_admin_token_guards_the_api(monkeypatch):
     assert c.get("/jobs?token=s3cret").status_code == 401  # query token only for SSE
     r = c.get("/jobs", headers={"Origin": "http://localhost:3000"})
     assert r.status_code == 401 and r.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+
+def test_live_server_starts_brainstorm_with_an_empty_board(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+    c = TestClient(app)
+    monkeypatch.setattr(settings, "demo_mode", "live")
+    live = c.post("/drafts", json={"sample": True}).json()
+    assert live["messages"] == [] and live["facts"] == [] and live["angles"] == []
+    monkeypatch.setattr(settings, "demo_mode", "fixture")
+    demo = c.post("/drafts", json={"sample": True}).json()
+    assert any("Mangwon" in f["value"] for f in demo["facts"])
