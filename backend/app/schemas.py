@@ -104,6 +104,7 @@ class Slide(BaseModel):
     body: str = ""
     event_id: str | None = None
     image: ImageAsset | None = None
+    stock_id: str | None = None  # copywriter's pick from renderer/stock/catalog.json; the host decides if it's used
     source_urls: list[str] = Field(default_factory=list)
 
 

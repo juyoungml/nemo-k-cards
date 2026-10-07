@@ -10,6 +10,7 @@ between review and publish. Events with no survivor get the Poster style.
 """
 
 import asyncio
+import json
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.schemas import EventBrief, ImageAsset
+from app.schemas import CardDeck, EventBrief, ImageAsset
 from app.services.link_checker import UA, _registrable, suspicious_reason
 
 OVERLAY_LICENSES = {"official_permission", "kogl_1", "cc0", "cc_by", "unsplash", "pexels"}
@@ -152,3 +153,45 @@ async def collect(briefs: list[EventBrief], ok_urls: set[str], out_dir: Path) ->
     async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=UA) as client:
         await asyncio.gather(*(one(b, client) for b in briefs))
     return found, log
+
+
+# ---------------------------------------------------------------- stock (AI-generated mood shots)
+
+STOCK_DIR = Path(__file__).resolve().parents[1] / "renderer" / "stock"
+
+
+def stock_catalog() -> list[dict]:
+    """What each stock image shows and what it may / may not be used for. The copywriter reads this."""
+    return json.loads((STOCK_DIR / "catalog.json").read_text())
+
+
+def attach_stock(deck: CardDeck, catalog: list[dict] | None = None) -> list[str]:
+    """Mix policy: an event slide without an official photo gets the copywriter's stock pick only if the id is
+    in the catalog and no earlier slide in this deck used it; otherwise it stays a Poster. Returns log lines."""
+    by_id = {c["id"]: c for c in (catalog if catalog is not None else stock_catalog())}
+    used: set[str] = set()
+    log: list[str] = []
+    for sl in sorted(deck.slides, key=lambda s: s.index):
+        if sl.layout != "event":
+            sl.stock_id = None
+            continue
+        pick = sl.stock_id
+        if sl.image:  # an official photo always wins
+            sl.stock_id = None
+            continue
+        if not pick:
+            log.append(f"slide {sl.index + 1}: no relevant stock photo → poster")
+            continue
+        if pick not in by_id:
+            log.append(f"slide {sl.index + 1}: unknown stock photo '{pick}' → poster")
+            sl.stock_id = None
+            continue
+        if pick in used:
+            log.append(f"slide {sl.index + 1}: '{pick}' already used in this deck → poster")
+            sl.stock_id = None
+            continue
+        used.add(pick)
+        sl.image = ImageAsset(url=(STOCK_DIR / by_id[pick]["file"]).as_uri(), license="ai_generated",
+                              credit="Image · AI-generated", allow_overlay=True)
+        log.append(f"slide {sl.index + 1}: stock photo '{pick}' (AI-generated, labeled)")
+    return log

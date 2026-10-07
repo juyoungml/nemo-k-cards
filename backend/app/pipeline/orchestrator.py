@@ -210,7 +210,10 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                 "Use the copywriter subagent. Turn the verified events (and brainstorm constraints, if any) "
                 "into a CardDeck for foreigners in Korea.",
                 {"briefs": [b.model_dump(mode="json") for b in included], "constraints": constraints,
-                 "prompt": job.prompt},
+                 "prompt": job.prompt,
+                 "has_official_photo": sorted(vetted),
+                 "stock_photos": [{k: c[k] for k in ("id", "shows", "fits", "never_for", "rule")}
+                                  for c in photos.stock_catalog()]},
                 CardDeck, job_id=job.id)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
@@ -220,6 +223,8 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
         for sl in deck.slides:
             if sl.layout == "event" and sl.event_id in vetted and not sl.image:
                 sl.image = vetted[sl.event_id].asset
+        for line in photos.attach_stock(deck):
+            r.log("copy", line)
         job.deck = deck
         n_tags = len(visual_qa.HASHTAG.findall(deck.caption))
         r.log("copy", f"CardDeck {len(deck.slides)} slides · caption {n_tags} hashtags")

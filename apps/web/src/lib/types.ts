@@ -46,6 +46,7 @@ export interface Slide {
   heading: string;
   body: string;
   event_id?: string | null;
+  stock_id?: string | null;
 }
 
 export interface CardDeck {

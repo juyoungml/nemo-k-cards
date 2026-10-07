@@ -75,3 +75,43 @@ async def test_collect_downloads_first_good_photo(tmp_path: Path, monkeypatch):
     assert v.remote_url.endswith("big.jpg") and v.asset.url.startswith("file://")
     assert Path(v.asset.url.removeprefix("file://")).exists()
     assert any("too small" in line for line in log) and any("not a JPEG" in line for line in log)
+
+
+# ---------------------------------------------------------------- stock (Mix policy)
+
+from app.schemas import CardDeck  # noqa: E402
+
+CAT = [{"id": "popup-paper-goods", "file": "popup.jpg"}, {"id": "hanji-lanterns-dusk", "file": "festival.jpg"}]
+
+
+def deck(*slides) -> CardDeck:
+    base = [{"index": 0, "layout": "cover", "heading": "c", "stock_id": "popup-paper-goods"}]
+    ev = [{"index": i + 1, "layout": "event", "heading": f"e{i}", "event_id": f"ev{i}", **s} for i, s in enumerate(slides)]
+    pad = [{"index": len(base + ev) + i, "layout": "tips", "heading": "t"} for i in range(max(0, 6 - len(base + ev)))]
+    return CardDeck.model_validate({"job_id": "t", "title": "t", "slides": base + ev + pad, "caption": "x"})
+
+
+def test_stock_mix_uses_each_image_once_and_falls_back_to_poster():
+    d = deck({"stock_id": "popup-paper-goods"}, {"stock_id": "popup-paper-goods"}, {"stock_id": "hanji-lanterns-dusk"},
+             {"stock_id": None}, {"stock_id": "made-up"})
+    log = photos.attach_stock(d, CAT)
+    ev = [s for s in d.slides if s.layout == "event"]
+    assert ev[0].image and ev[0].image.license == "ai_generated" and ev[0].image.credit == "Image · AI-generated"
+    assert ev[1].image is None and "already used" in log[1]          # repeat → poster
+    assert ev[2].image and ev[2].image.url.endswith("festival.jpg")
+    assert ev[3].image is None and ev[4].image is None and "unknown" in log[4]
+    assert d.slides[0].image is None and d.slides[0].stock_id is None   # never on non-event slides
+
+
+def test_official_photo_beats_stock():
+    official = ImageAsset(url="file:///x.jpg", license="kogl_1", credit="© KTO")
+    d = deck({"stock_id": "popup-paper-goods", "image": official.model_dump()})
+    photos.attach_stock(d, CAT)
+    ev = d.slides[1]
+    assert ev.image.credit == "© KTO" and ev.stock_id is None
+
+
+def test_catalog_files_exist():
+    for c in photos.stock_catalog():
+        assert (photos.STOCK_DIR / c["file"]).exists(), c["id"]
+        assert c["fits"] and c["never_for"] and c["shows"]

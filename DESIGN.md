@@ -59,7 +59,8 @@ Photos are used only when the license allows overlay (`ImageAsset.allow_overlay`
 **Photo sourcing order** (per event):
 1. Official or public-license photos: KTO photo gallery (관광사진갤러리), 공공누리 Type 1, city or festival press photos. Credit plus source link in the brief.
 2. Official promo image when reuse is allowed, with credit and link.
-3. AI-generated, only for mood: close-ups with no recognisable landmark, never a fake wide shot of a real named place. Always labelled `Image · AI-generated`.
+3. AI-generated stock, only for mood (`backend/app/renderer/stock/`, described in `catalog.json`): close-ups with no recognisable landmark, never a fake wide shot of a real named place. Always labelled `Image · AI-generated`.
+   - **Mix policy (approved):** the copywriter picks a stock image only when it shows what a visitor will actually see (`fits`, not `never_for`). Each image is used at most once per deck; otherwise the slide is a Poster. The reviewer warns on any mismatch.
 4. Nothing: use the Poster style.
 
 Never use other creators' photos.

@@ -1,0 +1,123 @@
+[
+  {
+    "id": "popup-paper-goods",
+    "file": "popup.jpg",
+    "category": "popup",
+    "shows": "Bright minimal shop interior: a long oak table with ceramic cups, vases and stacks of notebooks and paper goods, plants by a large window.",
+    "fits": [
+      "stationery",
+      "paper goods",
+      "ceramics",
+      "homeware",
+      "lifestyle or design shop",
+      "craft market",
+      "book or zine fair"
+    ],
+    "never_for": [
+      "character / toy / K-pop merch",
+      "fashion or beauty",
+      "food or drink",
+      "nightlife"
+    ],
+    "rule": "Use only if a visitor would recognise this picture as what they'll see; it must not look like the real venue of a named place."
+  },
+  {
+    "id": "gallery-white-room",
+    "file": "exhibition.jpg",
+    "category": "exhibition",
+    "shows": "Quiet white gallery room with skylight, one abstract painting on the wall, a wooden bench, stone floor.",
+    "fits": [
+      "painting exhibition",
+      "group show of paintings or works on paper",
+      "contemporary art in a white-cube gallery"
+    ],
+    "never_for": [
+      "installation, sculpture or textile art",
+      "immersive / media art",
+      "traditional costume or hanbok",
+      "science or history artifacts",
+      "kids' exhibitions",
+      "a named artist whose work isn't painting"
+    ],
+    "rule": "Use only if a visitor would recognise this picture as what they'll see; it must not look like the real venue of a named place."
+  },
+  {
+    "id": "hanji-lanterns-dusk",
+    "file": "festival.jpg",
+    "category": "festival",
+    "shows": "Close-up of hand-made hanji paper lanterns hanging from a branch, glowing at dusk among trees.",
+    "fits": [
+      "lantern festival",
+      "lotus lantern / Buddha's birthday",
+      "night walk with lanterns",
+      "traditional night festival"
+    ],
+    "never_for": [
+      "fireworks",
+      "music festival",
+      "food festival",
+      "flower or daytime festival",
+      "sports"
+    ],
+    "rule": "Use only if a visitor would recognise this picture as what they'll see; it must not look like the real venue of a named place."
+  },
+  {
+    "id": "theater-curtain",
+    "file": "performance.jpg",
+    "category": "performance",
+    "shows": "Empty Western-style proscenium theater with burgundy velvet seats, a balcony and a lit red stage curtain.",
+    "fits": [
+      "theater play",
+      "musical",
+      "opera",
+      "ballet",
+      "classical (Western) concert in a hall"
+    ],
+    "never_for": [
+      "gugak, pansori, traditional Korean music or dance",
+      "outdoor or street performance",
+      "K-pop concert or stadium show",
+      "club or DJ night"
+    ],
+    "rule": "Use only if a visitor would recognise this picture as what they'll see; it must not look like the real venue of a named place."
+  },
+  {
+    "id": "tea-table-tteok",
+    "file": "experience.jpg",
+    "category": "experience",
+    "shows": "Overhead tea table: celadon teapot and cups of green tea, rice cakes (tteok) on a plate, linen cloth, morning light.",
+    "fits": [
+      "tea ceremony or tea class",
+      "traditional dessert / tteok making",
+      "temple stay meal",
+      "Korean cooking or food class",
+      "slow cafe culture"
+    ],
+    "never_for": [
+      "street food or night market",
+      "BBQ / meat / alcohol",
+      "fine dining"
+    ],
+    "rule": "Use only if a visitor would recognise this picture as what they'll see; it must not look like the real venue of a named place."
+  },
+  {
+    "id": "hanok-window-lattice",
+    "file": "other.jpg",
+    "category": "other",
+    "shows": "Traditional hanok wooden window lattice with hanji paper and the shadow of a tree branch, empty floor.",
+    "fits": [
+      "hanok stay or hanok village",
+      "palace or heritage program",
+      "traditional culture class",
+      "calligraphy",
+      "quiet heritage walk"
+    ],
+    "never_for": [
+      "modern pop culture",
+      "shopping",
+      "nightlife",
+      "outdoor festivals"
+    ],
+    "rule": "Use only if a visitor would recognise this picture as what they'll see; it must not look like the real venue of a named place."
+  }
+]
