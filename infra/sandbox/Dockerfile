@@ -21,10 +21,12 @@ ENV DISABLE_AUTOUPDATER=1 \
 
 # OpenShell runs the workload as the image's `sandbox` account (uid 1000 unless the image says otherwise);
 # ubuntu:24.04 ships uid 1000 as `ubuntu`, so give that uid to `sandbox`.
+# The Docker driver refuses a workdir the sandbox user cannot write, so `sandbox` owns /sandbox/agent;
+# the policy's Landlock rules keep it read-only at runtime (scripts/openshell_probe.sh checks this).
 RUN userdel -r ubuntu && useradd -m -u 1000 sandbox && mkdir -p /sandbox/agent/policies /sandbox/input /sandbox/out \
-    && chown -R sandbox:sandbox /sandbox/out /sandbox/input
-COPY agent/ /sandbox/agent/
-COPY policies/content/ /sandbox/agent/policies/
+    && chown -R sandbox:sandbox /sandbox/agent /sandbox/out /sandbox/input
+COPY --chown=sandbox:sandbox agent/ /sandbox/agent/
+COPY --chown=sandbox:sandbox policies/content/ /sandbox/agent/policies/
 
 USER sandbox
 WORKDIR /sandbox/agent

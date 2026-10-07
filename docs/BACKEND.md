@@ -262,11 +262,11 @@ stdin: JSON payload  →  stdout: {"result": "<json>"}  →  TypeAdapter(T).vali
 - `LocalClaudeRunner` (dev, no sandbox) and `OpenShellRunner`, one fresh sandbox per stage:
   1. `openshell sandbox create --name <stage>-<job>-<rand> --detach --from whatsonkorea-agent:latest --policy policies/openshell/agent-policy.yaml --provider claude-code`
   2. files (rendered slides for the reviewer) → `openshell sandbox upload <sb> <dir> /tmp/input`. Uploads run under the policy, so read-only `/sandbox/input` can't receive them; payload paths are rewritten to `/tmp/input/…`.
-  3. `openshell sandbox exec -n <sb> --workdir /sandbox/agent --env CLAUDE_CONFIG_DIR=/tmp/claude … -- claude -p …` with the payload on stdin. VM sandboxes don't apply image `ENV`, so the runner passes it.
-  4. `openshell logs <sb> --source sandbox` → `services/policy_log.py` → `PolicyEvent[]` (stored with `job_id`), then `openshell sandbox delete`. (`--no-keep` would delete the log with the sandbox.)
+  3. `openshell sandbox exec -n <sb> --workdir /sandbox/agent --env HOME=/sandbox --env CLAUDE_CONFIG_DIR=/tmp/claude … -- claude -p …` with the payload on stdin. VM sandboxes don't apply image `ENV`, so the runner passes it. `HOME` is pinned because the Docker driver sets it to the workdir, and Claude Code ignores `.claude/agents` when the project is `$HOME`.
+  4. `openshell logs <sb> --source sandbox` → `services/policy_log.py` → `PolicyEvent[]` (stored with `job_id`), then `openshell sandbox delete`. (`--no-keep` would delete the log with the sandbox.) The log reaches the gateway asynchronously, so the runner re-reads it until it stops growing.
 - Sandbox names are capped at 19 characters by OpenShell.
 - Setup: `scripts/openshell_setup.sh` builds the image, imports `policies/openshell/providers/claude-code.yaml` and creates the `claude-code` provider from `ANTHROPIC_API_KEY`.
-- Host requirements: Landlock ABI 3 (Linux ≥ 6.2) and Docker ≥ 28 for the Docker driver. On older hosts (our Brev box: Ubuntu 22.04, 5.15, Docker 27) use the MicroVM driver (`compute_driver = "vm"`, user in `kvm` group); the guest kernel is 6.12.
+- Host requirements: Landlock ABI 3 (Linux ≥ 6.2) and Docker ≥ 28 for the Docker driver. On older hosts (our Brev box: Ubuntu 22.04, 5.15, Docker 27) use the MicroVM driver (`compute_driver = "vm"`, user in `kvm` group); the guest kernel is 6.12. The Docker driver (verified on Linux 6.8 / Docker 29, arm64) also requires the image `WORKDIR` to be writable by the sandbox user; Landlock still keeps it read-only at runtime.
 - Invalid JSON → 1 retry with the validation error appended → else `FAILED`.
 - Subagent selection: name it in the task text ("Use the researcher subagent…"); don't depend on a CLI flag.
 

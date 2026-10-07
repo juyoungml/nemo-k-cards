@@ -20,13 +20,21 @@ t pastebin           curl -sS -o /dev/null -w %{http_code} -X POST https://paste
 t event_page_curl    curl -sS -o /dev/null -w %{http_code} https://culture.seoul.go.kr/
 t public_api         curl -sS -o /dev/null -w %{http_code} https://apis.data.go.kr/
 t write_agent_dir    sh -c "echo x >> /sandbox/agent/CLAUDE.md"
-t write_out          sh -c "echo ok > /sandbox/out/probe.txt"
+t new_agent_file     sh -c "echo x > /sandbox/agent/injected.md"
+t write_out         sh -c "echo ok > /sandbox/out/probe.txt"
 '
 
 echo "creating sandbox $name ..."
 out=$(openshell sandbox create --name "$name" --from whatsonkorea-agent:latest \
         --policy policies/openshell/agent-policy.yaml -- sh -c "$probe" 2>/dev/null | grep '|')
-logs=$(openshell logs "$name" --source sandbox -n 2000 --color never 2>/dev/null)
+# The log reaches the gateway asynchronously: re-read until it stops growing.
+logs=
+for _ in $(seq 10); do
+  prev=$logs
+  logs=$(openshell logs "$name" --source sandbox -n 2000 --color never 2>/dev/null)
+  [ -n "$logs" ] && [ "$logs" = "$prev" ] && break
+  sleep 1
+done
 openshell sandbox delete "$name" >/dev/null 2>&1
 
 fails=0
@@ -44,7 +52,8 @@ check pastebin        "pastebin (exfiltration) denied"              '[ "$rc" != 
 check event_page_curl "event pages only for claude, not curl"       '[ "$rc" != 0 ] || [ "$body" = 403 ]'
 check public_api      "public data API reachable (read-only)"       '[[ "$body" =~ ^[1-5][0-9][0-9]$ ]] && [ "$body" != 403 ]'
 check write_agent_dir "agent instructions are read-only"            '[ "$rc" != 0 ]'
-check write_out       "/sandbox/out is writable"                    '[ "$rc" = 0 ]'
+check new_agent_file  "no new files in the agent dir"               '[ "$rc" != 0 ]'
+check write_out      "/sandbox/out is writable"                    '[ "$rc" = 0 ]'
 
 echo
 echo "Policy Log rows parsed from the sandbox log:"

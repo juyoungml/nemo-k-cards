@@ -120,8 +120,10 @@ class OpenShellRunner:
 
     SANDBOX_INPUT = "/tmp/input"
     # Image ENV doesn't reach VM sandboxes, so the CLI settings the image relies on are passed per exec.
-    CLAUDE_ENV: ClassVar[dict[str, str]] = {"CLAUDE_CONFIG_DIR": "/tmp/claude", "DISABLE_AUTOUPDATER": "1",
-                  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    # HOME: the Docker driver sets HOME to the workdir, and Claude Code ignores a project's .claude/agents
+    # when the project is $HOME.
+    CLAUDE_ENV: ClassVar[dict[str, str]] = {"HOME": "/sandbox", "CLAUDE_CONFIG_DIR": "/tmp/claude",
+                  "DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 
     def __init__(self) -> None:
         self.openshell = shutil.which("openshell") or ""
@@ -178,8 +180,16 @@ class OpenShellRunner:
             await self._delete(name)
 
     async def _collect_policy_events(self, name: str, job_id: str | None) -> None:
+        # The sandbox ships its log to the gateway asynchronously; a read right after the workload exits
+        # misses the last events, so re-read until the log stops growing.
         try:
-            rc, out, _ = await self._cli("logs", name, "--source", "sandbox", "-n", "5000", "--color", "never")
+            out, rc = b"", 1
+            for _ in range(10):
+                prev = out
+                rc, out, _ = await self._cli("logs", name, "--source", "sandbox", "-n", "5000", "--color", "never")
+                if rc != 0 or (out and out == prev):
+                    break
+                await asyncio.sleep(1)
             if rc == 0 and (events := policy_log.parse(out.decode(errors="replace"), name, job_id)):
                 store.add_policy_events(events)
         except Exception:  # a missing log must not fail the stage
