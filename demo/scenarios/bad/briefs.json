@@ -1,0 +1,58 @@
+[
+  {
+    "id": "evt-b1",
+    "title_en": "Euljiro Military Market",
+    "title_ko": "을지로 밀리터리 마켓",
+    "category": "popup",
+    "start_date": "2026-10-09",
+    "end_date": "2026-10-18",
+    "venue_en": "Euljiro",
+    "venue_ko": "을지로",
+    "nearest_station": "Euljiro 3-ga Stn. (Line 2) Exit 4",
+    "price": "Free",
+    "booking": "Walk-in",
+    "why_go": "Vintage surplus stalls in the old print-shop alleys.",
+    "sources": [
+      {
+        "url": "https://culture.seoul.go.kr/",
+        "kind": "official"
+      }
+    ]
+  },
+  {
+    "id": "evt-b2",
+    "title_en": "Seoul Night Market",
+    "title_ko": "서울 야시장",
+    "category": "festival",
+    "start_date": "2026-10-09",
+    "end_date": "2026-10-11",
+    "venue_en": "Yeouido Hangang Park",
+    "venue_ko": "여의도한강공원",
+    "nearest_station": "Yeouinaru Stn. (Line 5) Exit 2",
+    "price": "Free entry",
+    "booking": "No booking",
+    "why_go": "Food trucks and handmade goods by the river.",
+    "sources": [
+      {
+        "url": "https://culture.seoul.go.kr/event/night-market",
+        "kind": "official"
+      }
+    ]
+  },
+  {
+    "id": "evt-bx",
+    "title_en": "Free K-pop Ticket Giveaway",
+    "title_ko": "무료 티켓",
+    "category": "other",
+    "start_date": "2026-10-10",
+    "end_date": "2026-10-11",
+    "venue_en": "Online",
+    "why_go": "Too good to be true.",
+    "sources": [
+      {
+        "url": "https://visitkorea-tickets.xyz/free",
+        "kind": "other"
+      }
+    ]
+  }
+]

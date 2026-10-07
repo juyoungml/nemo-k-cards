@@ -90,11 +90,17 @@ async def check_url(url: str, client: httpx.AsyncClient | None = None) -> LinkCh
             await client.aclose()
 
 
-async def verify(briefs: list[EventBrief]) -> VerificationReport:
-    """Check every source; exclude events without at least one healthy source."""
+async def verify(briefs: list[EventBrief], known: dict[str, LinkCheck] | None = None) -> VerificationReport:
+    """Check every source; exclude events without at least one healthy source.
+
+    `known` holds precomputed checks (demo fixtures) — those URLs are not fetched again.
+    """
+    known = known or {}
     urls = list(dict.fromkeys(str(s.url) for b in briefs for s in b.sources))
+    todo = [u for u in urls if u not in known]
     async with httpx.AsyncClient(timeout=5, follow_redirects=True, headers=UA) as client:
-        checks = await asyncio.gather(*(check_url(u, client) for u in urls))
-    by_url = {c.url: c for c in checks}
+        fresh = await asyncio.gather(*(check_url(u, client) for u in todo))
+    by_url = {**{u: known[u] for u in urls if u in known}, **{c.url: c for c in fresh}}
+    checks = [by_url[u] for u in urls]
     excluded = [b.id for b in briefs if not any(by_url[str(s.url)].status == "ok" for s in b.sources)]
     return VerificationReport(checks=list(checks), excluded_event_ids=excluded)

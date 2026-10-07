@@ -167,9 +167,12 @@ class Job(BaseModel):
     draft_id: str | None = None
 
 
+Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend
+
+
 class CreateJobRequest(BaseModel):
     prompt: str = Field(min_length=3)
-    scenario: str | None = None  # mock-backend QA hint; ignored here
+    scenario: Scenario | None = None  # DEMO_MODE=fixture only; ignored in live mode
 
 
 class ApproveRequest(BaseModel):
