@@ -2,31 +2,30 @@
 {# Required on event slides (SPEC §6): name EN + 한글, dates, venue + nearest station, price, booking, why-go, source. #}
 {% block content %}
 {% if event %}
-  <div style="display:flex;align-items:flex-end;gap:3cqw">
-    <span class="num">{{ event_no }}</span>
-    <div style="min-width:0">
-      <span class="kicker" data-qa="event.kicker">{{ event.category | upper }} · {{ event.venue_en }}</span>
-      <div class="ttl" style="font-size:7.4cqw" data-qa="event.heading">{{ slide.heading or event.title_en }}</div>
+  {% if until %}<div class="until" data-qa="event.until">Until<b>{{ until }}</b></div>{% endif %}
+  <div class="ev-head">
+    <span class="num">{{ "%02d" | format(event_no) }}</span>
+    <div class="txt">
+      <span class="chip" style="--cat: {{ cat_color }}"><i></i>{{ cat_label }}</span>
+      <div class="title" style="font-size: 64px" data-qa="event.heading">{{ slide.heading or event.title_en }}</div>
       <div class="ko" data-qa="event.title_ko">{{ event.title_ko }}</div>
     </div>
   </div>
-  {% include "_photo.html" %}
-  <dl class="kv" data-qa="event.facts">
-    <dt>When</dt><dd>{{ event.start_date | daterange(event.end_date) }}</dd>
-    {% if event.nearest_station %}<dt>Where</dt><dd>{{ event.nearest_station }}</dd>{% endif %}
-    {% if event.price %}<dt>Price</dt><dd>{{ event.price }}</dd>{% endif %}
-    {% if event.booking %}<dt>Entry</dt><dd>{{ event.booking }}</dd>{% endif %}
-  </dl>
+  <div class="facts" data-qa="event.facts">
+    <div class="f"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span class="k">When</span><span class="v">{{ event.start_date | daterange(event.end_date) }}</span></div>
+    <div class="f"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span class="k">Where</span><span class="v">{{ event.venue_en }}{% if event.nearest_station %} · {{ event.nearest_station }}{% endif %}</span></div>
+    {% if event.price %}<div class="f"><svg viewBox="0 0 24 24"><path d="M4 8h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4Z"/><path d="M10 8v10" stroke-dasharray="2 2"/></svg><span class="k">Price</span><span class="v">{{ event.price }}</span></div>{% endif %}
+    {% if event.booking %}<div class="f"><svg viewBox="0 0 24 24"><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/><path d="M3 21h18M14 12h.01"/></svg><span class="k">Entry</span><span class="v">{{ event.booking }}</span></div>{% endif %}
+  </div>
   {% if badges %}
-  <div class="chips" data-qa="event.access">
-    {% for b in badges %}<span class="chip{% if b.warn %} warn{% endif %}"><i></i>{{ b.text }}</span>{% endfor %}
+  <div class="row" data-qa="event.access">
+    {% for b in badges %}<span class="chip {{ 'warn' if b.warn else 'ok' }}"><i></i>{{ b.text }}</span>{% endfor %}
   </div>
   {% endif %}
-  {% if slide.body or event.why_go %}<div class="sub" style="font-size:3.8cqw" data-qa="event.body">{{ slide.body or event.why_go }}</div>{% endif %}
+  {% if slide.body or event.why_go %}<div class="why" data-qa="event.body">{{ slide.body or event.why_go }}</div>{% endif %}
 {% else %}
-  <span class="kicker">What's on</span>
-  <div class="ttl" style="font-size:8cqw" data-qa="event.heading">{{ slide.heading }}</div>
-  {% include "_photo.html" %}
-  {% if slide.body %}<div class="sub" style="white-space:pre-line" data-qa="event.body">{{ slide.body }}</div>{% endif %}
+  <span class="eyebrow">What's on</span>
+  <div class="title" style="font-size: 64px" data-qa="event.heading">{{ slide.heading }}</div>
+  {% if slide.body %}<div class="lead" style="white-space: pre-line" data-qa="event.body">{{ slide.body }}</div>{% endif %}
 {% endif %}
 {% endblock %}

@@ -9,11 +9,19 @@
 </style>
 </head>
 <body class="theme-{{ theme }} layout-{{ slide.layout }}" style="{{ palette_css }}">
-<div class="slide">
-  {% if theme == "pop" %}<span class="blob b1"></span><span class="blob b2"></span>{% endif %}
+<div class="slide{% if photo %} has-photo{% endif %}">
+  {% if photo %}<div class="bleed"><img src="{{ photo.url }}" alt=""></div>
+  {% if photo.credit %}<span class="credit" data-qa="{{ slide.layout }}.credit">{{ photo.credit }}</span>{% endif %}{% endif %}
+  <header class="top">
+    <span class="mark"></span>
+    <span class="brand">What's On Korea</span>
+    <span class="counter" data-qa="{{ slide.layout }}.page"><b>{{ "%02d" | format(slide.index + 1) }}</b> / {{ "%02d" | format(total) }}</span>
+  </header>
   <div class="pad">{% block content %}{% endblock %}</div>
-  <span class="acct">{{ account }}</span>
-  <span class="pg" data-qa="{{ slide.layout }}.page">{{ slide.index + 1 }} / {{ total }}</span>
+  <footer class="bottom">
+    <span class="acct">{{ account }}</span>
+    {% if slide.index + 1 < total %}<span class="next">Swipe →</span>{% else %}<span>Save · Share</span>{% endif %}
+  </footer>
 </div>
 </body>
 </html>

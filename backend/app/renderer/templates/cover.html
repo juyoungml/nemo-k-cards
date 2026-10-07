@@ -1,7 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
-  <span class="kicker" data-qa="cover.kicker">{{ kicker }}</span>
-  <div class="ttl" data-qa="cover.heading">{{ slide.heading }}</div>
-  {% if slide.body %}<div class="sub" data-qa="cover.body">{{ slide.body }}</div>{% endif %}
-  {% include "_photo.html" %}
+  <div class="cover-head">
+    <div class="txt">
+      <span class="eyebrow" data-qa="cover.kicker">{{ kicker_place }}</span>
+      <div class="title{% if slide.heading | length < 34 %} xl{% endif %}" data-qa="cover.heading">{{ slide.heading }}</div>
+    </div>
+    <div class="cal" data-qa="cover.date">
+      <div class="mo">{{ cal.month }}</div>
+      <div class="d">{{ cal.days }}</div>
+      <div class="w">{{ cal.weekday }}</div>
+    </div>
+  </div>
+  {% if slide.body %}<div class="lead" data-qa="cover.body">{{ slide.body }}</div>{% endif %}
+  {% if preview %}
+  <div class="preview" data-qa="cover.preview">
+    <ul>
+      {% for p in preview %}
+      <li><span class="n">{{ "%02d" | format(p.no) }}</span><span class="t">{{ p.title }}</span>
+        <span class="chip" style="--cat: {{ p.color }}"><i></i>{{ p.category }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 {% endblock %}

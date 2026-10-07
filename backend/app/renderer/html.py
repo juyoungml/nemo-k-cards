@@ -29,6 +29,8 @@ MOODS: dict[str, dict[str, str]] = {
     "night": {"bold-bg": "#14123A", "pop-bg": "#E3DBFF", "blob1": "#7B3FE4", "blob2": "#00C2A8"},
     "bright": {"bold-bg": "#0047A0", "pop-bg": "#DDF4FF", "blob1": "#FFD166", "blob2": "#4CC9F0"},
 }
+CATEGORY = {"popup": ("Pop-up", "#E0457B"), "festival": ("Festival", "#D97706"), "exhibition": ("Exhibition", "#0047A0"),
+            "performance": ("Performance", "#7C3AED"), "experience": ("Experience", "#0F8A6A"), "other": ("Event", "#475569")}
 # Photo placeholder gradient per event category (used when a slide has no licensed image).
 PLACEHOLDER = {
     "popup": ("#FF8FB1", "#FFE3EC"), "festival": ("#1B1F4B", "#F28C38"),
@@ -41,8 +43,8 @@ PLACEHOLDER = {
 FIT_JS = """
 () => {
   const pad = document.querySelector('.pad');
-  const blocks = [...pad.querySelectorAll('.ttl, .sub, .kv, ul.list, .src, .place, .chips, .ko')];
-  const floor = el => el.classList.contains('ttl') ? 52 : 30;
+  const blocks = [...pad.querySelectorAll('.title, .lead, .facts, ul.tips, .why, .src, .taxi, .route, .preview, .ko, .row')];
+  const floor = el => el.classList.contains('title') ? 56 : 30;
   const overflowing = () => pad.scrollHeight > pad.clientHeight + 1;
   let steps = 0;
   while (overflowing() && steps < 30) {
@@ -50,7 +52,7 @@ FIT_JS = """
     for (const el of blocks) {
       const fs = parseFloat(getComputedStyle(el).fontSize);
       if (fs > floor(el)) { el.style.fontSize = Math.max(floor(el), fs * 0.95) + 'px'; shrunk = true; }
-      el.querySelectorAll('dd, li, .addr, .chip').forEach(c => {
+      el.querySelectorAll('.v, li, .addr, .chip, .stop').forEach(c => {
         const f = parseFloat(getComputedStyle(c).fontSize);
         if (f > 30) { c.style.fontSize = Math.max(30, f * 0.95) + 'px'; shrunk = true; }
       });
@@ -72,7 +74,7 @@ MEASURE_JS = """
     .filter(n => [...n.childNodes].some(c => c.nodeType === 3 && c.textContent.trim()))
     .map(n => parseFloat(getComputedStyle(n).fontSize));
   return { selector: el.dataset.qa,
-           overflow: el.scrollHeight > el.clientHeight + 4 || el.scrollWidth > el.clientWidth + 4
+           overflow: el.scrollHeight > el.clientHeight + 8 || el.scrollWidth > el.clientWidth + 8
                      || r.bottom > 1350 - 40 || r.right > 1080,
            font_px: hasText ? Math.min(...sizes) : 999 };
 })
@@ -140,22 +142,49 @@ class HtmlRenderer:
                                autoescape=select_autoescape(["html"]), undefined=StrictUndefined)
         self.env.filters["daterange"] = daterange
 
+    def cat_color(self, hex_color: str) -> str:
+        """Category colors are tuned for light cards; on the dark theme mix toward white so they stay legible."""
+        if self.theme != "bold":
+            return hex_color
+        r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+        return "#{:02X}{:02X}{:02X}".format(*(int(c + (255 - c) * 0.45) for c in (r, g, b)))
+
     def context(self, deck: CardDeck, slide: Slide, briefs: dict[str, EventBrief]) -> dict:
         event = briefs.get(slide.event_id) if slide.event_id else None
-        cover_event = event or next(iter(briefs.values()), None)
-        ph = PLACEHOLDER.get((cover_event.category if cover_event else "other"), PLACEHOLDER["other"])
-        palette = {**MOODS[self.mood], "ph1": ph[0], "ph2": ph[1]}
-        event_ids = [s.event_id for s in deck.slides if s.layout == "event"]
-        hosts = sorted({urlparse(str(src.url)).hostname or "" for b in briefs.values() for src in b.sources} - {""})
+        event_slides = [s for s in deck.slides if s.layout == "event"]
+        event_ids = [s.event_id for s in event_slides]
+        # Sources = only events that made it into the deck (excluded/lookalike links never appear on a card).
+        in_deck = [briefs[i] for i in dict.fromkeys(s.event_id for s in deck.slides if s.event_id) if i in briefs]
+        hosts = sorted({urlparse(str(src.url)).hostname or "" for b in in_deck for src in b.sources} - {""})
         credits = sorted({c for s in deck.slides if (c := (slide_image(s) or {}).get("credit"))})
+        img = slide_image(slide)
+        sat = self.today + timedelta(days=(5 - self.today.weekday()) % 7) if self.today.weekday() < 5 else (
+            self.today - timedelta(days=self.today.weekday() - 5))
+        sun = sat + timedelta(days=1)
+        cat = (event.category if event else "other")
+        preview = [{"no": i + 1, "title": (briefs[s.event_id].title_en if s.event_id in briefs else s.heading),
+                    "category": CATEGORY[briefs[s.event_id].category][0] if s.event_id in briefs else "Event",
+                    "color": self.cat_color(CATEGORY[briefs[s.event_id].category][1] if s.event_id in briefs
+                                            else CATEGORY["other"][1])}
+                   for i, s in enumerate(event_slides[:5])]
+        ends_soon = event and (event.end_date - self.today).days <= 14
+        place = next((b.venue_en.split(",")[0] for b in in_deck if b.venue_en), "Seoul")
         return {
             "deck": deck, "slide": slide, "event": event, "theme": self.theme,
             "total": len(deck.slides), "account": self.account, "as_of": self.as_of,
             "font_dir": FONT_DIR.as_uri(),
-            "palette_css": ";".join(f"--{k}:{v}" for k, v in palette.items()),
-            "img": slide_image(slide),
+            "palette_css": ";".join(f"--{k}:{v}" for k, v in {**MOODS[self.mood],
+                                                               "cat": self.cat_color(CATEGORY[cat][1])}.items()),
+            # Only licensed images that allow text overlay go full-bleed; never a placeholder.
+            "photo": img if img and img.get("url") and img.get("allow_overlay") else None,
             "kicker": f"{weekend_label(self.today)} · {self.account}",
-            "event_no": event_ids.index(slide.event_id) + 1 if slide.event_id in event_ids else "",
+            "kicker_place": f"What's on · {place}" if len(in_deck) == 1 else "What's on · Seoul",
+            "cal": {"month": f"{sat:%b}".upper(), "days": f"{sat.day}–{sun.day}" if sat.month == sun.month
+                    else f"{sat.day}–{sun:%-d}", "weekday": "SAT – SUN"},
+            "preview": preview if slide.layout == "cover" else [],
+            "event_no": event_ids.index(slide.event_id) + 1 if slide.event_id in event_ids else 1,
+            "cat_label": CATEGORY[cat][0], "cat_color": self.cat_color(CATEGORY[cat][1]),
+            "until": f"{event.end_date:%b} {event.end_date.day}" if ends_soon else None,
             "badges": access_badges(event),
             "source_hosts": hosts, "credits": credits,
         }

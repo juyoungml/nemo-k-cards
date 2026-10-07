@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {# body: one tip per line #}
 {% block content %}
-  <span class="kicker">Know before you go</span>
-  <div class="ttl" style="font-size:8.5cqw" data-qa="tips.heading">{{ slide.heading }}</div>
-  <ul class="list" data-qa="tips.body">
+  <span class="eyebrow">Know before you go</span>
+  <div class="title" data-qa="tips.heading">{{ slide.heading }}</div>
+  <ul class="tips" data-qa="tips.body">
     {% for line in slide.body.split("\n") if line.strip() %}
-    <li><span class="n">{{ "%02d" | format(loop.index) }}</span><span>{{ line.strip() }}</span></li>
+    <li><span class="n">{{ loop.index }}</span><span>{{ line.strip().lstrip("•-·0123456789. ") }}</span></li>
     {% endfor %}
   </ul>
 {% endblock %}

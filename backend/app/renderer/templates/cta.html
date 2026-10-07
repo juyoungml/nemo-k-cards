@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
-  <span class="kicker">Save this for the weekend</span>
-  <div class="ttl" style="font-size:8.5cqw" data-qa="cta.heading">{{ slide.heading }}</div>
-  <span class="stamp" data-qa="cta.verified">Verified {{ as_of }}</span>
-  {% if slide.body %}<div class="sub" data-qa="cta.body">{{ slide.body }}</div>{% endif %}
-  <div class="src" data-qa="cta.sources">
-    Sources: {{ source_hosts | join(" · ") }}<br>
-    {% if credits %}Photos: {{ credits | join(" · ") }}<br>{% endif %}
-    Schedules can change. Check the official page before you go.
+  <div class="save">
+    <svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z"/></svg>
+    <div class="title" data-qa="cta.heading">{{ slide.heading }}</div>
   </div>
-  <div class="follow">Follow <b>{{ account }}</b> for verified events in Korea.</div>
+  {% if slide.body %}<div class="lead" data-qa="cta.body">{{ slide.body }}</div>{% endif %}
+  <span class="stamp" data-qa="cta.verified">✓ Links checked {{ as_of }}</span>
+  <div class="src" data-qa="cta.sources">
+    <span>Sources: {{ source_hosts | join(" · ") }}</span>
+    {% if credits %}<span>Photos: {{ credits | join(" · ") }}</span>{% endif %}
+    <span>Schedules can change. Check the official page before you go.</span>
+  </div>
 {% endblock %}
