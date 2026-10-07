@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { LoadState, PageHeader, Panel } from "@/components/page";
 import { PublishProgress } from "@/components/publish-progress";
+import { PublishToast } from "@/components/publish-toast";
 import { ReviewActions } from "@/components/review-actions";
 import { SlidePreview } from "@/components/slide-preview";
 import { JobStatusBadge, StatusBadge, type Tone } from "@/components/status-badge";
@@ -124,6 +125,8 @@ export function ReviewDetailView({ id }: { id: string }) {
         )}
         <JobStatusBadge status={job.status} mock={!!job.published_url?.includes("/p/MOCK")} />
       </PageHeader>
+
+      <PublishToast job={job} />
 
       <div className="flex items-start gap-5">
         {deck && deck.slides.length > 0 && (

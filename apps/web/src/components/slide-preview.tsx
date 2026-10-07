@@ -47,7 +47,7 @@ export function SlidePreview({
           </div>
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {slides.map((s, i) => (
           <button
             key={s.index}
@@ -55,7 +55,7 @@ export function SlidePreview({
             aria-label={`Slide ${i + 1}: ${s.heading}`}
             aria-current={i === current}
             className={cn(
-              "h-[60px] w-12 overflow-hidden rounded-md border bg-card text-[10px] text-muted-foreground transition-shadow",
+              "h-[55px] w-11 overflow-hidden rounded-md border bg-card text-[10px] text-muted-foreground transition-shadow",
               i === current ? "border-2 border-primary ring-2 ring-primary/20" : "hover:border-muted-foreground",
             )}
           >
