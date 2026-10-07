@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
+import { useState } from "react";
 
 import { LoadState, PageHeader, Panel } from "@/components/page";
 import { PublishProgress } from "@/components/publish-progress";
@@ -50,6 +51,51 @@ function linkBadge(check: LinkCheck | undefined, excluded: boolean) {
   return <StatusBadge tone={tone}>{excluded ? `Excluded · ${label}` : label}</StatusBadge>;
 }
 
+/** Blocking issues first and always open; warnings collapsed. Clicking an issue opens its slide. */
+function IssueList({ issues, onJump }: { issues: Issue[]; onJump: (slide: number) => void }) {
+  const blocks = issues.filter((i) => i.severity === "block");
+  const warns = issues.filter((i) => i.severity === "warn");
+  const item = (i: Issue, n: number) => {
+    const body = (
+      <>
+        <span className="font-semibold">
+          {i.slide_index != null ? `Slide ${i.slide_index + 1}` : "Deck"} · {i.category}
+        </span>{" "}
+        — {i.message}
+      </>
+    );
+    const cls = cn(
+      "block w-full rounded-lg px-3 py-2.5 text-left text-xs",
+      i.severity === "block" ? "bg-danger-soft text-destructive" : "bg-warning-soft text-warning",
+    );
+    return (
+      <li key={n}>
+        {i.slide_index != null ? (
+          <button type="button" className={cn(cls, "hover:ring-1 hover:ring-current")} onClick={() => onJump(i.slide_index!)} title="Show this slide">
+            {body}
+          </button>
+        ) : (
+          <div className={cls}>{body}</div>
+        )}
+      </li>
+    );
+  };
+  return (
+    <div className="mt-3 space-y-3">
+      {blocks.length > 0 && <ul className="space-y-2">{blocks.map(item)}</ul>}
+      {warns.length > 0 && (
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+            {warns.length} warning{warns.length > 1 ? "s" : ""} (advisory)
+          </summary>
+          <ul className="mt-2 space-y-2">{warns.map(item)}</ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function reviewSummary(job: Job) {
   if (job.status !== "READY_FOR_REVIEW") return job.status.toLowerCase().replaceAll("_", " ");
   const blocks = job.issues.filter((i) => i.severity === "block").length;
@@ -60,6 +106,7 @@ function reviewSummary(job: Job) {
 
 export function ReviewDetailView({ id }: { id: string }) {
   const { data: job, error, setData } = useApi(() => api.getJob(id), [id], 1000);
+  const [slide, setSlide] = useState(0);
   if (!job) return <LoadState error={error} />;
   const deck = job.deck;
   const checksById = new Map(job.verification?.checks.map((c) => [c.url, c]));
@@ -79,29 +126,16 @@ export function ReviewDetailView({ id }: { id: string }) {
       </PageHeader>
 
       <div className="flex items-start gap-5">
-        {deck && deck.slides.length > 0 && <SlidePreview slides={deck.slides} images={job.slide_urls?.map(assetUrl)} />}
+        {deck && deck.slides.length > 0 && (
+          <SlidePreview slides={deck.slides} images={job.slide_urls?.map(assetUrl)} current={slide} onSelect={setSlide} />
+        )}
 
         <div className="min-w-0 flex-1 space-y-4">
           <PublishProgress job={job} />
 
           <Panel title="Automated checks">
             <div className="flex flex-wrap gap-2">{CHECKS.map((c) => checkBadge(job, c.category, c.label))}</div>
-            {job.issues.length > 0 && (
-              <ul className="mt-3 space-y-2">
-                {job.issues.map((i, n) => (
-                  <li
-                    key={n}
-                    className={cn(
-                      "rounded-lg px-3 py-2.5 text-xs",
-                      i.severity === "block" ? "bg-danger-soft text-destructive" : "bg-warning-soft text-warning",
-                    )}
-                  >
-                    {i.severity} · {i.slide_index != null && `slide ${i.slide_index + 1} · `}
-                    {i.category} — {i.message}
-                  </li>
-                ))}
-              </ul>
-            )}
+            {job.issues.length > 0 && <IssueList issues={job.issues} onJump={setSlide} />}
           </Panel>
 
           {job.briefs.length > 0 && (
