@@ -1,7 +1,7 @@
-# What's On Korea — 해커톤 스펙 v0.2
+# What's On Korea — 해커톤 스펙 v0.3
 
 > Fastcampus × NVIDIA Agentic AI Hackathon
-> v0.1 초안을 인터뷰로 구체화한 버전입니다. 기획 배경은 v0.1과 같고, 이 문서는 **무엇을 어떻게 만드는지**에 집중합니다.
+> v0.1 초안을 인터뷰로 구체화한 버전입니다. v0.3: 기획형 사용자를 위한 **Brainstorm 모드**(§4-1)를 추가했습니다. 기획 배경은 v0.1과 같고, 이 문서는 **무엇을 어떻게 만드는지**에 집중합니다.
 
 ---
 
@@ -27,12 +27,16 @@
 | 게시 | Instagram Graph API 실제 게시 | 사람이 Admin에서 승인한 뒤에만, 백엔드가 수행 |
 | 데이터 소스 | 웹 검색, TourAPI, 서울시 문화행사 API, Kakao/Naver 지도, k-skill | 빠르게 붙는 것부터 |
 | Admin 메트릭 | `@whatsonkorea` IG Insights 실데이터 + 나머지는 seed mock | |
+| 생성 모드 | **Quick**(딸깍 E2E) / **Brainstorm**(에이전트와 같이 기획) | New Job 화면에서 선택. 두 모드 모두 같은 검증·검수 파이프라인과 사람 승인을 거침 |
+| Brainstorm 입력 | 행사 URL + 자유 메모 (P0), 포스터 이미지 (P1) | 포스터는 비전 모델로 읽을 수 있지만 업로드·저장 처리가 필요해 후순위 |
 
 ---
 
 ## 2. 사용자 & 핵심 시나리오
 
-- **1차 사용자 (운영자)**: 프롬프트 한 줄로 카드뉴스 초안을 받고, 검수 리포트를 확인한 뒤 승인/반려합니다.
+- **1차 사용자 (운영자)**: 검수 리포트를 확인한 뒤 승인/반려합니다. 두 유형이 있습니다.
+  - **딸깍형 (Quick)**: "이번 주말 갈 만한 거"처럼 주제만 주고 결과를 받고 싶은 사람
+  - **기획형 (Brainstorm)**: 홍보하고 싶은 특정 행사나 전하고 싶은 포인트가 있어서, 앵글·타깃·구성을 같이 다듬고 싶은 사람
 - **2차 사용자 (외국인 팔로워)**: 저장해 두고 바로 참고할 수 있는 영어 카드뉴스를 받습니다.
 
 **Happy path**
@@ -41,6 +45,13 @@
 2. 에이전트가 조사·검증·작성 → 렌더 → 검수 → `READY_FOR_REVIEW`
 3. 운영자가 Review 화면에서 슬라이드, 출처, 링크 상태를 확인 → **Approve & Publish**
 4. 백엔드가 Graph API로 캐러셀 게시 → 게시 URL과 메트릭 수집 시작
+
+**Brainstorm path**
+
+1. 운영자가 행사 URL과 메모 입력: "망원 야시장 홍보하고 싶어요. 로컬 분위기 + 먹거리 위주로"
+2. host가 URL 검증 후 페이지를 가져오고, `planner`가 사실 추출 + 앵글 3개 + 아웃라인을 기획 보드에 제안
+3. 운영자가 채팅이나 보드 직접 편집으로 앵글·타깃·톤·슬라이드를 다듬음
+4. **Generate** → Research를 건너뛰고 Verify부터 같은 파이프라인 진행 → Review에서 승인
 
 ---
 
@@ -60,7 +71,8 @@
                                ▼
 ┌──────── OpenShell Sandbox (untrusted, per-stage) ────────┐
 │  Claude Code (headless)                                   │
-│   ├─ .claude/agents: researcher / copywriter / reviewer   │
+│   ├─ .claude/agents: researcher / planner / copywriter /  │
+│   │                  reviewer                              │
 │   ├─ .claude/skills: event-sources, k-skill …             │
 │   └─ stdout → JSON (pydantic 스키마로 검증)                │
 │  Network: allowlist (GET 위주) · graph.facebook.com 쓰기 차단 │
@@ -92,6 +104,24 @@
 **Job 상태**: `QUEUED → RESEARCHING → VERIFYING → WRITING → RENDERING → QA → REVIEWING → READY_FOR_REVIEW | REJECTED → PUBLISHING → PUBLISHED`
 
 진행 상황은 SSE(`GET /jobs/{id}/events`)로 Admin에 실시간 전달합니다.
+
+### 4-1. Brainstorm 모드
+
+기획형 사용자를 위한 사전 단계입니다. 결과물은 **Draft**(기획 보드)이고, Generate하면 Job으로 전환되어 위 파이프라인 2번(Verify)부터 진행합니다.
+
+| # | Step | 실행 위치 | 입력 → 출력 |
+|---|---|---|---|
+| B1 | **Fetch** | host | 메시지 속 URL → `link_checker` 검증 → 통과한 페이지 본문을 텍스트로 추출해 `/sandbox/input`에 전달 |
+| B2 | **Plan** | sandbox · `planner` | Draft JSON + 새 메시지 + 페이지 텍스트 → `DraftUpdate` (답장 + 보드 변경분) |
+| B3 | **Edit** | Admin | 운영자가 보드를 직접 수정 (앵글 선택, 타깃·톤, 슬라이드 순서·문구) |
+| B4 | **Generate** | host | Draft → Job 생성. `facts` → `EventBrief`, 앵글·타깃·톤·아웃라인 → copywriter 제약 조건 |
+
+**원칙**
+
+- **매 턴 stateless**: 채팅 한 턴마다 Draft 전체를 JSON으로 넘기고 샌드박스를 새로 만들었다 버립니다. 대화 상태는 host(DB)에만 있습니다.
+- **사용자 URL은 host가 가져옴**: 사용자가 준 URL은 도메인이 제각각이라, 샌드박스 allowlist를 넓히는 대신 host가 검증 후 본문만 넘깁니다. 페이지에 숨은 지시문도 데이터로만 전달됩니다(§7 인젝션 케이스와 같은 원칙).
+- **미확인 정보는 표시만**: 출처에서 확인되지 않은 정보(예: 메뉴 가격)는 `verified: false`로 보드에 노란색으로 표시합니다. copywriter는 이를 사실로 단정해 쓰지 않고, reviewer가 다시 확인합니다.
+- **Generate 후에도 검증은 그대로**: Verify(링크 재확인) → Copy → Render → QA → Review → 사람 승인. 기획 모드라고 검수를 생략하지 않습니다.
 
 ---
 
@@ -152,6 +182,45 @@ class Issue(BaseModel):
 class ReviewVerdict(BaseModel):
     verdict: Literal["pass", "fail"]
     issues: list[Issue]
+
+# --- Brainstorm (§4-1)
+class Fact(BaseModel):
+    key: Literal["event", "dates", "venue", "price", "booking", "other"]
+    value: str
+    verified: bool                     # 출처에서 확인됐는지
+    source_url: str | None
+
+class Angle(BaseModel):
+    id: str
+    title: str                         # "Eat like a local by the Han River"
+    hook: str                          # "Food-first · first-timers · what to order"
+
+class OutlineItem(BaseModel):
+    layout: Literal["cover", "event", "tips", "map", "cta"]
+    heading: str
+    updated_from_chat: bool = False
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "agent"]
+    text: str
+    urls: list[str] = []
+
+class Draft(BaseModel):
+    id: str
+    messages: list[ChatMessage]
+    facts: list[Fact]
+    angles: list[Angle]                # 보통 3개
+    selected_angle_id: str | None
+    targets: list[str]                 # "First-time visitors" …
+    tones: list[str]                   # "Friendly explainer" …
+    outline: list[OutlineItem]         # 6~8개
+    job_id: str | None                 # Generate 후 연결
+
+class DraftUpdate(BaseModel):         # planner 출력
+    reply: str
+    facts: list[Fact] | None = None    # None = 변경 없음
+    angles: list[Angle] | None = None
+    outline: list[OutlineItem] | None = None
 ```
 
 ---
@@ -229,7 +298,8 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 | 화면 | 구성 요소 |
 |---|---|
 | **Dashboard** | SNS/Channel 리스트, 채널별 followers·reach·views (IG Insights 실데이터 + mock), 최근 카드뉴스와 상태 뱃지 |
-| **New Job** | 프롬프트 입력, 프리셋("This weekend in Seoul", "Pop-ups this week"), 파이프라인 stepper(실시간 SSE), 단계별 로그 |
+| **New Job · Quick** | 모드 선택(Quick / Brainstorm), 프롬프트 입력, 프리셋("This weekend in Seoul", "Pop-ups this week"), 파이프라인 stepper(실시간 SSE), 단계별 로그 |
+| **New Job · Brainstorm** | 왼쪽 채팅(URL 첨부, 메모, 포스터 P1) + 오른쪽 기획 보드: ① Event facts(검증 배지, 미확인 노란색) ② 앵글 3개 + 타깃·톤 ③ 슬라이드 아웃라인(채팅으로 바뀐 항목 표시), Save draft / **Generate card news** |
 | **Review** | 슬라이드 캐러셀 미리보기, 캡션 편집, 행사별 출처·링크 상태 표, QA/Review issues(block/warn), **Approve & Publish** / Reject / Regenerate |
 | **Policy Log** | OpenShell 차단 이벤트 타임라인 (시간, sandbox, binary, host, method/path, 결과), 데모 하이라이트 |
 
@@ -246,6 +316,10 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 | POST | `/jobs/{id}/reject` | 반려 (사유) |
 | GET | `/channels`, `/metrics` | Dashboard |
 | GET | `/policy-events` | OpenShell 차단 로그 |
+| POST | `/drafts` | Brainstorm 초안 생성 → `Draft` |
+| GET / PATCH | `/drafts/{id}` | 조회 / 보드 직접 편집 (앵글 선택, 타깃·톤, 아웃라인) |
+| POST | `/drafts/{id}/messages` | `{text, urls}` → Fetch → `planner` → 갱신된 `Draft` (SSE로 진행 상황) |
+| POST | `/drafts/{id}/generate` | Draft → Job 생성, Verify부터 파이프라인 시작 → `Job` |
 
 ---
 
@@ -253,10 +327,10 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 
 | 역할 | 담당 | 첫 마일스톤 |
 |---|---|---|
-| A. Agent | `agent/` 서브에이전트·스킬·프롬프트, JSON 스키마 출력 | `researcher`가 `EventBrief[]`를 안정적으로 출력 |
+| A. Agent | `agent/` 서브에이전트·스킬·프롬프트, JSON 스키마 출력 | `researcher`가 `EventBrief[]`를, `planner`가 `DraftUpdate`를 안정적으로 출력 |
 | B. Backend | FastAPI, 파이프라인, link checker, Graph API | `/jobs` happy path 완주 (mock agent) |
 | C. Render & QA | HTML 템플릿, Playwright, Visual QA | `CardDeck` fixture → PNG 7장 + QAReport |
-| D. Frontend & Policy | Figma → Admin, OpenShell 정책·Policy Log | Review 화면 + 무단 DELETE 차단 시연 |
+| D. Frontend & Policy | Figma → Admin, OpenShell 정책·Policy Log | Review·Brainstorm 화면 + 무단 DELETE 차단 시연 |
 
 ---
 
@@ -275,6 +349,7 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 ## 15. 성공 기준
 
 - [ ] 프롬프트 한 줄로 영어 카드뉴스 6~8장이 생성되고, 모든 행사에 검증된 출처가 붙는다
+- [ ] 행사 URL + 메모로 Brainstorm을 시작해 앵글을 고르고, Generate까지 이어진다
 - [ ] 차단 케이스 5종(링크 / 민감 표현 / 글자 깨짐 / PII 유출 / 무단 게시·삭제)이 데모에서 재현되고 막힌다
 - [ ] 게시는 오직 사람 승인 → 백엔드 경로로만 일어난다 (OpenShell 로그로 증명)
 - [ ] `@whatsonkorea`에 실제 카드뉴스가 게시되어 있다
