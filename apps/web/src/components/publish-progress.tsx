@@ -70,8 +70,9 @@ export function PublishProgress({ job }: { job: Job }) {
 
   return (
     <section
+      id="publish-progress"
       className={cn(
-        "space-y-4 rounded-xl border bg-card p-5",
+        "scroll-mt-6 space-y-4 rounded-xl border bg-card p-5",
         failed && "border-destructive/40",
         finished && !dryrun && p?.mode === "graph" && "border-success/40",
       )}
