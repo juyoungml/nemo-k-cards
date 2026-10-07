@@ -1,0 +1,8 @@
+{
+  "fail_at": "render",
+  "log": [
+    "slide-00.jpg … slide-03.jpg",
+    "TimeoutError: page.screenshot exceeded 30000ms"
+  ],
+  "error": "Renderer timed out after 30s (Playwright: page.screenshot) — retry the job."
+}

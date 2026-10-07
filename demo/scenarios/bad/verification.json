@@ -1,0 +1,22 @@
+{
+  "checks": [
+    {
+      "url": "https://culture.seoul.go.kr/",
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "url": "https://culture.seoul.go.kr/event/night-market",
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "url": "https://visitkorea-tickets.xyz/free",
+      "status": "suspicious",
+      "reason": "lookalike of visitkorea.or.kr"
+    }
+  ],
+  "excluded_event_ids": [
+    "evt-bx"
+  ]
+}

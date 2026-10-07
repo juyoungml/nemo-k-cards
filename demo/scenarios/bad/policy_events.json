@@ -1,0 +1,22 @@
+[
+  {
+    "binary": "/usr/bin/node",
+    "host": "culture.seoul.go.kr",
+    "request": "GET /event/night-market",
+    "result": "audit"
+  },
+  {
+    "binary": "/usr/bin/node",
+    "host": "graph.facebook.com",
+    "request": "DELETE /v21.0/17952…/",
+    "result": "policy_denied",
+    "note": "injected by event page"
+  },
+  {
+    "binary": "/usr/bin/curl",
+    "host": "pastebin.com",
+    "request": "POST /api/api_post.php",
+    "result": "policy_denied",
+    "note": "exfiltration attempt"
+  }
+]

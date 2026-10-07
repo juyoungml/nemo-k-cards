@@ -1,6 +1,8 @@
 """Runs one job through SPEC §4: research -> verify -> copy -> render -> QA -> review (BACKEND §5).
 
 DEMO_MODE=fixture replays demo/scenarios/<name>/ for the agent stages (no API cost) while render/QA run for real.
+Scenarios match the Admin mock backend: good (READY_FOR_REVIEW), bad (REJECTED), fail (FAILED); Brainstorm jobs
+replay demo/scenarios/brainstorm/. Files a scenario doesn't provide fall back to good/.
 DEMO_MODE=live calls the Claude Code subagents through the configured runner.
 """
 
@@ -10,7 +12,7 @@ import logging
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from app import store
+from app import drafts, store
 from app.config import settings
 from app.pipeline.agent_runner import run_stage
 from app.renderer.html import HtmlRenderer
@@ -18,10 +20,12 @@ from app.schemas import (
     CardDeck,
     Draft,
     EventBrief,
+    Issue,
     Job,
     JobStatus,
     LogLine,
     PipelineStep,
+    PolicyEvent,
     ReviewVerdict,
     VerificationReport,
 )
@@ -87,22 +91,33 @@ class Run:
 
 
 def _scenario(name: str = "good"):
-    d = settings.scenarios_dir / name
+    dirs = [settings.scenarios_dir / name, settings.scenarios_dir / "good"]
 
     def load(fname: str):
-        p = d / fname
-        return json.loads(p.read_text()) if p.exists() else None
+        for d in dirs:
+            if (p := d / fname).exists():
+                return json.loads(p.read_text())
+        return None
     return load
 
 
-async def run_job(job_id: str, draft: Draft | None = None) -> None:
+async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good") -> None:
     job = store.get_job(job_id)
     if not job:
         return
     r = Run(job)
-    fx = _scenario()
+    fx = _scenario("brainstorm" if draft else scenario)
     live = settings.demo_mode == "live"
+    fail = None if live else fx("fail.json")
     current = "research"
+
+    def fixture_fail(stage: str) -> None:
+        """fail scenario: stop the run at `fail_at` the way a real stage error would."""
+        if fail and fail.get("fail_at") == stage:
+            for line in fail.get("log", []):
+                r.log(stage, line, "warn")
+            raise RuntimeError(fail["error"])
+
     try:
         # 1. Research (sandbox) ------------------------------------------------------------
         if job.source == "quick":
@@ -118,7 +133,9 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
                     list[EventBrief])
             else:
                 await asyncio.sleep(FIXTURE_DELAY)
+                fixture_fail("research")
                 briefs = [EventBrief.model_validate(b) for b in fx("briefs.json")]
+                _replay_policy_events(r, fx("policy_events.json") or [])
             job.briefs = briefs
             n_src = sum(len(b.sources) for b in briefs)
             r.log("research", f"{len(briefs)} EventBrief validated (schema ok)")
@@ -127,9 +144,18 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
         # 2. Verify (host) -------------------------------------------------------------------
         current = "verify"
         r.step("verify", "running")
+        fixture_fail("verify")
+        host_issues: list[Issue] = []  # board problems found on the host; block approval like QA issues
+        if draft:
+            # Brainstorm skips Research: the board's facts become the brief, so its sources get the same check.
+            brief, problems = drafts.brief_from_draft(draft, datetime.now(KST).date())
+            job.briefs = [brief] if brief else []
+            for p in problems:
+                r.log("verify", p, "warn")
+                host_issues.append(Issue(severity="block", category="fact", message=f"Brainstorm board: {p}."))
         fixture_ver = None if live else fx("verification.json")
-        report = (VerificationReport.model_validate(fixture_ver) if fixture_ver
-                  else await link_checker.verify(job.briefs))
+        known = {c.url: c for c in VerificationReport.model_validate(fixture_ver).checks} if fixture_ver else None
+        report = await link_checker.verify(job.briefs, known)
         job.verification = report
         for c in report.checks:
             if c.status != "ok":
@@ -145,10 +171,19 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
                 if str(src.url) in ok_urls:
                     src.fetched_at = datetime.now(UTC)
         included = [b for b in job.briefs if b.id not in report.excluded_event_ids]
+        if draft:
+            draft, demoted = drafts.demote_unverified(draft, ok_urls)
+            if demoted:
+                r.log("verify", f"{demoted} board fact(s) marked unverified: source failed the link check", "warn")
+            if job.briefs and not included:
+                host_issues.append(Issue(severity="block", category="link", message=(
+                    "Every source for this event failed link verification — add the official event page in "
+                    "Brainstorm and generate again.")))
 
         # 3. Outline & copy (sandbox) ----------------------------------------------------------
         current = "copy"
         r.step("copy", "running")
+        fixture_fail("copy")
         if live:
             constraints = draft.model_dump(include={"facts", "angles", "selected_angle_id", "targets", "tones",
                                                     "outline"}) if draft else None
@@ -161,7 +196,8 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
                 CardDeck)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
-            deck = _deck_from_draft(draft) if draft else CardDeck.model_validate(fx("deck.json"))
+            deck = (_deck_from_draft(draft, included[0].id if included else None) if draft
+                    else CardDeck.model_validate(fx("deck.json")))
         deck.job_id = job.id
         job.deck = deck
         n_tags = len(visual_qa.HASHTAG.findall(deck.caption))
@@ -171,6 +207,7 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
         # 4. Render (host) ------------------------------------------------------------------
         current = "render"
         r.step("render", "running")
+        fixture_fail("render")
         out_dir = settings.output_dir / job.id
         rendered = await HtmlRenderer(theme=settings.theme).render(deck, out_dir, included)
         job.slide_urls = [f"/assets/{job.id}/{s.path.name}" for s in rendered]
@@ -180,6 +217,7 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
         # 5. Visual QA (host) ------------------------------------------------------------------
         current = "qa"
         r.step("qa", "running")
+        fixture_fail("qa")
         secrets = tuple(s for s in (settings.ig_access_token,) if s)
         qa = visual_qa.run_qa(rendered, deck, secrets)
         nb = sum(i.severity == "block" for i in qa.issues)
@@ -190,6 +228,7 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
         # 6. Final review (sandbox) -------------------------------------------------------------
         current = "review"
         r.step("review", "running")
+        fixture_fail("review")
         if live:
             verdict = await run_stage(
                 "reviewer",
@@ -199,6 +238,7 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
                 {"deck": deck.model_dump(mode="json"), "briefs": [b.model_dump(mode="json") for b in included],
                  "qa_issues": [i.model_dump() for i in qa.issues],
                  "slide_paths": [str(s.path) for s in rendered],
+                 "board_facts": [f.model_dump() for f in draft.facts] if draft else None,
                  "sensitive_topics_yaml": (settings.agent_dir.parent / "policies/content/sensitive_topics.yaml")
                  .read_text(encoding="utf-8"),
                  "today": datetime.now(KST).date().isoformat()},
@@ -210,7 +250,7 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
               "info" if verdict.verdict == "pass" else "warn")
         r.step("review", "done", f"{verdict.verdict} · {len(verdict.issues)} issue(s)")
 
-        job.issues = qa.issues + verdict.issues
+        job.issues = host_issues + qa.issues + verdict.issues
         blocked = verdict.verdict == "fail" or any(i.severity == "block" for i in job.issues)
         job.status = JobStatus.REJECTED if blocked else JobStatus.READY_FOR_REVIEW
         r.save()
@@ -221,13 +261,28 @@ async def run_job(job_id: str, draft: Draft | None = None) -> None:
         r.step(current, "failed", str(e)[:120])
 
 
-def _deck_from_draft(draft: Draft) -> CardDeck:
+def _replay_policy_events(r: Run, events: list[dict]) -> None:
+    """Fixture stand-in for `openshell logs`: what the sandbox tried and the policy denied, tied to this job."""
+    if not events:
+        return
+    now = datetime.now(KST).strftime("%H:%M:%S")
+    rows = [PolicyEvent.model_validate({"time": now, **e, "sandbox": f"agent-{r.job.id}", "job_id": r.job.id})
+            for e in events]
+    store.add_policy_events(rows)
+    for e in rows:
+        r.log("research", f"{e.request.split()[0]} {e.host} → {e.result} (OpenShell)",
+              "warn" if e.result.endswith("denied") else "info")
+
+
+def _deck_from_draft(draft: Draft, event_id: str | None = None) -> CardDeck:
     """Fixture copywriter for Brainstorm: outline headings + verified facts."""
     angle = next((a for a in draft.angles if a.id == draft.selected_angle_id), None)
     title = angle.title if angle else (draft.outline[0].heading if draft.outline else "What's on in Korea")
     facts = "\n".join(f.value for f in draft.facts if f.verified)
     slides = [{"index": i, "layout": o.layout, "heading": o.heading,
-               "body": facts if o.layout == "event" and i == 1 else ""} for i, o in enumerate(draft.outline[:8])]
+               "body": facts if o.layout == "event" and i == 1 else "",
+               "event_id": event_id if o.layout == "event" and i == 1 else None}
+              for i, o in enumerate(draft.outline[:8])]
     while len(slides) < 6:
         slides.insert(-1, {"index": 0, "layout": "tips", "heading": "Good to know", "body": ""})
     for i, s in enumerate(slides):

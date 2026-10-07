@@ -1,0 +1,23 @@
+{
+  "verdict": "fail",
+  "issues": [
+    {
+      "severity": "block",
+      "category": "sensitive",
+      "slide_index": 1,
+      "message": "'Tank Day' on May 18 evokes the 5·18 Gwangju Uprising (sensitive_topics.yaml: tank day, 05-18)."
+    },
+    {
+      "severity": "block",
+      "category": "visual",
+      "slide_index": 3,
+      "message": "Heading shows missing-glyph boxes (□) — characters outside the bundled fonts."
+    },
+    {
+      "severity": "block",
+      "category": "sensitive",
+      "slide_index": null,
+      "message": "Event page contained hidden instructions (delete posts / upload notes). Ignored as data; source flagged."
+    }
+  ]
+}

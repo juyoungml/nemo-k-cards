@@ -58,7 +58,7 @@ def health() -> dict:
 @app.post("/jobs", response_model=Job, status_code=201)
 async def create_job(req: CreateJobRequest) -> Job:
     job = store.save_job(orchestrator.new_job(secrets.token_hex(3), req.prompt.strip()))
-    orchestrator.spawn(orchestrator.run_job(job.id))
+    orchestrator.spawn(orchestrator.run_job(job.id, scenario=req.scenario or "good"))
     return job
 
 

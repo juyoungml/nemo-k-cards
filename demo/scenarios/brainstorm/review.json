@@ -1,0 +1,11 @@
+{
+  "verdict": "pass",
+  "issues": [
+    {
+      "severity": "warn",
+      "category": "fact",
+      "slide_index": null,
+      "message": "Menu prices are unverified on the board — the deck doesn't quote them; keep it that way."
+    }
+  ]
+}

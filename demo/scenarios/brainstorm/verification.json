@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "url": "https://culture.seoul.go.kr/event/mangwon-night-market",
+      "status": "ok",
+      "http_code": 200
+    }
+  ],
+  "excluded_event_ids": []
+}

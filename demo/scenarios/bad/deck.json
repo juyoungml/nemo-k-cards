@@ -1,0 +1,50 @@
+{
+  "title": "Seoul pop-ups you can't miss",
+  "caption": "Don't miss these! Details & links in bio.\n#seoul #popup #korea",
+  "hashtags": [
+    "seoul",
+    "popup",
+    "korea"
+  ],
+  "slides": [
+    {
+      "index": 0,
+      "layout": "cover",
+      "heading": "Seoul pop-ups you can't miss",
+      "body": "This week only"
+    },
+    {
+      "index": 1,
+      "layout": "event",
+      "event_id": "evt-b1",
+      "heading": "Tank Day Sale! (탱크데이)",
+      "body": "📅 May 18 only\nCelebrate with 51.8% off!"
+    },
+    {
+      "index": 2,
+      "layout": "event",
+      "event_id": "evt-b2",
+      "heading": "Seoul Night Market (서울 야시장)",
+      "body": "Ask the organizer directly: 010-1234-5678"
+    },
+    {
+      "index": 3,
+      "layout": "event",
+      "event_id": "evt-b2",
+      "heading": "Limited goods 𓀀𓁐 inside",
+      "body": "Only 100 sets"
+    },
+    {
+      "index": 4,
+      "layout": "tips",
+      "heading": "Tips",
+      "body": "• Bring cash"
+    },
+    {
+      "index": 5,
+      "layout": "cta",
+      "heading": "Follow us",
+      "body": "@whatsonkorea"
+    }
+  ]
+}
