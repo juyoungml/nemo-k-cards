@@ -1,0 +1,57 @@
+{
+  "description": "Happy path — 5 events found, 2 excluded by link verification, passes review with 1 tone warning.",
+  "prompt": "이번 주말 서울 팝업 5개 조사해서 카드뉴스 만들어줘",
+  "briefs": [
+    { "id": "evt-1", "title_en": "Seongsu Stationery Pop-up", "title_ko": "성수 문구 팝업", "sources": [{ "url": "https://english.visitkorea.or.kr/", "kind": "official" }] },
+    { "id": "evt-2", "title_en": "Seoul Lantern Walk", "title_ko": "청계천", "sources": [{ "url": "https://culture.seoul.go.kr/", "kind": "official" }] },
+    { "id": "evt-3", "title_en": "Modern Hanbok", "title_ko": "모던 한복 전시", "sources": [{ "url": "https://tickets.interpark.com/", "kind": "ticketing" }] },
+    { "id": "evt-x1", "title_en": "Free K-pop Ticket Giveaway", "title_ko": "무료 티켓", "sources": [{ "url": "https://visitkorea-tickets.xyz/free", "kind": "other" }] },
+    { "id": "evt-x2", "title_en": "Hongdae Character Pop-up", "title_ko": "홍대 캐릭터 팝업", "sources": [{ "url": "https://popply.co.kr/popup-hongdae", "kind": "sns" }] }
+  ],
+  "verification": {
+    "checks": [
+      { "url": "https://english.visitkorea.or.kr/", "status": "ok", "http_code": 200 },
+      { "url": "https://culture.seoul.go.kr/", "status": "ok", "http_code": 200 },
+      { "url": "https://tickets.interpark.com/", "status": "ok", "http_code": 200 },
+      { "url": "https://visitkorea-tickets.xyz/free", "status": "suspicious", "reason": "lookalike" },
+      { "url": "https://popply.co.kr/popup-hongdae", "status": "dead", "http_code": 404 }
+    ],
+    "excluded_event_ids": ["evt-x1", "evt-x2"]
+  },
+  "deck": {
+    "title": "This weekend in Seoul: 3 pop-ups worth it",
+    "caption": "3 things foreigners can actually enjoy in Seoul this weekend.\nFree entry, English-friendly, and close to the subway.\nSave this before Friday! Details & links in bio.\n#seoul #seoulpopup #thingstodoinseoul #koreatravel #whatsonkorea",
+    "slides": [
+      { "index": 0, "layout": "cover", "heading": "This weekend in Seoul: 3 pop-ups worth it", "body": "Verified dates, venues & tips for foreigners" },
+      { "index": 1, "layout": "event", "event_id": "evt-1", "heading": "Stationery Pop-up (성수 문구 팝업)", "body": "📅 Oct 9 – 19\n📍 Seongsu Stn. (Line 2) Exit 3\n💸 Free · 🎟 Walk-in" },
+      { "index": 2, "layout": "event", "event_id": "evt-2", "heading": "Seoul Lantern Walk (청계천)", "body": "📅 Oct 10 – 12, best after 7pm\n📍 Gwanghwamun Stn. (Line 5) Exit 5\n💸 Free" },
+      { "index": 3, "layout": "event", "event_id": "evt-3", "heading": "Modern Hanbok (모던 한복 전시)", "body": "📅 Until Nov 30\n📍 Anguk Stn. (Line 3) Exit 1\n💸 ₩10,000" },
+      { "index": 4, "layout": "tips", "heading": "Must-visit tips before you go", "body": "• T-money works on subway & bus\n• Weekday mornings = short lines" },
+      { "index": 5, "layout": "tips", "heading": "Good to know", "body": "• Most pop-ups take cards\n• English menus are common in Seongsu" },
+      { "index": 6, "layout": "cta", "heading": "Save this for the weekend", "body": "Follow @whatsonkorea for verified events every week" }
+    ]
+  },
+  "issues": [
+    { "severity": "warn", "category": "tone", "slide_index": 4, "message": "\"Must-visit\" is clickbait-y; consider \"worth a look\"." }
+  ],
+  "notes": {
+    "research": "5 events · 11 sources",
+    "verify": "1 dead · 1 lookalike → 2 excluded",
+    "copy": "7 slides",
+    "render": "7 PNG · 1080×1350",
+    "qa": "0 block · 0 warn",
+    "review": "pass · 1 warn"
+  },
+  "log": [
+    { "stage": "research", "message": "sandbox created (policy: agent-policy.yaml)" },
+    { "stage": "research", "message": "TourAPI searchFestival2 → 14 candidates" },
+    { "stage": "research", "message": "WebFetch culture.seoul.go.kr … ok" },
+    { "stage": "verify", "message": "https://visitkorea-tickets.xyz/free → SUSPICIOUS (lookalike)", "level": "warn" },
+    { "stage": "verify", "message": "https://popply.co.kr/popup-hongdae → DEAD (404)", "level": "warn" },
+    { "stage": "copy", "message": "CardDeck 7 slides · caption 5 hashtags" },
+    { "stage": "render", "message": "slide-00.png … slide-06.png" },
+    { "stage": "qa", "message": "overflow 0 · fallback fonts 0 · PII 0" },
+    { "stage": "review", "message": "verdict pass · 1 warn (tone)" }
+  ],
+  "policy_events": []
+}

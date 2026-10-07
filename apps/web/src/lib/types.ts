@@ -72,7 +72,14 @@ export interface Job {
   deck?: CardDeck | null;
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
   published_url?: string | null;
+  error?: string | null;
+  // View extras returned by GET /jobs/{id} and the SSE stream.
+  source?: "quick" | "brainstorm";
+  pipeline?: PipelineStep[];
+  log?: LogLine[];
 }
+
+export type Scenario = "good" | "bad" | "fail";
 
 // Admin-only view models (no backend schema yet).
 

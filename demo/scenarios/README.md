@@ -1,12 +1,7 @@
-# Demo scenarios (`DEMO_MODE=fixture`)
+# Demo scenarios
 
-라이브 웹 상태와 상관없이 데모를 재현하기 위한 고정 데이터를 둡니다 (SPEC §7).
+데모 재현용 고정 데이터입니다 (SPEC §7).
 
-```
-<scenario>/briefs.json   # list[EventBrief]
-<scenario>/deck.json     # CardDeck
-<scenario>/review.json   # ReviewVerdict
-```
-
-- `good/`: `READY_FOR_REVIEW`
-- `bad/`: `REJECTED` (사기 링크, 민감 표현, 글자 깨짐, PII, 프롬프트 인젝션 페이지)
+- **Admin mock 백엔드 fixture (정본)**: `apps/web/src/mock/scenarios/{good,bad,fail}.json` — QA 방법은 [docs/QA.md](../../docs/QA.md)
+- 백엔드 `DEMO_MODE=fixture`도 같은 JSON을 읽게 하면 프론트와 백엔드가 같은 데모 데이터를 봅니다. (필드: `briefs`, `verification`, `deck`, `issues`, `log`, `policy_events`)
+- `bad`에 쓸 프롬프트 인젝션 페이지가 필요하면 이 폴더에 HTML로 둡니다.

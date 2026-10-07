@@ -321,6 +321,9 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 | POST | `/drafts/{id}/messages` | `{text, urls}` → Fetch → `planner` → 갱신된 `Draft` (SSE로 진행 상황) |
 | POST | `/drafts/{id}/generate` | Draft → Job 생성, Verify부터 파이프라인 시작 → `Job` |
 
+- 응답 형식: `GET /jobs/{id}`와 SSE 이벤트는 `Job` 전체 스냅샷이고, 화면용 `pipeline`(단계 상태)과 `log`를 포함합니다. `GET /policy-events`는 `{stats, events}`, 에러는 `{detail}` + 4xx를 반환합니다.
+- **Mock 백엔드**: Admin은 `NEXT_PUBLIC_API_URL`이 없으면 같은 앱의 `/api/mock/*`(위 계약 그대로)를 씁니다. QA 방법은 [docs/QA.md](QA.md)를 참고하세요.
+
 ---
 
 ## 13. 팀 분업 (4명 기준 예시)

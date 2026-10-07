@@ -1,79 +1,45 @@
-// Data access for the Admin UI. Currently serves lib/mock.ts.
-// TODO(backend): swap each function for a fetch to the FastAPI routes in SPEC §12
-// (NEXT_PUBLIC_API_URL, default http://localhost:8000). With cacheComponents on, wrap
-// components that read live data in <Suspense>.
+// HTTP client for the backend contract in SPEC §12. Used from client components.
+// NEXT_PUBLIC_API_URL unset → the in-app mock backend at /api/mock (src/mock/server.ts).
+// Set it to the FastAPI URL (e.g. http://localhost:8000) to run against the real backend.
 
-import * as mock from "./mock";
-import type { Draft, DraftUpdate, Job } from "./types";
+import type { Channel, Draft, Job, Metric, PolicyEvent, Scenario } from "./types";
 
-export async function getMetrics() {
-  return mock.metrics;
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
+export const IS_MOCK = !process.env.NEXT_PUBLIC_API_URL;
+
+async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    cache: "no-store",
+    headers: init?.json !== undefined ? { "content-type": "application/json" } : undefined,
+    body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
+  });
+  if (!res.ok) {
+    const detail = await res.json().then((b) => b.detail).catch(() => res.statusText);
+    throw new Error(`${res.status} ${detail}`);
+  }
+  return res.json() as Promise<T>;
 }
 
-export async function getChannels() {
-  return mock.channels;
-}
+export const api = {
+  listJobs: () => req<Job[]>("/jobs"),
+  getJob: (id: string) => req<Job>(`/jobs/${id}`),
+  // `scenario` is honored by the mock backend only (QA); FastAPI ignores it.
+  createJob: (prompt: string, scenario?: Scenario) => req<Job>("/jobs", { method: "POST", json: { prompt, scenario } }),
+  approveJob: (id: string, caption: string) => req<Job>(`/jobs/${id}/approve`, { method: "POST", json: { caption } }),
+  rejectJob: (id: string, reason: string) => req<Job>(`/jobs/${id}/reject`, { method: "POST", json: { reason } }),
+  jobEventsUrl: (id: string) => `${API_URL}/jobs/${id}/events`,
 
-export async function getJobs(): Promise<Job[]> {
-  return mock.jobs;
-}
+  getMetrics: () => req<Metric[]>("/metrics"),
+  getChannels: () => req<Channel[]>("/channels"),
+  getPolicyLog: () => req<{ stats: Metric[]; events: PolicyEvent[] }>("/policy-events"),
 
-export async function getJob(id: string): Promise<Job | undefined> {
-  return mock.jobs.find((j) => j.id === id);
-}
+  createDraft: (sample = true) => req<Draft>("/drafts", { method: "POST", json: { sample } }),
+  getDraft: (id: string) => req<Draft>(`/drafts/${id}`),
+  patchDraft: (id: string, patch: Partial<Draft>) => req<Draft>(`/drafts/${id}`, { method: "PATCH", json: patch }),
+  sendDraftMessage: (id: string, text: string, urls: string[]) =>
+    req<Draft>(`/drafts/${id}/messages`, { method: "POST", json: { text, urls } }),
+  generateFromDraft: (id: string) => req<Job>(`/drafts/${id}/generate`, { method: "POST" }),
 
-export async function getPipeline() {
-  return { job: mock.runningJob, steps: mock.pipeline, log: mock.logLines };
-}
-
-export async function getPolicyLog() {
-  return { stats: mock.policyStats, events: mock.policyEvents };
-}
-
-export async function getDraft(): Promise<Draft> {
-  // TODO(backend): POST /drafts (new) or GET /drafts/{id} (resume)
-  return mock.draft;
-}
-
-// Mutations — called from client components. No-ops until the backend is wired.
-
-export async function createJob(prompt: string): Promise<{ id: string }> {
-  // TODO(backend): POST /jobs {prompt}
-  void prompt;
-  return { id: mock.runningJob.id };
-}
-
-export async function approveJob(id: string, caption: string): Promise<void> {
-  // TODO(backend): POST /jobs/{id}/approve — the host publishes; never the sandbox.
-  void id;
-  void caption;
-}
-
-export async function rejectJob(id: string, reason: string): Promise<void> {
-  // TODO(backend): POST /jobs/{id}/reject
-  void id;
-  void reason;
-}
-
-export async function sendDraftMessage(draftId: string, text: string, urls: string[]): Promise<DraftUpdate> {
-  // TODO(backend): POST /drafts/{id}/messages {text, urls} — host verifies & fetches URLs,
-  // then the sandboxed `planner` returns a DraftUpdate (reply + board changes).
-  void draftId;
-  void text;
-  return {
-    reply: urls.length
-      ? `(mock) URL ${urls.length}개를 받았어요. 백엔드가 연결되면 링크를 검증하고 페이지 내용을 보드에 반영합니다.`
-      : "(mock) 메모를 받았어요. 백엔드가 연결되면 planner가 앵글과 아웃라인을 업데이트합니다.",
-  };
-}
-
-export async function updateDraft(draft: Draft): Promise<void> {
-  // TODO(backend): PATCH /drafts/{id}
-  void draft;
-}
-
-export async function generateFromDraft(draft: Draft): Promise<{ jobId: string }> {
-  // TODO(backend): POST /drafts/{id}/generate — starts the pipeline at Verify.
-  void draft;
-  return { jobId: mock.runningJob.id };
-}
+  resetMock: () => req<{ ok: true }>("/reset", { method: "POST" }),
+};

@@ -6,7 +6,8 @@ import { ArrowDown, ArrowRight, ArrowUp, ImageIcon, Link2, Send } from "lucide-r
 
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { generateFromDraft, sendDraftMessage, updateDraft } from "@/lib/api";
+import { api } from "@/lib/api";
+import { targetOptions, toneOptions } from "@/lib/constants";
 import type { Draft, Fact } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -40,42 +41,43 @@ function Chip({ selected, onClick, children }: { selected: boolean; onClick: () 
 
 const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
-export function Brainstorm({
-  initialDraft,
-  targetOptions,
-  toneOptions,
-}: {
-  initialDraft: Draft;
-  targetOptions: string[];
-  toneOptions: string[];
-}) {
+export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
   const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
   const [input, setInput] = useState("");
   const [sending, startSending] = useTransition();
   const [generating, startGenerating] = useTransition();
+  const [error, setError] = useState<string>();
 
-  // Board edits are local first; persisted via PATCH once the backend exists.
+  // Board edits apply locally right away and are persisted with PATCH /drafts/{id}.
+  const boardOf = (d: Draft) => ({
+    facts: d.facts,
+    angles: d.angles,
+    selected_angle_id: d.selected_angle_id,
+    targets: d.targets,
+    tones: d.tones,
+    outline: d.outline,
+  });
   const edit = (next: Draft) => {
     setDraft(next);
-    void updateDraft(next);
+    api.patchDraft(next.id, boardOf(next)).catch((e: Error) => setError(e.message));
   };
 
   const send = () => {
     const text = input.trim();
     if (!text) return;
     const urls = text.match(URL_RE) ?? [];
+    const message = text.replace(URL_RE, "").trim();
     setInput("");
-    setDraft((d) => ({ ...d, messages: [...d.messages, { role: "user", text: text.replace(URL_RE, "").trim() || text, urls }] }));
+    setError(undefined);
+    // Optimistic user bubble; the server returns the whole updated draft (reply + board).
+    setDraft((d) => ({ ...d, messages: [...d.messages, { role: "user", text: message, urls }] }));
     startSending(async () => {
-      const update = await sendDraftMessage(draft.id, text, urls);
-      setDraft((d) => ({
-        ...d,
-        messages: [...d.messages, { role: "agent", text: update.reply }],
-        facts: update.facts ?? d.facts,
-        angles: update.angles ?? d.angles,
-        outline: update.outline ?? d.outline,
-      }));
+      try {
+        setDraft(await api.sendDraftMessage(draft.id, message, urls));
+      } catch (e) {
+        setError((e as Error).message);
+      }
     });
   };
 
@@ -105,14 +107,14 @@ export function Brainstorm({
                   {u.replace(/^https?:\/\//, "")}
                 </span>
               ))}
-              <p
+              {m.text && <p
                 className={cn(
                   "max-w-[360px] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed whitespace-pre-line",
                   m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted",
                 )}
               >
                 {m.text}
-              </p>
+              </p>}
             </li>
           ))}
           {sending && <li className="text-xs text-muted-foreground">planner is thinking…</li>}
@@ -252,10 +254,11 @@ export function Brainstorm({
         </section>
 
         <div className="flex items-center gap-2.5">
-          <p className="flex-1 text-xs text-muted-foreground">
-            Generate skips Research and starts at Verify → Copy → Render → QA → Review. You still approve before posting.
+          <p className={cn("flex-1 text-xs", error ? "text-destructive" : "text-muted-foreground")}>
+            {error ? `Error: ${error}` : null}
+            {!error && "Generate skips Research and starts at Verify → Copy → Render → QA → Review. You still approve before posting."}
           </p>
-          <Button variant="outline" size="lg" onClick={() => void updateDraft(draft)}>
+          <Button variant="outline" size="lg" onClick={() => edit(draft)}>
             Save draft
           </Button>
           <Button
@@ -263,8 +266,12 @@ export function Brainstorm({
             disabled={generating || !draft.selected_angle_id}
             onClick={() =>
               startGenerating(async () => {
-                await generateFromDraft(draft);
-                router.push("/jobs/new"); // pipeline view
+                try {
+                  await api.generateFromDraft(draft.id);
+                  router.push("/jobs/new"); // shows the newest job's pipeline
+                } catch (e) {
+                  setError((e as Error).message);
+                }
               })
             }
           >

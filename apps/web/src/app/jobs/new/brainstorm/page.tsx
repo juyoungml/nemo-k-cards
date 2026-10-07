@@ -1,13 +1,9 @@
-import { Brainstorm } from "@/components/brainstorm";
 import { ModeSwitch } from "@/components/mode-switch";
 import { PageHeader } from "@/components/page";
 import { StatusBadge } from "@/components/status-badge";
-import { getDraft } from "@/lib/api";
-import { targetOptions, toneOptions } from "@/lib/mock";
+import { BrainstormView } from "@/components/views/brainstorm-view";
 
-export default async function BrainstormPage() {
-  const draft = await getDraft();
-
+export default function BrainstormPage() {
   return (
     <>
       <PageHeader
@@ -17,7 +13,7 @@ export default async function BrainstormPage() {
         <StatusBadge tone="info">Draft · auto-saved</StatusBadge>
       </PageHeader>
       <ModeSwitch active="brainstorm" />
-      <Brainstorm initialDraft={draft} targetOptions={targetOptions} toneOptions={toneOptions} />
+      <BrainstormView />
     </>
   );
 }
