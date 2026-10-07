@@ -224,3 +224,11 @@ backend/.data/
 
 # Local research notes (not part of the submission)
 /docs/research/
+
+# Local credentials and public-release scratch files
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store
+/.slide-build/
+/output/
