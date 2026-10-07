@@ -55,6 +55,7 @@ network_policies:
       - { host: www.visitseoul.net, port: 443, protocol: rest, enforcement: enforce, access: read-only }
       - { host: tickets.interpark.com, port: 443, protocol: rest, enforcement: enforce, access: read-only }
       - { host: www.popply.co.kr, port: 443, protocol: rest, enforcement: enforce, access: read-only }
+      - { host: popply.co.kr, port: 443, protocol: rest, enforcement: enforce, access: read-only }
     binaries:
       - { path: /usr/local/bin/claude }
 

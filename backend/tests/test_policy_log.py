@@ -38,3 +38,12 @@ def test_remap_swaps_uploaded_paths_only():
     payload = {"slide_paths": ["/host/out/j1/slide-00.jpg", "keep"], "deck": {"title": "/host/out/j1/slide-00.jpg"}}
     out = _remap(payload, {"/host/out/j1/slide-00.jpg": "/tmp/input/j1/slide-00.jpg"})
     assert out == {"slide_paths": ["/tmp/input/j1/slide-00.jpg", "keep"], "deck": {"title": "/tmp/input/j1/slide-00.jpg"}}
+
+
+def test_skips_allowed_inference_calls_but_keeps_denials():
+    log = ("[1791353300.000] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED POST "
+           "http://api.anthropic.com:443/v1/messages [policy:claude-code engine:l7]\n"
+           "[1791353300.100] [sandbox] [OCSF ] [ocsf] HTTP:DELETE [MED] DENIED DELETE "
+           "http://api.anthropic.com:443/v1/files/x [policy:claude-code engine:l7]\n")
+    assert [(e.host, e.request, e.result) for e in policy_log.parse(log, "sb")] == [
+        ("api.anthropic.com", "DELETE /v1/files/x", "policy_denied")]

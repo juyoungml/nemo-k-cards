@@ -8,7 +8,8 @@ Reads the CLI's OCSF shorthand lines, e.g.
         [reason:transparent_tcp_policy_denied]
 
 Kept: every DENIED connection or request, and ALLOWED HTTP requests (what the agent actually read).
-Connection-level ALLOWED lines are skipped — each is followed by its HTTP line.
+Connection-level ALLOWED lines are skipped — each is followed by its HTTP line — and so are allowed calls
+to the inference host, which the provider adds and every stage makes many of.
 """
 
 import re
@@ -25,6 +26,7 @@ NET = re.compile(r"^(?P<binary>\S+?)\(\d+\) -> (?P<host>[^:\s]+):(?P<port>\d+)")
 HTTP = re.compile(r"^(?P<method>[A-Z]+) (?P<url>\S+)")
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+INFERENCE_HOSTS = {"api.anthropic.com"}
 
 
 def note_for(host: str, method: str | None, result: str) -> str | None:
@@ -61,6 +63,8 @@ def parse(text: str, sandbox: str, job_id: str | None = None) -> list[PolicyEven
             host = u.hostname or ""
             path = u.path + (f"?{u.query}" if u.query else "")
             result = "policy_denied" if denied else "allowed"
+            if result == "allowed" and host in INFERENCE_HOSTS:
+                continue
             events.append(PolicyEvent(time=time, sandbox=sandbox, binary=binary_by_host.get(host, "—"),
                                       host=host, request=f"{h['method']} {path or '/'}", result=result,
                                       note=note_for(host, h["method"], result), job_id=job_id))
