@@ -1,3 +1,4 @@
+import { UNREACHABLE } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Metric } from "@/lib/types";
 
@@ -68,7 +69,7 @@ export function Panel({ title, description, action, className, children }: {
 export function LoadState({ error, label = "Loading…" }: { error?: Error; label?: string }) {
   return (
     <div className={cn("rounded-xl border bg-card p-5 text-sm", error ? "border-destructive/30 bg-danger-soft text-destructive" : "animate-pulse text-muted-foreground")}>
-      {error ? `Couldn't reach the API — ${error.message}` : label}
+      {error ? (error.message.startsWith(UNREACHABLE) ? error.message : `Couldn't load — ${error.message}`) : label}
     </div>
   );
 }

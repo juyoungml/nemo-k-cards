@@ -25,18 +25,25 @@ export const setAdminToken = (token: string) => {
   } catch {}
 };
 export const AUTH_REQUIRED_EVENT = "wok-auth-required";
+export const UNREACHABLE = "Can't reach the backend";
 
 async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const token = IS_MOCK ? "" : getAdminToken();
   const headers: Record<string, string> = {};
   if (init?.json !== undefined) headers["content-type"] = "application/json";
   if (token) headers.authorization = `Bearer ${token}`;
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    cache: "no-store",
-    headers,
-    body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...init,
+      cache: "no-store",
+      headers,
+      body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
+    });
+  } catch {
+    // fetch only throws on network failure (server down, CORS, offline), never on HTTP errors.
+    throw new Error(`${UNREACHABLE} at ${API_URL}. Is the API running?`);
+  }
   if (res.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
   if (!res.ok) {
     const detail = await res.json().then((b) => b.detail).catch(() => res.statusText);
