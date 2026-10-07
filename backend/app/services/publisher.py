@@ -32,8 +32,12 @@ async def _wait_ready(client: httpx.AsyncClient, container_id: str) -> None:
     raise RuntimeError(f"container {container_id}: not ready in time")
 
 
-async def publish_carousel(image_urls: list[str], caption: str) -> str:
-    """child containers -> CAROUSEL container -> media_publish -> return permalink."""
+async def publish_carousel(image_urls: list[str], caption: str, publish: bool = True) -> str:
+    """child containers -> CAROUSEL container -> media_publish -> return permalink.
+
+    publish=False is a dry run: everything up to a FINISHED carousel container, then stop (nothing goes public).
+    Returns the permalink, or "dryrun:<container_id>".
+    """
     if not 2 <= len(image_urls) <= 10:
         raise ValueError(f"carousel needs 2-10 images, got {len(image_urls)}")
     user = settings.ig_user_id
@@ -52,6 +56,8 @@ async def publish_carousel(image_urls: list[str], caption: str) -> str:
         carousel = await _call(client, "POST", f"/{user}/media", media_type="CAROUSEL",
                                children=",".join(children), caption=caption)
         await _wait_ready(client, carousel["id"])
+        if not publish:
+            return f"dryrun:{carousel['id']}"
 
         media = await _call(client, "POST", f"/{user}/media_publish", creation_id=carousel["id"])
         return (await _call(client, "GET", f"/{media['id']}", fields="permalink"))["permalink"]

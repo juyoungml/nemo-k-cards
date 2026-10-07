@@ -29,7 +29,7 @@ from app.schemas import (
     ReviewVerdict,
     VerificationReport,
 )
-from app.services import link_checker, publisher, visual_qa
+from app.services import image_host, link_checker, publisher, visual_qa
 
 log = logging.getLogger("orchestrator")
 KST = ZoneInfo("Asia/Seoul")
@@ -218,7 +218,7 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
         current = "qa"
         r.step("qa", "running")
         fixture_fail("qa")
-        secrets = tuple(s for s in (settings.ig_access_token,) if s)
+        secrets = tuple(s for s in (settings.ig_access_token, settings.supabase_service_key) if s)
         qa = visual_qa.run_qa(rendered, deck, secrets)
         nb = sum(i.severity == "block" for i in qa.issues)
         nw = len(qa.issues) - nb
@@ -303,19 +303,26 @@ async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
     r.step("publish", "running", f"publishing ({mode})")
     r.log("publish", f"approved by operator → publisher on host (mode: {mode})")
     try:
-        if mode == "graph":
-            if not settings.public_asset_base_url:
-                raise RuntimeError("PUBLIC_ASSET_BASE_URL is not set (Instagram must fetch the JPEGs)")
-            urls = [settings.public_asset_base_url.rstrip("/") + u for u in job.slide_urls]
-            job.published_url = await publisher.publish_carousel(urls, job.deck.caption)
+        if mode in ("graph", "dryrun"):
+            paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
+            urls = await image_host.publish_images(job.id, paths)
+            r.log("publish", f"{len(urls)} slides public via {settings.image_host} → {urls[0].rsplit('/', 2)[0]}/…")
+            result = await publisher.publish_carousel(urls, job.deck.caption, publish=(mode == "graph"))
+            if mode == "dryrun":
+                r.log("publish", f"dry run: Instagram carousel container {result.split(':', 1)[1]} FINISHED · "
+                      "media_publish skipped (nothing posted)")
+                job.status = JobStatus.READY_FOR_REVIEW
+                r.step("publish", "pending", "dry run OK · approve again with graph mode to post")
+                return
+            job.published_url = result
         else:
             await asyncio.sleep(1.5)
             job.published_url = f"https://www.instagram.com/p/MOCK{job.id.upper()}/"
-            r.log("publish", "mock publish: no network call (set PUBLISH_MODE=graph to post)")
+            r.log("publish", "mock publish: no network call (set PUBLISH_MODE=dryrun or graph)")
         job.status = JobStatus.PUBLISHED
         r.step("publish", "done", "posted to @whatsonkorea" if mode == "graph" else "mock post created")
     except Exception as e:  # noqa: BLE001
         job.status = JobStatus.READY_FOR_REVIEW
         job.error = f"Publish failed: {e}"
+        r.log("publish", f"publish failed: {e}", "warn")
         r.step("publish", "failed", str(e)[:120])
-
