@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     scenarios_dir: Path = REPO_ROOT / "demo/scenarios"
     output_dir: Path = REPO_ROOT / "backend/.data/out"
 
+    # Agent runtime
+    agent_model: str = ""                 # e.g. "sonnet" to cut cost; empty = CLI default
+    agent_timeout_s: int = 300
+    openshell_providers: list[str] = ["claude-code"]
+    publish_mode: Literal["mock", "dryrun", "graph"] = "mock"
+    theme: Literal["bold", "clean", "pop"] = "clean"
+
     # Instagram Graph API — host-only secrets, never forwarded to the sandbox.
     ig_user_id: str = ""
     ig_access_token: str = ""

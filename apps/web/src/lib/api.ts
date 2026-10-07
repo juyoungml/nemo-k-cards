@@ -7,6 +7,9 @@ import type { Channel, Draft, Job, Metric, PolicyEvent, Scenario } from "./types
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
 export const IS_MOCK = !process.env.NEXT_PUBLIC_API_URL;
 
+/** Absolute URL for a backend asset path such as /assets/{job}/slide-00.jpg. */
+export const assetUrl = (path: string) => (path.startsWith("http") ? path : `${API_URL}${path}`);
+
 async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,

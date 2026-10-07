@@ -6,15 +6,20 @@ import type { Slide } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
- * HTML stand-in for the rendered 1080x1350 PNGs (scaled to 400x500).
- * TODO(backend): show the renderer's PNGs once job.slide_paths are served.
+ * Shows the renderer's 1080x1350 JPEGs (job.slide_urls) when the real backend serves them;
+ * falls back to an HTML stand-in (scaled to 400x500) for the mock backend.
  */
-export function SlidePreview({ slides }: { slides: Slide[] }) {
+export function SlidePreview({ slides, images }: { slides: Slide[]; images?: string[] }) {
   const [current, setCurrent] = useState(0);
   const slide = slides[current];
+  const img = images?.[current];
 
   return (
     <div className="w-[400px] shrink-0 space-y-3">
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={img} alt={`Slide ${current + 1}: ${slide.heading}`} className="aspect-[4/5] w-full rounded-xl border object-cover" />
+      ) : (
       <div className="flex aspect-[4/5] flex-col rounded-xl border bg-[#FFFDF8] px-8 pt-9 pb-6">
         <div className="h-1.5 w-12 rounded-full bg-[linear-gradient(90deg,var(--brand-red)_50%,var(--primary)_50%)]" />
         <div className={cn("space-y-3.5", slide.layout === "cover" ? "mt-24" : "mt-8")}>
@@ -30,6 +35,7 @@ export function SlidePreview({ slides }: { slides: Slide[] }) {
           </span>
         </div>
       </div>
+      )}
       <div className="flex gap-2">
         {slides.map((s) => (
           <button

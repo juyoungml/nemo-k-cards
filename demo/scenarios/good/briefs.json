@@ -4,44 +4,102 @@
     "title_en": "Seongsu Stationery Pop-up",
     "title_ko": "성수 문구 팝업",
     "category": "popup",
-    "start_date": "2026-10-09", "end_date": "2026-10-18",
-    "venue_en": "Seongsu-dong", "venue_ko": "성수동",
+    "start_date": "2026-10-09",
+    "end_date": "2026-10-18",
+    "venue_en": "Seongsu-dong",
+    "venue_ko": "성수동",
     "address_ko": "서울 성동구 연무장길 (샘플)",
     "nearest_station": "Seongsu Stn. (Line 2) Exit 4",
     "price": "Free",
     "booking": "Walk-in · waitlist kiosk",
-    "foreigner_tips": ["Join the kiosk waitlist first, then explore nearby alleys"],
+    "foreigner_tips": [
+      "Join the kiosk waitlist first, then explore nearby alleys"
+    ],
     "why_go": "Korean stationery brands you won't find at the airport, plus free stickers.",
-    "sources": [{"url": "https://english.visitkorea.or.kr/", "kind": "official"}]
+    "sources": [
+      {
+        "url": "https://english.visitkorea.or.kr/",
+        "kind": "official"
+      }
+    ]
   },
   {
     "id": "ev-lantern-walk",
     "title_en": "Seoul Lantern Walk",
     "title_ko": "청계천 등불 산책",
     "category": "festival",
-    "start_date": "2026-10-09", "end_date": "2026-10-11",
-    "venue_en": "Cheonggyecheon Stream", "venue_ko": "청계천",
+    "start_date": "2026-10-09",
+    "end_date": "2026-10-11",
+    "venue_en": "Cheonggyecheon Stream",
+    "venue_ko": "청계천",
     "address_ko": "서울 중구 청계천로 1 (청계광장)",
     "nearest_station": "Gwanghwamun Stn. (Line 5) Exit 5",
     "price": "Free",
     "booking": "No booking",
-    "foreigner_tips": ["Start at Cheonggye Plaza at sunset", "Weekday nights after 20:00 are quieter"],
+    "foreigner_tips": [
+      "Start at Cheonggye Plaza at sunset",
+      "Weekday nights after 20:00 are quieter"
+    ],
     "why_go": "A 1 km walk of hand-made lanterns along the stream, right in central Seoul.",
-    "sources": [{"url": "https://culture.seoul.go.kr/", "kind": "official"}]
+    "sources": [
+      {
+        "url": "https://culture.seoul.go.kr/",
+        "kind": "official"
+      }
+    ]
   },
   {
     "id": "ev-modern-hanbok",
     "title_en": "Modern Hanbok Exhibition",
     "title_ko": "모던 한복 전시",
     "category": "exhibition",
-    "start_date": "2026-10-01", "end_date": "2026-11-30",
-    "venue_en": "Jongno-gu", "venue_ko": "종로구",
+    "start_date": "2026-10-01",
+    "end_date": "2026-11-30",
+    "venue_en": "Jongno-gu",
+    "venue_ko": "종로구",
     "address_ko": "서울 종로구 (샘플)",
     "nearest_station": "Anguk Stn. (Line 3) Exit 1",
     "price": "₩5,000",
     "booking": "Tickets on site or online",
-    "foreigner_tips": ["Docent tour in English at 14:00"],
+    "foreigner_tips": [
+      "Docent tour in English at 14:00"
+    ],
     "why_go": "See how designers are reinventing hanbok for everyday wear.",
-    "sources": [{"url": "https://tickets.interpark.com/", "kind": "ticketing"}]
+    "sources": [
+      {
+        "url": "https://tickets.interpark.com/",
+        "kind": "ticketing"
+      }
+    ]
+  },
+  {
+    "id": "ev-kpop-giveaway",
+    "title_en": "Free K-pop Ticket Giveaway",
+    "title_ko": "무료 케이팝 티켓",
+    "category": "other",
+    "start_date": "2026-10-10",
+    "end_date": "2026-10-11",
+    "venue_en": "Online",
+    "sources": [
+      {
+        "url": "https://visitkorea-tickets.xyz/free",
+        "kind": "other"
+      }
+    ]
+  },
+  {
+    "id": "ev-hongdae-character",
+    "title_en": "Hongdae Character Pop-up",
+    "title_ko": "홍대 캐릭터 팝업",
+    "category": "popup",
+    "start_date": "2026-10-09",
+    "end_date": "2026-10-12",
+    "venue_en": "Hongdae",
+    "sources": [
+      {
+        "url": "https://popply.co.kr/popup-hongdae",
+        "kind": "sns"
+      }
+    ]
   }
 ]

@@ -1,8 +1,38 @@
-# Content rules for the reviewer subagent (SPEC §7). block = must not publish, warn = human check.
-# TODO: fill in with the team.
+# Content rules for the reviewer subagent (SPEC §7, BACKEND §11 #12).
+# block = must not publish · warn = human check. Source: team research (risk_review_checklist), 2026-10-07.
 
-dates: []      # - { date: "05-18", note: "5·18 민주화운동 기념일", rule: block_playful_tone }
-phrases: []    # - { pattern: "tank day", severity: block, note: "..." }
+date_gate_days: 3   # publish date or event date within ±N days of a listed date → neutral tone, no promos
+
+dates:
+  - { date: "03-01", note: "삼일절 (1919 independence movement)", avoid: [japanese imperial imagery, sale framing] }
+  - { date: "04-03", note: "제주 4·3", avoid: [festive Jeju promos, "폭동"] }
+  - { date: "04-16", note: "세월호 참사 (Sewol ferry)", avoid: [ships/sinking jokes, "siren", "tank", party tone] }
+  - { date: "05-18", note: "5·18 광주 민주화운동", avoid: [tanks, troops, "책상 탁", "폭동", "북한군 개입", discounts], window: "05-15..05-20" }
+  - { date: "06-06", note: "현충일 (Memorial Day)", avoid: [discount hooks, comic military content] }
+  - { date: "06-10", note: "6·10 민주항쟁", avoid: ["탁 치니 억", tear-gas jokes] }
+  - { date: "06-25", note: "한국전쟁 발발", avoid: [war / North Korea jokes] }
+  - { date: "08-14", note: "일본군 위안부 피해자 기림의 날", avoid: [any joke, "80 years ago" hooks] }
+  - { date: "08-15", note: "광복절 (Liberation Day)", avoid: [rising sun imagery, japanese militaria, japanese brand promos] }
+  - { date: "10-29", note: "10·29 이태원 참사", avoid: [Itaewon Halloween parties, crowd hype, costume promos] }
+  - { date: "12-03", note: "2024 비상계엄", avoid: [martial law / tanks as fun imagery] }
+
+phrases:
+  - { pattern: "책상\\s*(을|에)?\\s*탁", severity: block, note: "박종철 고문치사 은폐 발언 — 탱크데이(2026), 무신사(2019)" }
+  - { pattern: "탁\\s*치니\\s*억", severity: block, note: "박종철 은폐 발언" }
+  - { pattern: "(?i)tank\\s*day|탱크\\s*데이", severity: block, note: "스타벅스 탱크데이 (2026-05-18)" }
+  - { pattern: "폭동", severity: block, note: "5·18/4·3 비하" }
+  - { pattern: "북한군\\s*개입", severity: block, note: "5·18 왜곡" }
+  - { pattern: "가만히\\s*있으라", severity: block, note: "세월호" }
+  - { pattern: "(?i)sea of japan|takeshima", severity: block, note: "use East Sea / Dokdo" }
+  - { pattern: "(?i)must[- ]visit|insane|you won't believe", severity: warn, note: "clickbait" }
+
 topics:
-  block: []
-  warn: []
+  block:
+    - victims, death tolls or historical violence used as a hook, pun or joke
+    - rising sun flag or radial-ray designs
+    - claims that hanbok comes from hanfu or that kimchi is paocai
+    - party colors combined with ballot numbers during elections
+  warn:
+    - military imagery outside factual museum/commemoration context
+    - Japanese imperial-era IP near 3·1 / 8·15
+    - Halloween / Itaewon crowd content in late October
