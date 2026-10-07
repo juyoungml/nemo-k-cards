@@ -2,6 +2,7 @@
 
 import asyncio
 import secrets
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,31 @@ from app.schemas import (
     RejectRequest,
 )
 
-app = FastAPI(title="What's On Korea API")
+
+def recover_interrupted() -> None:
+    """A restart kills in-flight background tasks: never leave jobs stuck in a running state."""
+    running = {JobStatus.QUEUED, JobStatus.RESEARCHING, JobStatus.VERIFYING, JobStatus.WRITING,
+               JobStatus.RENDERING, JobStatus.QA, JobStatus.REVIEWING}
+    for job in store.list_jobs(500):
+        if job.status == JobStatus.PUBLISHING:
+            job.status = JobStatus.READY_FOR_REVIEW
+            job.error = "Publish interrupted by a server restart. Nothing was posted; approve again."
+            if job.publish_progress:
+                job.publish_progress.step, job.publish_progress.error = "failed", job.error
+                job.publish_progress.label = "Interrupted by a server restart"
+            store.save_job(job)
+        elif job.status in running:
+            job.status, job.error = JobStatus.FAILED, "Interrupted by a server restart; start the job again."
+            store.save_job(job)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    recover_interrupted()
+    yield
+
+
+app = FastAPI(title="What's On Korea API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -100,8 +125,10 @@ async def approve(job_id: str, req: ApproveRequest) -> Job:
     job = _job_or_404(job_id)
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
-    if any(i.severity == "block" for i in job.issues):
-        raise HTTPException(409, "job has blocking issues")
+    # Blocking issues are advisory: the operator saw them in Review and chose to approve.
+    # Hard stop only for leaked credentials — those must never be published.
+    if any(i.category == "pii" and "credential" in i.message for i in job.issues):
+        raise HTTPException(409, "deck contains a credential-like string; regenerate before publishing")
     if req.caption:
         from app.services.visual_qa import HASHTAG, scan_text
         if len(HASHTAG.findall(req.caption)) > 5 or scan_text(req.caption, "caption",

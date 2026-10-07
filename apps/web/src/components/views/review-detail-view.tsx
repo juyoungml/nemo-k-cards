@@ -3,6 +3,7 @@
 import { ExternalLink } from "lucide-react";
 
 import { LoadState, PageHeader, Panel } from "@/components/page";
+import { PublishProgress } from "@/components/publish-progress";
 import { ReviewActions } from "@/components/review-actions";
 import { SlidePreview } from "@/components/slide-preview";
 import { JobStatusBadge, StatusBadge, type Tone } from "@/components/status-badge";
@@ -50,7 +51,7 @@ function linkBadge(check: LinkCheck | undefined, excluded: boolean) {
 }
 
 export function ReviewDetailView({ id }: { id: string }) {
-  const { data: job, error, setData } = useApi(() => api.getJob(id), [id], 2000);
+  const { data: job, error, setData } = useApi(() => api.getJob(id), [id], 1000);
   if (!job) return <LoadState error={error} />;
   const deck = job.deck;
   const checksById = new Map(job.verification?.checks.map((c) => [c.url, c]));
@@ -73,6 +74,8 @@ export function ReviewDetailView({ id }: { id: string }) {
         {deck && deck.slides.length > 0 && <SlidePreview slides={deck.slides} images={job.slide_urls?.map(assetUrl)} />}
 
         <div className="min-w-0 flex-1 space-y-4">
+          <PublishProgress job={job} />
+
           <Panel title="Automated checks">
             <div className="flex flex-wrap gap-2">{CHECKS.map((c) => checkBadge(job, c.category, c.label))}</div>
             {job.issues.length > 0 && (

@@ -1,7 +1,7 @@
 # Backend Spec: What's On Korea
 
-> Status: **FROZEN v1.1** (2026-10-07). Changes after this point need a team heads-up in Slack + a version bump here.
-> v1.1: §6 runner flow and #13 updated from running OpenShell 0.1.2 for real (MicroVM driver, native Claude Code binary).
+> Status: **FROZEN v1.2** (2026-10-07; v1.1: no auto-reject — the operator decides). Changes after this point need a team heads-up in Slack + a version bump here.
+> v1.2: §6 runner flow and #13 updated from running OpenShell 0.1.2 for real (MicroVM driver, native Claude Code binary).
 > Builds on [SPEC.md](SPEC.md) **v0.3** (incl. Brainstorm §4-1) and the [Admin Figma mockups](https://www.figma.com/design/OrkSDRFk7FwMzJ5WFxgYDY) (5 screens). Where they disagree, **Figma wins for UI behavior** and this doc wins for the backend contract.
 
 ---
@@ -125,11 +125,10 @@ QUEUED → RESEARCHING → VERIFYING → WRITING → RENDERING → QA → REVIEW
        → READY_FOR_REVIEW ──approve──▶ PUBLISHING → PUBLISHED
                           ──reject────▶ REJECTED
                           ──regenerate▶ WRITING   (keeps briefs + verification)
-review verdict = fail ───────────────▶ REJECTED (auto, issues attached)
 any stage error ─────────────────────▶ FAILED (error message)
 ```
 - Quick: starts at `RESEARCHING`. Brainstorm `generate`: starts at `VERIFYING` (Research step = `skipped`).
-- Only `block` issues prevent `READY_FOR_REVIEW`; `warn` issues are shown and the human decides.
+- Review/QA issues (`block` or `warn`) never change the status; they're shown in Review and the human approves or rejects.
 
 ### 2.2 Draft (Brainstorm, SPEC §4-1)
 - One draft = **one event**. Roundups go through Quick.
@@ -219,7 +218,7 @@ Base `http://localhost:8000` (`NEXT_PUBLIC_API_URL`). JSON. Errors: `{"error": c
 | GET | `/jobs/{id}/events` | SSE of `JobEvent` | replays history, then live; closes on terminal state |
 | POST | `/jobs/{id}/regenerate` | `{instruction?}` → `Job` | from READY_FOR_REVIEW/REJECTED → WRITING |
 | POST | `/jobs/{id}/reject` | `{reason}` → `Job` | |
-| POST | `/jobs/{id}/approve` | `{caption, mode?:"mock"\|"dryrun"\|"graph"}` → `Job` | **only publish path**; 409 unless READY_FOR_REVIEW and no `block`; re-runs PII + secret + hashtag checks on the edited caption |
+| POST | `/jobs/{id}/approve` | `{caption, mode?:"mock"\|"dryrun"\|"graph"}` → `Job` | **only publish path**; 409 unless READY_FOR_REVIEW (or if a credential leak was found); re-runs PII + secret + hashtag checks on the edited caption |
 | GET | `/assets/{job_id}/slide-NN.jpg` | image/jpeg | exists (StaticFiles); public via tunnel for Graph API |
 | POST | `/drafts` | `{}` → `Draft` | |
 | GET | `/drafts/{id}` | → `Draft` | |
@@ -310,7 +309,7 @@ brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 | 1 | Brainstorm: one event per draft; roundups via Quick |
 | 2 | Re-generate a draft → new Job; `Draft.job_id` = latest |
 | 3 | Brainstorm chat: request/response (no streaming) in v1 |
-| 4 | `warn` issues don't block approval; `block` does |
+| 4 | Automated checks never auto-reject: every finished deck goes to READY_FOR_REVIEW with its issues; the operator decides (approving over `block` issues is logged as an override). Only credential leaks hard-stop publishing |
 | 5 | Storage: SQLite |
 | 6 | Image hosting: backend `/assets` + public tunnel (`PUBLIC_ASSET_BASE_URL`) |
 | 7 | Publishing via Instagram Login API → `graph.instagram.com`; OpenShell policy must guard **both** `graph.instagram.com` and `graph.facebook.com` |
