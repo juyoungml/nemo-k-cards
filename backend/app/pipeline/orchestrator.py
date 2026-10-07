@@ -26,6 +26,7 @@ from app.schemas import (
     LogLine,
     PipelineStep,
     PolicyEvent,
+    PublishProgress,
     ReviewVerdict,
     VerificationReport,
 )
@@ -297,6 +298,12 @@ def _deck_from_draft(draft: Draft, event_id: str | None = None) -> CardDeck:
                     "#thingstodoinseoul #whatsonkorea", slides=slides)
 
 
+# Progress bands per publish step (percent of the bar), so the UI shows steady, honest progress.
+BANDS = {"upload": (0, 30), "containers": (30, 60), "processing": (60, 85), "publish": (85, 99)}
+LABELS = {"upload": "Uploading slides to public storage", "containers": "Sending slides to Instagram",
+          "processing": "Instagram is processing the images", "publish": "Publishing to @whatsonkorea"}
+
+
 async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
     job = store.get_job(job_id)
     if not job or not job.deck:
@@ -305,31 +312,57 @@ async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
     if caption:
         job.deck.caption = caption
     job.status = JobStatus.PUBLISHING
-    r.step("publish", "running", f"publishing ({mode})")
+    job.error = None
+    job.publish_progress = PublishProgress(mode=mode, step="upload", label=LABELS["upload"],
+                                           started_at=datetime.now(UTC))
     n_block = sum(i.severity == "block" for i in job.issues)
+    r.step("publish", "running", f"publishing ({mode})")
     r.log("publish", f"approved by operator → publisher on host (mode: {mode})"
           + (f" · operator overrode {n_block} blocking issue(s)" if n_block else ""))
+
+    def progress(step: str, done: int, total: int) -> None:
+        lo, hi = BANDS[step]
+        pp = job.publish_progress
+        pp.step, pp.done, pp.total = step, done, total
+        pp.label = f"{LABELS[step]} ({done}/{total})" if total > 1 else LABELS[step]
+        pp.percent = int(lo + (hi - lo) * (done / total if total else 0))
+        r.save()
+
     try:
+        paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
         if mode in ("graph", "dryrun"):
-            paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
-            urls = await image_host.publish_images(job.id, paths)
+            urls = await image_host.publish_images(job.id, paths, lambda d, t: progress("upload", d, t))
             r.log("publish", f"{len(urls)} slides public via {settings.image_host} → {urls[0].rsplit('/', 2)[0]}/…")
-            result = await publisher.publish_carousel(urls, job.deck.caption, publish=(mode == "graph"))
+            result = await publisher.publish_carousel(urls, job.deck.caption, publish=(mode == "graph"),
+                                                      on_progress=progress)
             if mode == "dryrun":
-                r.log("publish", f"dry run: Instagram carousel container {result.split(':', 1)[1]} FINISHED · "
-                      "media_publish skipped (nothing posted)")
+                cid = result.split(":", 1)[1]
+                r.log("publish", f"dry run: Instagram carousel container {cid} FINISHED · media_publish skipped "
+                      "(nothing posted)")
                 job.status = JobStatus.READY_FOR_REVIEW
+                job.publish_progress.step, job.publish_progress.percent = "done", 100
+                job.publish_progress.label = "Dry run complete: carousel ready on Instagram, nothing posted"
+                job.publish_progress.finished_at = datetime.now(UTC)
                 r.step("publish", "pending", "dry run OK · approve again with graph mode to post")
                 return
             job.published_url = result
         else:
-            await asyncio.sleep(1.5)
+            for step in ("upload", "containers", "processing", "publish"):  # mock: simulate the same steps
+                for i in range(1, len(paths) + 1 if step in ("upload", "containers") else 2):
+                    progress(step, i, len(paths) if step in ("upload", "containers") else 1)
+                    await asyncio.sleep(0.15)
             job.published_url = f"https://www.instagram.com/p/MOCK{job.id.upper()}/"
             r.log("publish", "mock publish: no network call (set PUBLISH_MODE=dryrun or graph)")
         job.status = JobStatus.PUBLISHED
+        pp = job.publish_progress
+        pp.step, pp.percent, pp.finished_at = "done", 100, datetime.now(UTC)
+        pp.label = "Published to @whatsonkorea" if mode == "graph" else "Mock publish complete (nothing posted)"
         r.step("publish", "done", "posted to @whatsonkorea" if mode == "graph" else "mock post created")
     except Exception as e:  # noqa: BLE001
         job.status = JobStatus.READY_FOR_REVIEW
         job.error = f"Publish failed: {e}"
+        pp = job.publish_progress
+        pp.label = f"Failed: {LABELS.get(pp.step, 'publishing').lower()}"
+        pp.step, pp.error, pp.finished_at = "failed", str(e)[:300], datetime.now(UTC)
         r.log("publish", f"publish failed: {e}", "warn")
         r.step("publish", "failed", str(e)[:120])

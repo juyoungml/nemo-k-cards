@@ -149,6 +149,19 @@ class LogLine(BaseModel):
     level: Literal["info", "warn"] = "info"
 
 
+class PublishProgress(BaseModel):
+    """Live sub-steps of an approved publish, for the Review progress card."""
+    mode: Literal["mock", "dryrun", "graph"]
+    step: Literal["upload", "containers", "processing", "publish", "done", "failed"]
+    label: str
+    done: int = 0
+    total: int = 0
+    percent: int = 0
+    started_at: datetime
+    finished_at: datetime | None = None
+    error: str | None = None
+
+
 class Job(BaseModel):
     id: str
     prompt: str
@@ -162,6 +175,7 @@ class Job(BaseModel):
     slide_urls: list[str] = Field(default_factory=list)  # /assets/{job_id}/slide-NN.jpg
     published_url: str | None = None
     error: str | None = None
+    publish_progress: PublishProgress | None = None
     pipeline: list[PipelineStep] = Field(default_factory=list)
     log: list[LogLine] = Field(default_factory=list)
     draft_id: str | None = None

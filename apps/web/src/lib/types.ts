@@ -74,10 +74,23 @@ export interface Job {
   published_url?: string | null;
   error?: string | null;
   slide_urls?: string[]; // rendered JPEGs, relative to API_URL (/assets/{id}/slide-NN.jpg)
+  publish_progress?: PublishProgress | null; // live sub-steps after Approve & Publish
   // View extras returned by GET /jobs/{id} and the SSE stream.
   source?: "quick" | "brainstorm";
   pipeline?: PipelineStep[];
   log?: LogLine[];
+}
+
+export interface PublishProgress {
+  mode: "mock" | "dryrun" | "graph";
+  step: "upload" | "containers" | "processing" | "publish" | "done" | "failed";
+  label: string;
+  done: number;
+  total: number;
+  percent: number;
+  started_at: string;
+  finished_at?: string | null;
+  error?: string | null;
 }
 
 export type Scenario = "good" | "bad" | "fail";

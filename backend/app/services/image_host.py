@@ -7,6 +7,7 @@ IMAGE_HOST=local     serve from this backend's /assets via PUBLIC_ASSET_BASE_URL
 The storage key is host-only: it is never passed to an agent sandbox.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -30,7 +31,7 @@ async def _ensure_bucket(client: httpx.AsyncClient) -> None:
         raise ImageHostError(f"could not create bucket {b!r}: {r.status_code} {r.text[:200]}")
 
 
-async def _supabase_upload(job_id: str, paths: list[Path]) -> list[str]:
+async def _supabase_upload(job_id: str, paths: list[Path], on_progress: Callable[[int, int], None]) -> list[str]:
     if not (settings.supabase_url and settings.supabase_service_key):
         raise ImageHostError("SUPABASE_URL / SUPABASE_SERVICE_KEY are not set in backend/.env")
     base = settings.supabase_url.rstrip("/")
@@ -46,6 +47,7 @@ async def _supabase_upload(job_id: str, paths: list[Path]) -> list[str]:
             if r.status_code not in (200, 201):
                 raise ImageHostError(f"upload {obj} failed: {r.status_code} {r.text[:200]}")
             urls.append(f"{base}/storage/v1/object/public/{settings.supabase_bucket}/{obj}")
+            on_progress(len(urls), len(paths))
         # Instagram must be able to fetch them: check one URL without credentials.
         chk = await httpx.AsyncClient(timeout=15).get(urls[0])
         if chk.status_code != 200 or not chk.headers.get("content-type", "").startswith("image/"):
@@ -60,9 +62,12 @@ def _local_urls(job_id: str, paths: list[Path]) -> list[str]:
     return [f"{base}/assets/{job_id}/{p.name}" for p in paths]
 
 
-async def publish_images(job_id: str, paths: list[Path]) -> list[str]:
+async def publish_images(job_id: str, paths: list[Path],
+                         on_progress: Callable[[int, int], None] = lambda done, total: None) -> list[str]:
     """Make the job's slides publicly reachable and return their URLs (in slide order)."""
     paths = sorted(paths)
     if settings.image_host == "supabase":
-        return await _supabase_upload(job_id, paths)
-    return _local_urls(job_id, paths)
+        return await _supabase_upload(job_id, paths, on_progress)
+    urls = _local_urls(job_id, paths)
+    on_progress(len(urls), len(urls))
+    return urls

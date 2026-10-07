@@ -5,6 +5,7 @@ Instagram fetches images itself, so image_urls must be public JPEG URLs
 """
 
 import asyncio
+from collections.abc import Callable
 
 import httpx
 
@@ -32,7 +33,8 @@ async def _wait_ready(client: httpx.AsyncClient, container_id: str) -> None:
     raise RuntimeError(f"container {container_id}: not ready in time")
 
 
-async def publish_carousel(image_urls: list[str], caption: str, publish: bool = True) -> str:
+async def publish_carousel(image_urls: list[str], caption: str, publish: bool = True,
+                           on_progress: Callable[[str, int, int], None] = lambda step, done, total: None) -> str:
     """child containers -> CAROUSEL container -> media_publish -> return permalink.
 
     publish=False is a dry run: everything up to a FINISHED carousel container, then stop (nothing goes public).
@@ -45,19 +47,21 @@ async def publish_carousel(image_urls: list[str], caption: str, publish: bool = 
         base_url=GRAPH, timeout=30,
         headers={"Authorization": f"Bearer {settings.ig_access_token}"},
     ) as client:
-        children = [
-            (await _call(client, "POST", f"/{user}/media",
-                         image_url=url, is_carousel_item="true"))["id"]
-            for url in image_urls
-        ]
-        for child in children:
+        children = []
+        for i, url in enumerate(image_urls, 1):
+            children.append((await _call(client, "POST", f"/{user}/media",
+                                         image_url=url, is_carousel_item="true"))["id"])
+            on_progress("containers", i, len(image_urls))
+        for i, child in enumerate(children, 1):
             await _wait_ready(client, child)
+            on_progress("processing", i, len(children))
 
         carousel = await _call(client, "POST", f"/{user}/media", media_type="CAROUSEL",
                                children=",".join(children), caption=caption)
         await _wait_ready(client, carousel["id"])
         if not publish:
             return f"dryrun:{carousel['id']}"
+        on_progress("publish", 0, 1)
 
         media = await _call(client, "POST", f"/{user}/media_publish", creation_id=carousel["id"])
         return (await _call(client, "GET", f"/{media['id']}", fields="permalink"))["permalink"]
