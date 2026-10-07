@@ -1,139 +1,167 @@
-<div align="center">
-
-# What's On Korea
-
-**한국 행사 소식을 외국인을 위한 영어 카드뉴스로.**
-
-Claude Code × NVIDIA OpenShell × Human Review
-
-Fastcampus × NVIDIA Agentic AI Hackathon
-
-[**기획 데모 체험**](https://juyoung.site/nemo-k-cards/try/) | [**Admin 열기**](https://admin-production-3db0.up.railway.app/) | [**발표 보기**](https://juyoung.site/nemo-k-cards/) | [**Instagram**](https://www.instagram.com/whatsonkorea/)
-
-</div>
-
----
-
-행사 조사부터 출처 검증, 영어 문안 작성, 카드 렌더링과 검수까지 에이전트가 처리합니다. 운영자는 카드와 검수 결과를 확인한 뒤 게시를 승인합니다. `AGENT_RUNNER=openshell`에서는 Claude Code가 NVIDIA OpenShell의 파일 및 네트워크 정책 안에서 실행되고, Instagram 게시 자격 증명은 호스트 백엔드에만 둡니다.
-
-## 접속 URL과 QR 코드
-
-| 접속 대상 | URL | 용도 |
-| --- | --- | --- |
-| 체험 안내 | [juyoung.site/nemo-k-cards/try/](https://juyoung.site/nemo-k-cards/try/) | 예시 요청과 기획 데모 진입 |
-| Admin | [admin-production-3db0.up.railway.app](https://admin-production-3db0.up.railway.app/) | Dashboard, New Job, Review, Policy Log |
-| 발표 | [juyoung.site/nemo-k-cards/](https://juyoung.site/nemo-k-cards/) | 해커톤 발표 슬라이드 |
-
-**2026-10-07 확인:** 위 세 주소는 HTTP 200으로 응답합니다. 배포된 Admin 화면에는 **Mock API**가 표시되며, 시연용 데이터로 동작합니다. 실제 AI 생성과 Instagram 게시는 별도의 백엔드 연결 및 운영 설정이 필요합니다.
-
-<div align="center">
-<table>
-<tr><th>모바일 체험 안내</th><th>Admin 바로 열기</th></tr>
-<tr>
-<td align="center"><a href="https://juyoung.site/nemo-k-cards/try/"><img src="docs/assets/try-qr.png" width="180" height="180" alt="체험 안내 URL의 QR 코드"></a></td>
-<td align="center"><a href="https://admin-production-3db0.up.railway.app/"><img src="docs/assets/admin-qr.png" width="180" height="180" alt="Admin URL의 QR 코드"></a></td>
-</tr>
-<tr><td align="center"><a href="docs/assets/try-qr.svg">SVG 다운로드</a></td><td align="center"><a href="docs/assets/admin-qr.svg">SVG 다운로드</a></td></tr>
-</table>
-</div>
-
-## 카드 미리보기
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/hero-dark.svg">
+  <img src="docs/assets/brand/hero-light.svg" alt="Nemo K Cards: Korean culture, English carousels. Research with agents, review with evidence, publish with human approval." width="100%">
+</picture>
 
 <p align="center">
-  <img src="presentation/assets/seongsu-card-01.jpg" width="30%" alt="크리에이티브 성수 카드 표지">
-  <img src="presentation/assets/seongsu-card-02.jpg" width="30%" alt="크리에이티브 성수 카드 시안 2">
-  <img src="presentation/assets/seongsu-card-04.jpg" width="30%" alt="방문 전 체크리스트 카드">
+  <a href="README.ko.md">한국어</a> ·
+  <a href="https://www.instagram.com/whatsonkorea/">Instagram</a> ·
+  <a href="https://juyoung.site/nemo-k-cards/Nemo-K-Cards-Presentation.pdf">Presentation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-보존된 디자인 시안입니다. 현재 입력한 요청의 생성 결과는 아닙니다.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111418" alt="MIT license"></a>
+  <a href="policies/openshell/agent-policy.yaml"><img src="https://img.shields.io/badge/runtime-NVIDIA_OpenShell-76B900" alt="NVIDIA OpenShell runtime"></a>
+  <a href="https://github.com/juyoungml/nemo-k-cards/actions/workflows/backend-checks.yml"><img src="https://github.com/juyoungml/nemo-k-cards/actions/workflows/backend-checks.yml/badge.svg" alt="Backend checks"></a>
+</p>
 
-## 제작 흐름
+**Nemo K Cards researches Korean events, checks their sources, and turns them into English Instagram carousels. An operator reviews the cards before the backend publishes them.**
 
-```text
-행사 조사 → 출처 검증 → 영어 문안 → 카드 렌더링 → 자동 QA → 에이전트 검수
-                                                               ↓
-                                                    운영자 검토 및 승인 → 게시
-```
+The software powers the editorial workflow behind **[@whatsonkorea](https://www.instagram.com/whatsonkorea/)**. Claude Code handles research, planning, writing and review. NVIDIA OpenShell limits the agent's file and network access. Instagram credentials stay with the host backend.
 
-- **Quick:** 요청을 바탕으로 행사를 조사하고 카드뉴스를 만듭니다.
-- **Brainstorm:** 대화로 행사, 관점과 구성을 정한 뒤 카드를 생성합니다.
-- **Review:** 카드 이미지, 출처와 검수 이슈를 함께 보고 승인하거나 반려합니다.
-- **Policy Log:** 샌드박스의 접근 및 차단 기록을 확인합니다.
+Built for the Fastcampus × NVIDIA Agentic AI Hackathon 2026. This is an early project with local, sandboxed and fixture execution modes, not a managed publishing service.
 
-자동 검수 이슈는 운영자에게 전달됩니다. 자격 증명 유출 검사는 게시를 차단하며, 실제 게시 여부는 백엔드의 `PUBLISH_MODE` 설정과 운영자 승인에 따릅니다.
+## See the result
 
-## 로컬 실행
+<p align="center">
+  <a href="https://www.instagram.com/p/DeL2WwdGQP5/"><img src="docs/assets/cards/slow-seoul.jpg" width="31%" alt="English carousel cover: A slower side of Seoul"></a>
+  <a href="https://www.instagram.com/p/DeL2WwdGQP5/"><img src="docs/assets/cards/seoul-forest.jpg" width="31%" alt="Seoul Forest card with photo and visitor guidance"></a>
+  <a href="https://www.instagram.com/p/DeL2e1vmXz4/"><img src="docs/assets/cards/seongsu.jpg" width="31%" alt="Creative X Seongsu event card with dates and location"></a>
+</p>
 
-필요 도구: **Node.js 22**, **pnpm 10**, **Python 3.12 이상**, **uv**.
+These are project-produced cards from the October 7, 2026 publishing run. They show the output format, not proof that every card passed through an unattended end-to-end pipeline. [Media sources and evidence](docs/SHOWCASE.md).
 
-### UI 데모
+## What the agent does
+
+- **Research:** find events and retain source URLs, dates, venues and visitor conditions.
+- **Plan:** work from a short request, or refine an event URL and editorial direction through Brainstorm.
+- **Produce:** write English copy and render portrait cards for Instagram.
+- **Review:** surface source links, excluded information, wording issues and visual checks for an operator.
+
+The reader gets English information in a familiar channel. The operator gets a workflow for producing and checking it. The project addresses event discovery and understanding; it does not solve Korean identity verification, booking or payment restrictions.
+
+## Demo links and QR codes
+
+| Destination | Link | What it provides |
+|---|---|---|
+| Demo guide | [Open the guide](https://juyoung.site/nemo-k-cards/try/) | Sample prompt and entry to the planning UI |
+| Public Admin | [Open Admin](https://admin-production-3db0.up.railway.app/) | Railway-hosted UI mock, as checked October 7, 2026 |
+| Web slides | [Open slides](https://juyoung.site/nemo-k-cards/) | Interactive deck with a link to the latest public PDF |
+
+<p align="center">
+  <a href="https://juyoung.site/nemo-k-cards/try/"><img src="docs/assets/try-qr.png" width="160" height="160" alt="Demo guide QR"></a>
+  <a href="https://admin-production-3db0.up.railway.app/"><img src="docs/assets/admin-qr.png" width="160" height="160" alt="Public Admin mock QR"></a>
+</p>
+
+[Demo QR SVG](docs/assets/try-qr.svg) · [Admin QR SVG](docs/assets/admin-qr.svg). The Railway mock is separate from the authenticated live backend used for the on-site demonstration.
+
+## Quick start
+
+For a UI-only preview, run `pnpm install --frozen-lockfile` and `pnpm dev` in `apps/web` without `NEXT_PUBLIC_API_URL`. This uses in-memory samples and resets when the server restarts. To exercise the backend renderer and checks, follow the two-terminal setup below.
+
+### 1. Run the backend with sample data
+
+Requires **Python 3.12+**, [uv](https://docs.astral.sh/uv/), **Node.js 22** and **pnpm 10**. Playwright Chromium is needed for card rendering.
 
 ```bash
 git clone https://github.com/juyoungml/nemo-k-cards.git
-cd nemo-k-cards/apps/web
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-[localhost:3000](http://localhost:3000)에서 엽니다. `NEXT_PUBLIC_API_URL`을 설정하지 않으면 앱 내부의 mock API를 사용합니다. 상태는 메모리에 저장되며 서버 재시작 시 초기화됩니다.
-
-### 백엔드를 연결한 fixture 데모
-
-레포 루트에서 백엔드를 실행합니다. 기본 fixture 설정은 보존된 데이터로 파이프라인을 재현합니다.
-
-```bash
-cd backend
-cp .env.example .env
+cd nemo-k-cards/backend
 uv sync --frozen
 uv run playwright install chromium
-uv run uvicorn app.main:app --reload
+DEMO_MODE=fixture PUBLISH_MODE=mock uv run uvicorn app.main:app --port 8000 --reload --reload-dir app
 ```
 
-별도 터미널에서 프런트엔드를 실행합니다.
+No model or Instagram credentials are required for this mode. Agent outputs come from fixtures; the backend still renders the cards and runs its checks. `PUBLISH_MODE=mock` does not publish to Instagram.
+
+### 2. Connect the Admin Page
+
+In a second terminal, from the repository root:
 
 ```bash
 cd apps/web
+pnpm install --frozen-lockfile
 NEXT_PUBLIC_API_URL=http://localhost:8000 pnpm dev
 ```
 
-실제 에이전트 실행은 `DEMO_MODE=live`와 Claude Code 설정이 필요합니다. OpenShell 실행 절차는 [샌드박스 설정 스크립트](scripts/openshell_setup.sh)와 [백엔드 문서](docs/BACKEND.md)를 참고하세요.
+Open **http://localhost:3000**, choose **New Job**, enter an event request, and run the sample workflow. Review the cards and their source information before trying the simulated approval step.
 
-## 배포와 운영 설정
+If you omit `NEXT_PUBLIC_API_URL`, the Admin uses a separate in-memory UI mock rather than this backend. [Modes and troubleshooting](docs/GETTING_STARTED.md).
 
-| 설정 | 역할 |
-| --- | --- |
-| `NEXT_PUBLIC_API_URL` | Admin이 연결할 FastAPI 주소. 프런트엔드 빌드 시 적용 |
-| `ADMIN_TOKEN` | 외부에 공개한 백엔드의 접근 코드 |
-| `CORS_ORIGINS` | 백엔드가 허용할 Admin origin의 JSON 배열 |
-| `DEMO_MODE` | `fixture` 또는 `live` |
-| `AGENT_RUNNER` | `local` 또는 `openshell` |
-| `PUBLISH_MODE` | `mock`, `dryrun`, `graph` |
+## Review before publishing
 
-외부 백엔드에는 `ADMIN_TOKEN`을 설정하고 Admin에서 접근 코드를 입력합니다. 토큰과 API 키는 배포 환경 변수 또는 로컬 `.env`에만 보관합니다. `NEXT_PUBLIC_` 변수에는 비밀 값을 넣지 않습니다. 렌더링 결과의 `/assets/` 경로는 Instagram이 이미지를 가져올 수 있도록 공개됩니다.
+![Admin review screen with cards, source links, excluded URLs and editorial warnings](docs/assets/screenshots/review-mock.jpg)
 
-- **Admin:** [Railway 설정](apps/web/railway.json), 프로젝트 `whatsonkorea-admin`, 서비스 `admin`.
-- **발표:** `presentation/` 변경을 `main`에 푸시하면 [GitHub Actions](.github/workflows/presentation-pages.yml)가 GitHub Pages로 배포합니다.
-- **게시:** `mock`은 미리보기를 만들고, `dryrun`은 게시용 컨테이너를 준비하며, `graph`는 승인된 내용을 Instagram에 게시합니다.
+*This screenshot uses mock data to explain the review interface.* Source checks and warnings inform the operator; most blocking issues are advisory in the current implementation. The approve endpoint hard-stops credential-like content and prevents requests from escalating beyond the server's configured publish mode. [Approval implementation](backend/app/main.py).
 
-```bash
-cd apps/web
-railway link
-railway up --service admin --ci
+## Where OpenShell fits
+
+```mermaid
+flowchart LR
+    admin["Admin Page"] -->|"Request / approve"| backend["FastAPI backend"]
+    backend -->|"Create stage sandbox"| agent["Claude Code in OpenShell"]
+    agent -->|"Validated JSON + policy logs"| backend
+    backend --> store["SQLite + rendered files"]
+    backend -->|"After operator approval"| instagram["Instagram Graph API"]
+    backend -->|"Upload JPEGs"| images["Public image host"]
+    images -->|"Images fetched by Instagram"| instagram
 ```
 
-## 코드와 문서
+| Boundary | Implementation |
+|---|---|
+| Agent execution | Fresh sandbox per stage; collect logs before deleting it. |
+| Network access | Host, executable and request rules; Instagram access is read-only. |
+| Files | Read-only instructions, writable output paths and required Landlock enforcement. |
+| Credentials | Model keys via a provider; publishing and storage keys on the host. |
+| Publishing | Operator approval in Admin; Instagram calls from the host publisher. |
 
-| 경로 | 내용 |
-| --- | --- |
-| [apps/web](apps/web/) | Next.js Admin 및 mock API |
-| [backend](backend/) | FastAPI, 파이프라인, 렌더러, QA, 게시 |
-| [agent](agent/) | Claude Code 에이전트와 작업 규칙 |
-| [policies](policies/) | OpenShell 및 콘텐츠 정책 |
-| [demo/scenarios](demo/scenarios/) | 재현용 fixture |
-| [presentation](presentation/) | 웹 발표 및 체험 안내 |
-| [제품 스펙](docs/SPEC.md) | 화면과 데이터 계약 |
-| [백엔드 문서](docs/BACKEND.md) | 파이프라인과 API 상세 |
-| [UI QA](docs/QA.md) | mock 시나리오 검증 |
-| [공개 검수 기록](docs/PUBLIC_REVIEW.md) | 검사 범위와 결과 |
+The local runner is a development alternative and **does not provide OpenShell isolation**. The fixture mode also does not prove runtime enforcement.
 
-폰트 고지는 [renderer/fonts](backend/app/renderer/fonts/)에, 발표 자료의 출처는 [자료 목록](presentation/manifest.json)에 보관합니다. 저장소 전체에 적용하는 별도의 LICENSE 파일은 아직 없습니다.
+[Policy file](policies/openshell/agent-policy.yaml) · [Runner](backend/app/pipeline/agent_runner.py) · [Policy probe](scripts/openshell_probe.sh) · [OpenShell setup](docs/GETTING_STARTED.md#openshell)
+
+### Evidence, with its scope
+
+![Policy Log screenshot from the running Admin, showing denied requests](docs/assets/screenshots/policy-log.jpg)
+
+The October 7 Admin capture displays denied file-write, external-connection and Graph API delete requests. A separate [committed OpenShell probe log](backend/tests/data/openshell-probe.txt) and [parser tests](backend/tests/test_policy_log.py) make the request/result mapping inspectable. These are specific test observations, not an attack-blocking rate or a guarantee against every prompt injection. [Evidence notes](docs/SHOWCASE.md#policy-evidence).
+
+## Choose an execution mode
+
+| Goal | Agent data | Runner | Publishing |
+|---|---|---|---|
+| Inspect the UI | In-memory samples | None | UI simulation |
+| Reproduce the pipeline | `DEMO_MODE=fixture` | Fixture outputs | `PUBLISH_MODE=mock` |
+| Develop with real agents | `DEMO_MODE=live` | `AGENT_RUNNER=local` | Start with `mock` |
+| Run with isolation | `DEMO_MODE=live` | `AGENT_RUNNER=openshell` | Start with `mock` |
+| Publish to your account | Configured workflow | Local or OpenShell | `PUBLISH_MODE=graph`, credentials and approval required |
+
+`dryrun` uploads images and creates Instagram containers but does not publish the final post. It is not an offline mode. Set `ADMIN_TOKEN` and restrict `CORS_ORIGINS` before exposing a real backend. Keep a publicly shared sample demo separate from an account with live publishing credentials.
+
+## Develop and contribute
+
+```bash
+cd backend
+uv run pytest -q
+uv run python -m app.renderer.preview
+```
+
+The tests include fixture pipelines, link/photo handling and policy-log parsing. They do not launch a real OpenShell sandbox. Run the [policy probe](scripts/openshell_probe.sh) in a configured OpenShell environment to test enforcement separately.
+
+Useful contribution areas are better source coverage, date-conflict fixtures, reproducible security tests, card accessibility and first-run setup. [Contribution guide](CONTRIBUTING.md) · [Report a bug](https://github.com/juyoungml/nemo-k-cards/issues/new?template=bug_report.yml) · [Propose an improvement](https://github.com/juyoungml/nemo-k-cards/issues/new?template=feature_request.yml)
+
+If you find the workflow useful, a star helps others discover it. A reproducible issue or a new event-source fixture helps improve it.
+
+## Documentation
+
+- [Getting started and deployment](docs/GETTING_STARTED.md)
+- [Product scope](docs/SPEC.md) and [backend contract](docs/BACKEND.md)
+- [Screenshots, cards and evidence](docs/SHOWCASE.md)
+- [Design system](DESIGN.md) and [brand assets](docs/assets/brand/README.md)
+- [Security reporting](SECURITY.md)
+- [Project roadmap](docs/ROADMAP.md)
+- [Public deployment review](docs/PUBLIC_REVIEW.md)
+
+## License
+
+Project code and original brand assets are available under the [MIT License](LICENSE). Fonts, photos, event posters and other third-party materials retain their own terms; see [media attribution](docs/SHOWCASE.md#media-attribution) and the bundled font notices. NVIDIA, Claude and Instagram names do not imply sponsorship or endorsement beyond the stated hackathon context.

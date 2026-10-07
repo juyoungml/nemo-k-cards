@@ -1,0 +1,30 @@
+name: Backend checks
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
+  pull_request:
+    paths: ['backend/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DEMO_MODE: fixture
+      PUBLISH_MODE: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest -q

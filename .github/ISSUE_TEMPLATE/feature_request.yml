@@ -1,0 +1,21 @@
+name: Improvement proposal
+description: Suggest a focused improvement to the editorial workflow.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Who has this problem?
+      description: Describe a concrete user or contributor situation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should change and how would we verify it?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or examples

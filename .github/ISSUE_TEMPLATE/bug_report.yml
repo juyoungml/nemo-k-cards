@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible problem in setup, agents, cards or publishing.
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: Do not paste tokens or access codes. Report security vulnerabilities privately through SECURITY.md.
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened?
+      description: Include the expected result and any redacted error message.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal event prompt or fixture when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and modes
+      description: OS, commit, DEMO_MODE, AGENT_RUNNER, PUBLISH_MODE, and OpenShell version if used. Never include credentials.
+    validations:
+      required: true
