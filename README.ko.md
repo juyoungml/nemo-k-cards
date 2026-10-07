@@ -76,6 +76,7 @@ UI만 먼저 살펴보려면 `apps/web`에서 `pnpm install --frozen-lockfile` �
 
 - OpenShell은 에이전트의 실행 프로그램, 대상 호스트, 허용 요청을 검사합니다.
 - Instagram API는 에이전트에게 읽기 전용으로 허용합니다. 게시 토큰은 에이전트에게 전달하지 않습니다.
+- 공통 테스트 폴더는 `/hackathon/input`을 읽기 전용, `/hackathon/output`을 쓰기 가능으로 둡니다. `restricted`와 `secrets`는 정책에 없어서 목록도 내용도 볼 수 없습니다([상세](docs/BACKEND.md#03-handling-the-common-test-folders-hackathon)).
 - 실제 게시는 운영자의 승인 뒤 백엔드가 수행합니다.
 - 로컬 Claude 실행은 개발용이며 OpenShell 격리를 제공하지 않습니다.
 

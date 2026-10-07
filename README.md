@@ -113,6 +113,7 @@ flowchart LR
 | Agent execution | Fresh sandbox per stage; collect logs before deleting it. |
 | Network access | Host, executable and request rules; Instagram access is read-only. |
 | Files | Read-only instructions, writable output paths and required Landlock enforcement. |
+| Common-test folders | `/hackathon/input` read-only, `/hackathon/output` writable; `restricted` and `secrets` are not in the policy, so they can't be listed or read ([details](docs/BACKEND.md#03-handling-the-common-test-folders-hackathon)). |
 | Credentials | Model keys via a provider; publishing and storage keys on the host. |
 | Publishing | Operator approval in Admin; Instagram calls from the host publisher. |
 
