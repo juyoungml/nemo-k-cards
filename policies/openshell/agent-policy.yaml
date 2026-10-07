@@ -1,0 +1,74 @@
+# What's On Korea — agent sandbox policy (SPEC §8)
+# Schema: https://docs.nvidia.com/openshell/latest/reference/policy-schema
+#
+#   openshell sandbox create --from whatsonkorea-agent:latest \
+#     --policy policies/openshell/agent-policy.yaml --provider claude-code --no-keep -- claude -p '...'
+#   openshell logs <sandbox> --since 5m --source sandbox     # policy_denied events → Admin Policy Log
+#
+# TODO(policy owner): verify binary paths against the built image (`which claude curl python3`).
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/bin, /usr, /lib, /proc, /dev/urandom, /etc, /var/log, /sandbox/agent, /sandbox/input]
+  read_write: [/sandbox/out, /tmp, /dev/null]
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  # Inference. The claude-code provider injects ANTHROPIC_API_KEY only for this host.
+  anthropic:
+    name: anthropic-inference
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+    binaries:
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/lib/node_modules/@anthropic-ai/** }
+
+  # Public event / map APIs — read-only, L7 enforced.
+  public_data:
+    name: korea-public-data-readonly
+    endpoints:
+      - { host: apis.data.go.kr, port: 443, protocol: rest, enforcement: enforce, access: read-only }
+      - { host: dapi.kakao.com, port: 443, protocol: rest, enforcement: enforce, access: read-only }
+      - { host: openapi.naver.com, port: 443, protocol: rest, enforcement: enforce, access: read-only }
+      # Seoul Open API is plain HTTP on 8088.
+      - { host: openapi.seoul.go.kr, port: 8088, protocol: rest, enforcement: enforce, access: read-only }
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/local/bin/claude }
+
+  # Event / ticketing pages for WebFetch. Start in audit, collect hosts from logs, then enforce.
+  event_pages:
+    name: event-pages-readonly
+    endpoints:
+      - { host: korean.visitkorea.or.kr, port: 443, protocol: rest, enforcement: audit, access: read-only }
+      - { host: english.visitkorea.or.kr, port: 443, protocol: rest, enforcement: audit, access: read-only }
+      - { host: culture.seoul.go.kr, port: 443, protocol: rest, enforcement: audit, access: read-only }
+      - { host: tickets.interpark.com, port: 443, protocol: rest, enforcement: audit, access: read-only }
+      - { host: www.popply.co.kr, port: 443, protocol: rest, enforcement: audit, access: read-only }
+    binaries:
+      - { path: /usr/local/bin/claude }
+
+  # Instagram: the agent may at most READ. POST (publish) and DELETE are denied at L7 and logged.
+  # No credential is injected, so even a GET is unauthenticated. Publishing happens on the host only.
+  instagram_guard:
+    name: instagram-no-write
+    endpoints:
+      - host: graph.facebook.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/local/bin/claude }
+
+# Everything else (pastebin, webhooks, arbitrary hosts) is denied by default.

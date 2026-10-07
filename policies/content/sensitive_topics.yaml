@@ -1,0 +1,8 @@
+# Content rules for the reviewer subagent (SPEC §7). block = must not publish, warn = human check.
+# TODO: fill in with the team.
+
+dates: []      # - { date: "05-18", note: "5·18 민주화운동 기념일", rule: block_playful_tone }
+phrases: []    # - { pattern: "tank day", severity: block, note: "..." }
+topics:
+  block: []
+  warn: []
