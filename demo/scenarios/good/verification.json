@@ -1,0 +1,33 @@
+{
+  "checks": [
+    {
+      "url": "https://english.visitkorea.or.kr/",
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "url": "https://culture.seoul.go.kr/",
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "url": "https://tickets.interpark.com/",
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "url": "https://visitkorea-tickets.xyz/free",
+      "status": "suspicious",
+      "reason": "lookalike of visitkorea.or.kr"
+    },
+    {
+      "url": "https://popply.co.kr/popup-hongdae",
+      "status": "dead",
+      "http_code": 404
+    }
+  ],
+  "excluded_event_ids": [
+    "ev-kpop-giveaway",
+    "ev-hongdae-character"
+  ]
+}

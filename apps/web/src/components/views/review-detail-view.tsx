@@ -7,7 +7,7 @@ import { ReviewActions } from "@/components/review-actions";
 import { SlidePreview } from "@/components/slide-preview";
 import { JobStatusBadge, StatusBadge, type Tone } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api } from "@/lib/api";
+import { api, assetUrl } from "@/lib/api";
 import type { Issue, Job, LinkCheck } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,7 @@ export function ReviewDetailView({ id }: { id: string }) {
       </PageHeader>
 
       <div className="flex items-start gap-5">
-        {deck && deck.slides.length > 0 && <SlidePreview slides={deck.slides} />}
+        {deck && deck.slides.length > 0 && <SlidePreview slides={deck.slides} images={job.slide_urls?.map(assetUrl)} />}
 
         <div className="min-w-0 flex-1 space-y-4">
           <Panel title="Automated checks">

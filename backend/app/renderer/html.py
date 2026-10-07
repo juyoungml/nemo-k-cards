@@ -5,7 +5,7 @@ Each slide's HTML is written next to its JPEG for debugging; text marked with da
 for visual QA (overflow, font size).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -36,6 +36,32 @@ PLACEHOLDER = {
     "experience": ("#0F2A3D", "#E8B04B"), "other": ("#24324A", "#7FA7D9"),
 }
 
+# Auto-fit: if the column overflows, shrink text blocks together (5% steps) down to a readable floor.
+# Photos already shrink first (flex: 1 1 0). Anything still overflowing at the floor is caught by QA.
+FIT_JS = """
+() => {
+  const pad = document.querySelector('.pad');
+  const blocks = [...pad.querySelectorAll('.ttl, .sub, .kv, ul.list, .src, .place, .chips, .ko')];
+  const floor = el => el.classList.contains('ttl') ? 52 : 30;
+  const overflowing = () => pad.scrollHeight > pad.clientHeight + 1;
+  let steps = 0;
+  while (overflowing() && steps < 30) {
+    let shrunk = false;
+    for (const el of blocks) {
+      const fs = parseFloat(getComputedStyle(el).fontSize);
+      if (fs > floor(el)) { el.style.fontSize = Math.max(floor(el), fs * 0.95) + 'px'; shrunk = true; }
+      el.querySelectorAll('dd, li, .addr, .chip').forEach(c => {
+        const f = parseFloat(getComputedStyle(c).fontSize);
+        if (f > 30) { c.style.fontSize = Math.max(30, f * 0.95) + 'px'; shrunk = true; }
+      });
+    }
+    if (!shrunk) break;
+    steps++;
+  }
+  return steps;
+}
+"""
+
 MEASURE_JS = """
 () => [...document.querySelectorAll('[data-qa]')].map(el => {
   const cs = getComputedStyle(el), r = el.getBoundingClientRect();
@@ -62,6 +88,13 @@ def daterange(start: date | str, end: date | str) -> str:
     if (s.year, s.month) == (e.year, e.month):
         return f"{s:%b} {s.day}–{e.day}"
     return f"{s:%b} {s.day} – {e:%b} {e.day}"
+
+
+def weekend_label(today: date) -> str:
+    """'Oct 10–11' for the coming weekend (this weekend if today is Sat/Sun)."""
+    sat = today + timedelta(days=(5 - today.weekday()) % 7) if today.weekday() < 5 else today - timedelta(
+        days=today.weekday() - 5)
+    return daterange(sat, sat + timedelta(days=1))
 
 
 def access_badges(event: EventBrief | None) -> list[dict]:
@@ -101,7 +134,8 @@ class HtmlRenderer:
     def __init__(self, theme: Theme = "clean", mood: Mood = "autumn",
                  account: str = "@whatsonkorea", as_of: date | None = None) -> None:
         self.theme, self.mood, self.account = theme, mood, account
-        self.as_of = (as_of or datetime.now(ZoneInfo("Asia/Seoul")).date()).strftime("%Y.%m.%d")
+        self.today = as_of or datetime.now(ZoneInfo("Asia/Seoul")).date()
+        self.as_of = self.today.strftime("%Y.%m.%d")
         self.env = Environment(loader=FileSystemLoader(HERE / "templates"),
                                autoescape=select_autoescape(["html"]), undefined=StrictUndefined)
         self.env.filters["daterange"] = daterange
@@ -114,15 +148,13 @@ class HtmlRenderer:
         event_ids = [s.event_id for s in deck.slides if s.layout == "event"]
         hosts = sorted({urlparse(str(src.url)).hostname or "" for b in briefs.values() for src in b.sources} - {""})
         credits = sorted({c for s in deck.slides if (c := (slide_image(s) or {}).get("credit"))})
-        # cover date = when every featured event is running (latest start date)
-        first = briefs[max(briefs, key=lambda k: briefs[k].start_date)] if briefs else None
         return {
             "deck": deck, "slide": slide, "event": event, "theme": self.theme,
             "total": len(deck.slides), "account": self.account, "as_of": self.as_of,
             "font_dir": FONT_DIR.as_uri(),
             "palette_css": ";".join(f"--{k}:{v}" for k, v in palette.items()),
             "img": slide_image(slide),
-            "kicker": f"{first.start_date:%b %-d} · {self.account}" if first else self.account,
+            "kicker": f"{weekend_label(self.today)} · {self.account}",
             "event_no": event_ids.index(slide.event_id) + 1 if slide.event_id in event_ids else "",
             "badges": access_badges(event),
             "source_hosts": hosts, "credits": credits,
@@ -136,6 +168,7 @@ class HtmlRenderer:
         from playwright.async_api import async_playwright
 
         by_id = {b.id: b for b in (briefs or [])}
+        out_dir = out_dir.resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         rendered: list[RenderedSlide] = []
         async with async_playwright() as p:
@@ -146,6 +179,7 @@ class HtmlRenderer:
                 html_path.write_text(self.html(deck, slide, by_id), encoding="utf-8")
                 await page.goto(html_path.as_uri())
                 await page.evaluate("document.fonts.ready")
+                await page.evaluate(FIT_JS)
                 measures = [TextMeasure(**m) for m in await page.evaluate(MEASURE_JS)]
                 jpg = out_dir / f"slide-{slide.index:02d}.jpg"
                 await page.screenshot(path=str(jpg), type="jpeg", quality=90)

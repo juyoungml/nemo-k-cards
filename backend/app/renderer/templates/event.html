@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {# Required on event slides (SPEC §6): name EN + 한글, dates, venue + nearest station, price, booking, why-go, source. #}
 {% block content %}
+{% if event %}
   <div style="display:flex;align-items:flex-end;gap:3cqw">
     <span class="num">{{ event_no }}</span>
     <div style="min-width:0">
@@ -22,4 +23,10 @@
   </div>
   {% endif %}
   {% if slide.body or event.why_go %}<div class="sub" style="font-size:3.8cqw" data-qa="event.body">{{ slide.body or event.why_go }}</div>{% endif %}
+{% else %}
+  <span class="kicker">What's on</span>
+  <div class="ttl" style="font-size:8cqw" data-qa="event.heading">{{ slide.heading }}</div>
+  {% include "_photo.html" %}
+  {% if slide.body %}<div class="sub" style="white-space:pre-line" data-qa="event.body">{{ slide.body }}</div>{% endif %}
+{% endif %}
 {% endblock %}

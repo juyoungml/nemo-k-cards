@@ -1,15 +1,266 @@
-"""Runs one job through SPEC §4: research -> verify -> write -> render -> QA -> review."""
+"""Runs one job through SPEC §4: research -> verify -> copy -> render -> QA -> review (BACKEND §5).
 
-from app.schemas import Job
+DEMO_MODE=fixture replays demo/scenarios/<name>/ for the agent stages (no API cost) while render/QA run for real.
+DEMO_MODE=live calls the Claude Code subagents through the configured runner.
+"""
+
+import asyncio
+import json
+import logging
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
+from app import store
+from app.config import settings
+from app.pipeline.agent_runner import run_stage
+from app.renderer.html import HtmlRenderer
+from app.schemas import (
+    CardDeck,
+    Draft,
+    EventBrief,
+    Job,
+    JobStatus,
+    LogLine,
+    PipelineStep,
+    ReviewVerdict,
+    VerificationReport,
+)
+from app.services import link_checker, publisher, visual_qa
+
+log = logging.getLogger("orchestrator")
+KST = ZoneInfo("Asia/Seoul")
+FIXTURE_DELAY = 1.2  # seconds per agent stage in fixture mode, so the UI shows progress
+
+STEPS = {
+    "research": ("Research", "researcher · sandbox"),
+    "verify": ("Verify links", "host"),
+    "copy": ("Outline & copy", "copywriter · sandbox"),
+    "render": ("Render", "host · Playwright"),
+    "qa": ("Visual QA", "host"),
+    "review": ("Final review", "reviewer · sandbox"),
+    "publish": ("Human publish", "you"),
+}
+STATUS = {"research": JobStatus.RESEARCHING, "verify": JobStatus.VERIFYING, "copy": JobStatus.WRITING,
+          "render": JobStatus.RENDERING, "qa": JobStatus.QA, "review": JobStatus.REVIEWING}
+
+_tasks: set[asyncio.Task] = set()
 
 
-async def run_job(job: Job) -> None:
-    # TODO: for each stage, update job.status and persist
-    #   1. RESEARCHING  agent_runner.run_stage("researcher", ...) -> list[EventBrief]
-    #   2. VERIFYING    services.link_checker.verify(...)          -> VerificationReport
-    #   3. WRITING      agent_runner.run_stage("copywriter", ...)  -> CardDeck
-    #   4. RENDERING    renderer.render(...)                       -> list[RenderedSlide]
-    #   5. QA           services.visual_qa.run_qa(...)             -> QAReport
-    #   6. REVIEWING    agent_runner.run_stage("reviewer", ...)    -> ReviewVerdict
-    #   -> READY_FOR_REVIEW | REJECTED
-    raise NotImplementedError
+def spawn(coro) -> None:
+    t = asyncio.create_task(coro)
+    _tasks.add(t)
+    t.add_done_callback(_tasks.discard)
+
+
+def new_job(job_id: str, prompt: str, source: str = "quick", draft_id: str | None = None) -> Job:
+    keys = [k for k in STEPS if not (source == "brainstorm" and k == "research")]
+    steps = [PipelineStep(name=STEPS[k][0], where=STEPS[k][1]) for k in keys]
+    steps[-1].note = "Approve in Review"
+    return Job(id=job_id, prompt=prompt, created_at=datetime.now(UTC), source=source,
+               draft_id=draft_id, pipeline=steps)
+
+
+class Run:
+    """Small helper that mutates the job and persists after every change (SSE reads the store)."""
+
+    def __init__(self, job: Job) -> None:
+        self.job = job
+
+    def save(self) -> None:
+        store.save_job(self.job)
+
+    def step(self, key: str, state: str, note: str | None = None) -> None:
+        name = STEPS[key][0]
+        for s in self.job.pipeline:
+            if s.name == name:
+                s.state = state
+                if note is not None:
+                    s.note = note
+        if state == "running" and key in STATUS:
+            self.job.status = STATUS[key]
+        self.save()
+
+    def log(self, stage: str, message: str, level: str = "info") -> None:
+        self.job.log.append(LogLine(time=datetime.now(KST).strftime("%H:%M:%S"), stage=stage,
+                                    message=message, level=level))
+        self.save()
+
+
+def _scenario(name: str = "good"):
+    d = settings.scenarios_dir / name
+
+    def load(fname: str):
+        p = d / fname
+        return json.loads(p.read_text()) if p.exists() else None
+    return load
+
+
+async def run_job(job_id: str, draft: Draft | None = None) -> None:
+    job = store.get_job(job_id)
+    if not job:
+        return
+    r = Run(job)
+    fx = _scenario()
+    live = settings.demo_mode == "live"
+    current = "research"
+    try:
+        # 1. Research (sandbox) ------------------------------------------------------------
+        if job.source == "quick":
+            current = "research"
+            r.step("research", "running")
+            r.log("research", f"sandbox started ({settings.agent_runner}, policy: {settings.openshell_policy.name})")
+            if live:
+                briefs = await run_stage(
+                    "researcher",
+                    "Use the researcher subagent. Research events for this request and return EventBrief items. "
+                    f"Today is {datetime.now(KST):%Y-%m-%d} (Asia/Seoul). Request: {job.prompt}",
+                    {"prompt": job.prompt, "today": datetime.now(KST).date().isoformat()},
+                    list[EventBrief])
+            else:
+                await asyncio.sleep(FIXTURE_DELAY)
+                briefs = [EventBrief.model_validate(b) for b in fx("briefs.json")]
+            job.briefs = briefs
+            n_src = sum(len(b.sources) for b in briefs)
+            r.log("research", f"{len(briefs)} EventBrief validated (schema ok)")
+            r.step("research", "done", f"{len(briefs)} events · {n_src} sources")
+
+        # 2. Verify (host) -------------------------------------------------------------------
+        current = "verify"
+        r.step("verify", "running")
+        fixture_ver = None if live else fx("verification.json")
+        report = (VerificationReport.model_validate(fixture_ver) if fixture_ver
+                  else await link_checker.verify(job.briefs))
+        job.verification = report
+        for c in report.checks:
+            if c.status != "ok":
+                r.log("verify", f"{c.url} → {c.status.upper()}" + (f" ({c.reason or c.http_code})"), "warn")
+        bad = [c for c in report.checks if c.status != "ok"]
+        dead = sum(c.status == "dead" for c in bad)
+        sus = sum(c.status == "suspicious" for c in bad)
+        r.step("verify", "done", f"{dead} dead · {sus} lookalike → {len(report.excluded_event_ids)} excluded"
+               if bad else f"{len(report.checks)} links ok")
+        ok_urls = {c.url for c in report.checks if c.status == "ok"}
+        for b in job.briefs:
+            for src in b.sources:
+                if str(src.url) in ok_urls:
+                    src.fetched_at = datetime.now(UTC)
+        included = [b for b in job.briefs if b.id not in report.excluded_event_ids]
+
+        # 3. Outline & copy (sandbox) ----------------------------------------------------------
+        current = "copy"
+        r.step("copy", "running")
+        if live:
+            constraints = draft.model_dump(include={"facts", "angles", "selected_angle_id", "targets", "tones",
+                                                    "outline"}) if draft else None
+            deck = await run_stage(
+                "copywriter",
+                "Use the copywriter subagent. Turn the verified events (and brainstorm constraints, if any) "
+                "into a CardDeck for foreigners in Korea.",
+                {"briefs": [b.model_dump(mode="json") for b in included], "constraints": constraints,
+                 "prompt": job.prompt},
+                CardDeck)
+        else:
+            await asyncio.sleep(FIXTURE_DELAY)
+            deck = _deck_from_draft(draft) if draft else CardDeck.model_validate(fx("deck.json"))
+        deck.job_id = job.id
+        job.deck = deck
+        n_tags = len(visual_qa.HASHTAG.findall(deck.caption))
+        r.log("copy", f"CardDeck {len(deck.slides)} slides · caption {n_tags} hashtags")
+        r.step("copy", "done", f"{len(deck.slides)} slides")
+
+        # 4. Render (host) ------------------------------------------------------------------
+        current = "render"
+        r.step("render", "running")
+        out_dir = settings.output_dir / job.id
+        rendered = await HtmlRenderer(theme=settings.theme).render(deck, out_dir, included)
+        job.slide_urls = [f"/assets/{job.id}/{s.path.name}" for s in rendered]
+        r.log("render", f"{rendered[0].path.name} … {rendered[-1].path.name}")
+        r.step("render", "done", f"{len(rendered)} JPEG · 1080×1350")
+
+        # 5. Visual QA (host) ------------------------------------------------------------------
+        current = "qa"
+        r.step("qa", "running")
+        secrets = tuple(s for s in (settings.ig_access_token,) if s)
+        qa = visual_qa.run_qa(rendered, deck, secrets)
+        nb = sum(i.severity == "block" for i in qa.issues)
+        nw = len(qa.issues) - nb
+        r.log("qa", f"overflow/font/PII/secret/hashtag checks → {nb} block · {nw} warn")
+        r.step("qa", "done", f"{nb} block · {nw} warn")
+
+        # 6. Final review (sandbox) -------------------------------------------------------------
+        current = "review"
+        r.step("review", "running")
+        if live:
+            verdict = await run_stage(
+                "reviewer",
+                "Use the reviewer subagent. Review this card deck before a human approves it. Check facts against "
+                "the briefs, sensitive dates/phrasing (rules in `sensitive_topics_yaml`), PII and tone. "
+                "Look at the rendered slide images listed in `slide_paths`.",
+                {"deck": deck.model_dump(mode="json"), "briefs": [b.model_dump(mode="json") for b in included],
+                 "qa_issues": [i.model_dump() for i in qa.issues],
+                 "slide_paths": [str(s.path) for s in rendered],
+                 "sensitive_topics_yaml": (settings.agent_dir.parent / "policies/content/sensitive_topics.yaml")
+                 .read_text(encoding="utf-8"),
+                 "today": datetime.now(KST).date().isoformat()},
+                ReviewVerdict)
+        else:
+            await asyncio.sleep(FIXTURE_DELAY)
+            verdict = ReviewVerdict.model_validate(fx("review.json") or {"verdict": "pass"})
+        r.log("review", f"verdict {verdict.verdict} · {len(verdict.issues)} issue(s)",
+              "info" if verdict.verdict == "pass" else "warn")
+        r.step("review", "done", f"{verdict.verdict} · {len(verdict.issues)} issue(s)")
+
+        job.issues = qa.issues + verdict.issues
+        blocked = verdict.verdict == "fail" or any(i.severity == "block" for i in job.issues)
+        job.status = JobStatus.REJECTED if blocked else JobStatus.READY_FOR_REVIEW
+        r.save()
+    except Exception as e:
+        log.exception("job %s failed at %s", job_id, current)
+        job.error = f"{STEPS[current][0]} failed: {e}"
+        job.status = JobStatus.FAILED
+        r.step(current, "failed", str(e)[:120])
+
+
+def _deck_from_draft(draft: Draft) -> CardDeck:
+    """Fixture copywriter for Brainstorm: outline headings + verified facts."""
+    angle = next((a for a in draft.angles if a.id == draft.selected_angle_id), None)
+    title = angle.title if angle else (draft.outline[0].heading if draft.outline else "What's on in Korea")
+    facts = "\n".join(f.value for f in draft.facts if f.verified)
+    slides = [{"index": i, "layout": o.layout, "heading": o.heading,
+               "body": facts if o.layout == "event" and i == 1 else ""} for i, o in enumerate(draft.outline[:8])]
+    while len(slides) < 6:
+        slides.insert(-1, {"index": 0, "layout": "tips", "heading": "Good to know", "body": ""})
+    for i, s in enumerate(slides):
+        s["index"] = i
+    hook = angle.hook if angle else ""
+    return CardDeck(title=title, caption=f"{title}\n{hook}\nDetails & links in bio.\n#seoul #korea #koreatravel "
+                    "#thingstodoinseoul #whatsonkorea", slides=slides)
+
+
+async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
+    job = store.get_job(job_id)
+    if not job or not job.deck:
+        return
+    r = Run(job)
+    if caption:
+        job.deck.caption = caption
+    job.status = JobStatus.PUBLISHING
+    r.step("publish", "running", f"publishing ({mode})")
+    r.log("publish", f"approved by operator → publisher on host (mode: {mode})")
+    try:
+        if mode == "graph":
+            if not settings.public_asset_base_url:
+                raise RuntimeError("PUBLIC_ASSET_BASE_URL is not set (Instagram must fetch the JPEGs)")
+            urls = [settings.public_asset_base_url.rstrip("/") + u for u in job.slide_urls]
+            job.published_url = await publisher.publish_carousel(urls, job.deck.caption)
+        else:
+            await asyncio.sleep(1.5)
+            job.published_url = f"https://www.instagram.com/p/MOCK{job.id.upper()}/"
+            r.log("publish", "mock publish: no network call (set PUBLISH_MODE=graph to post)")
+        job.status = JobStatus.PUBLISHED
+        r.step("publish", "done", "posted to @whatsonkorea" if mode == "graph" else "mock post created")
+    except Exception as e:  # noqa: BLE001
+        job.status = JobStatus.READY_FOR_REVIEW
+        job.error = f"Publish failed: {e}"
+        r.step("publish", "failed", str(e)[:120])
+

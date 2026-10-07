@@ -1,0 +1,11 @@
+{
+  "verdict": "pass",
+  "issues": [
+    {
+      "severity": "warn",
+      "category": "tone",
+      "slide_index": 4,
+      "message": "\"How locals do it\" is fine; avoid \"must-visit\" style hype in the caption."
+    }
+  ]
+}

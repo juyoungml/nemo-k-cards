@@ -73,6 +73,7 @@ export interface Job {
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
   published_url?: string | null;
   error?: string | null;
+  slide_urls?: string[]; // rendered JPEGs, relative to API_URL (/assets/{id}/slide-NN.jpg)
   // View extras returned by GET /jobs/{id} and the SSE stream.
   source?: "quick" | "brainstorm";
   pipeline?: PipelineStep[];
