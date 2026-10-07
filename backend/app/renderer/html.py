@@ -5,7 +5,7 @@ Each slide's HTML is written next to its JPEG for debugging; text marked with da
 for visual QA (overflow, font size).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -90,6 +90,13 @@ def daterange(start: date | str, end: date | str) -> str:
     return f"{s:%b} {s.day} – {e:%b} {e.day}"
 
 
+def weekend_label(today: date) -> str:
+    """'Oct 10–11' for the coming weekend (this weekend if today is Sat/Sun)."""
+    sat = today + timedelta(days=(5 - today.weekday()) % 7) if today.weekday() < 5 else today - timedelta(
+        days=today.weekday() - 5)
+    return daterange(sat, sat + timedelta(days=1))
+
+
 def access_badges(event: EventBrief | None) -> list[dict]:
     """Foreigner access chips from EventBrief.access (BACKEND §3). Empty until the schema has it."""
     acc = getattr(event, "access", None) if event else None
@@ -127,7 +134,8 @@ class HtmlRenderer:
     def __init__(self, theme: Theme = "clean", mood: Mood = "autumn",
                  account: str = "@whatsonkorea", as_of: date | None = None) -> None:
         self.theme, self.mood, self.account = theme, mood, account
-        self.as_of = (as_of or datetime.now(ZoneInfo("Asia/Seoul")).date()).strftime("%Y.%m.%d")
+        self.today = as_of or datetime.now(ZoneInfo("Asia/Seoul")).date()
+        self.as_of = self.today.strftime("%Y.%m.%d")
         self.env = Environment(loader=FileSystemLoader(HERE / "templates"),
                                autoescape=select_autoescape(["html"]), undefined=StrictUndefined)
         self.env.filters["daterange"] = daterange
@@ -140,15 +148,13 @@ class HtmlRenderer:
         event_ids = [s.event_id for s in deck.slides if s.layout == "event"]
         hosts = sorted({urlparse(str(src.url)).hostname or "" for b in briefs.values() for src in b.sources} - {""})
         credits = sorted({c for s in deck.slides if (c := (slide_image(s) or {}).get("credit"))})
-        # cover date = when every featured event is running (latest start date)
-        first = briefs[max(briefs, key=lambda k: briefs[k].start_date)] if briefs else None
         return {
             "deck": deck, "slide": slide, "event": event, "theme": self.theme,
             "total": len(deck.slides), "account": self.account, "as_of": self.as_of,
             "font_dir": FONT_DIR.as_uri(),
             "palette_css": ";".join(f"--{k}:{v}" for k, v in palette.items()),
             "img": slide_image(slide),
-            "kicker": f"{first.start_date:%b %-d} · {self.account}" if first else self.account,
+            "kicker": f"{weekend_label(self.today)} · {self.account}",
             "event_no": event_ids.index(slide.event_id) + 1 if slide.event_id in event_ids else "",
             "badges": access_badges(event),
             "source_hosts": hosts, "credits": credits,

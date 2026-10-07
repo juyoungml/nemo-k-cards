@@ -67,11 +67,11 @@ class EventBrief(BaseModel):
     address_ko: str = ""
     lat: float | None = None
     lng: float | None = None
-    nearest_station: str | None = Field(None, max_length=60)
-    price: str | None = Field(None, max_length=40)
-    booking: str | None = Field(None, max_length=60)
+    nearest_station: str | None = None   # keep short (≤ 60); renderer auto-fits, QA catches overflow
+    price: str | None = None
+    booking: str | None = None
     foreigner_tips: list[str] = Field(default_factory=list)
-    why_go: str = Field("", max_length=140)
+    why_go: str = ""
     sources: list[Source] = Field(min_length=1)
     access: Access | None = None
     images: list[ImageAsset] = Field(default_factory=list)
@@ -100,8 +100,8 @@ Layout = Literal["cover", "event", "tips", "map", "cta"]
 class Slide(BaseModel):
     index: int
     layout: Layout
-    heading: str = Field(max_length=100)
-    body: str = Field("", max_length=300)
+    heading: str
+    body: str = ""
     event_id: str | None = None
     image: ImageAsset | None = None
     source_urls: list[str] = Field(default_factory=list)

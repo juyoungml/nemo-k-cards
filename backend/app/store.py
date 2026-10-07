@@ -1,15 +1,26 @@
 """SQLite store (BACKEND §8). Models are stored as JSON; one table per kind."""
 
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.config import settings
 from app.schemas import Draft, Job, PolicyEvent
 
 _lock = threading.Lock()
+log = logging.getLogger("store")
+
+
+def _load[M: BaseModel](model: type[M], raw: str) -> M | None:
+    """Validate a stored row; never let one bad/legacy row break a list endpoint."""
+    try:
+        return model.model_validate_json(raw)
+    except ValidationError as e:
+        log.warning("stored %s failed validation (%d errors); skipping", model.__name__, e.error_count())
+        return None
 
 
 def _conn() -> sqlite3.Connection:
@@ -40,12 +51,12 @@ def save_job(job: Job) -> Job:
 
 def get_job(job_id: str) -> Job | None:
     row = _db.execute("select json from jobs where id = ?", (job_id,)).fetchone()
-    return Job.model_validate_json(row[0]) if row else None
+    return _load(Job, row[0]) if row else None
 
 
 def list_jobs(limit: int = 50) -> list[Job]:
     rows = _db.execute("select json from jobs order by created_at desc limit ?", (limit,)).fetchall()
-    return [Job.model_validate_json(r[0]) for r in rows]
+    return [j for r in rows if (j := _load(Job, r[0]))]
 
 
 def save_draft(draft: Draft) -> Draft:
@@ -55,7 +66,7 @@ def save_draft(draft: Draft) -> Draft:
 
 def get_draft(draft_id: str) -> Draft | None:
     row = _db.execute("select json from drafts where id = ?", (draft_id,)).fetchone()
-    return Draft.model_validate_json(row[0]) if row else None
+    return _load(Draft, row[0]) if row else None
 
 
 def add_policy_events(events: list[PolicyEvent]) -> None:
@@ -67,4 +78,4 @@ def add_policy_events(events: list[PolicyEvent]) -> None:
 
 def list_policy_events(limit: int = 200) -> list[PolicyEvent]:
     rows = _db.execute("select json from policy_events order by rowid desc limit ?", (limit,)).fetchall()
-    return [PolicyEvent.model_validate_json(r[0]) for r in rows]
+    return [e for r in rows if (e := _load(PolicyEvent, r[0]))]
