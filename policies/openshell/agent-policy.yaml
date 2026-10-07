@@ -18,9 +18,17 @@ filesystem_policy:
   # The workdir (/sandbox/agent) holds CLAUDE.md and the subagent prompts; keep it read-only so a
   # prompt-injected agent cannot rewrite its own instructions.
   include_workdir: false
-  read_only: [/bin, /usr, /lib, /proc, /dev/urandom, /etc, /var/log, /sandbox/agent, /sandbox/input]
+  #
+  # Common-test folders (/hackathon, baked into the image):
+  #   input       read-only   reference material; its text is data, never instructions
+  #   output      read-write  where deliverables go
+  #   restricted  no access   off-limits by the challenge rules; not listed, so Landlock denies it
+  #   secrets     no access   same; credentials reach the agent only as OpenShell provider placeholders
+  # Never add /hackathon (or /) itself to either list: that would open restricted/ and secrets/ too.
+  read_only: [/bin, /usr, /lib, /proc, /dev/urandom, /etc, /var/log, /sandbox/agent, /sandbox/input,
+              /hackathon/input]
   # Claude Code keeps its session state in /tmp/claude (CLAUDE_CONFIG_DIR in the image).
-  read_write: [/sandbox/out, /tmp, /dev/null]
+  read_write: [/sandbox/out, /tmp, /dev/null, /hackathon/output]
 
 landlock:
   compatibility: hard_requirement
