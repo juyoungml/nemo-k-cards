@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 
+import { AccessGate } from "@/components/access-gate";
 import { Sidebar } from "@/components/sidebar";
 import "./globals.css";
 
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full bg-canvas">
         <Sidebar />
         <main className="min-w-0 flex-1 space-y-6 px-10 py-8">{children}</main>
+        <AccessGate />
       </body>
     </html>
   );

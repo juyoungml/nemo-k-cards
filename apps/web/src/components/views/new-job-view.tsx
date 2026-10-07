@@ -47,6 +47,13 @@ export function NewJobView() {
 
   const live = job && !TERMINAL.includes(job.status) ? api.jobEventsUrl(job.id) : null;
   useEventSource<Job>(live, setJob);
+  // Some proxies hold SSE until the stream ends (e.g. Cloudflare quick tunnels), so poll as well while it runs.
+  const jobId = job?.id;
+  useEffect(() => {
+    if (!live || !jobId) return;
+    const t = setInterval(() => api.getJob(jobId).then(setJob).catch(() => {}), 2000);
+    return () => clearInterval(t);
+  }, [live, jobId]);
 
   const run = () =>
     startTransition(async () => {

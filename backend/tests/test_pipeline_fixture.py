@@ -161,3 +161,41 @@ def test_demote_unverified_keeps_only_checked_sources():
 ])
 def test_parse_dates(text, expected):
     assert drafts.parse_dates(text, date(2026, 10, 7)) == expected
+
+
+def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+    calls = []
+
+    async def fake_publish(job_id, caption, mode):
+        calls.append(mode)
+    monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
+    monkeypatch.setattr(settings, "publish_mode", "mock")
+    client = TestClient(app)
+    for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
+        job = orchestrator.new_job(secrets.token_hex(3), "approve test")
+        job.status = JobStatus.READY_FOR_REVIEW
+        store.save_job(job)
+        r = client.post(f"/jobs/{job.id}/approve", json={"mode": mode} if mode else {})
+        assert r.status_code == code, (mode, r.text)
+    assert calls == ["mock", "mock"]
+
+
+def test_admin_token_guards_the_api(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings, "admin_token", "s3cret")
+    c = TestClient(app)
+    assert c.get("/health").status_code == 200
+    assert c.get("/jobs").status_code == 401
+    assert c.get("/jobs", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert c.get("/jobs", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+    assert c.post("/reset").status_code == 401
+    assert c.get("/jobs?token=s3cret").status_code == 401  # query token only for SSE
+    r = c.get("/jobs", headers={"Origin": "http://localhost:3000"})
+    assert r.status_code == 401 and r.headers.get("access-control-allow-origin") == "http://localhost:3000"

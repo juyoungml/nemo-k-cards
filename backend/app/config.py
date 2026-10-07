@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     openshell_providers: list[str] = ["claude-code"]
     publish_mode: Literal["mock", "dryrun", "graph"] = "mock"
     theme: Literal["bold", "clean", "pop"] = "clean"
+    # Admin origins allowed to call this API from the browser (e.g. a tunnel URL for a shared test).
+    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # When set, every API call except /health and /assets needs `Authorization: Bearer <ADMIN_TOKEN>`
+    # (SSE: `?token=`). Set it whenever the API is reachable from outside this machine.
+    admin_token: str = ""
 
     # Instagram Graph API — host-only secrets, never forwarded to the sandbox.
     ig_user_id: str = ""

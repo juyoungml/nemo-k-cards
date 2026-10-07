@@ -28,17 +28,10 @@ def ig_account() -> dict | None:
 
 
 def channels() -> list[Channel]:
+    """Connected channels only: no row (and no invented follower count) for an account without a token."""
     ig = ig_account()
-    live = [Channel(handle=f"@{ig.get('username', 'whatsonkorea')}", platform="Instagram",
-                    followers=int(ig.get("followers_count", 0)), live=True)] if ig else [CHANNELS[0]]
-    return live + CHANNELS[1:]
-
-CHANNELS = [
-    Channel(handle="@whatsonkorea", platform="Instagram", followers=12480, live=True),
-    Channel(handle="@whatsonkorea.jp", platform="Instagram", followers=2104, live=False),
-    Channel(handle="What's On Korea", platform="Threads", followers=860, live=False),
-    Channel(handle="What's On Korea", platform="YouTube Shorts", followers=1320, live=False),
-]
+    return [Channel(handle=f"@{ig.get('username', 'whatsonkorea')}", platform="Instagram",
+                    followers=int(ig.get("followers_count", 0)), live=True)] if ig else []
 
 # Representative events from a sandbox run (Figma Policy Log), shown only in DEMO_MODE=fixture.
 # Live runs show only the parsed OpenShell logs.
