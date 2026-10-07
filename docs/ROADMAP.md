@@ -11,4 +11,6 @@ These are proposed priorities, not shipped features or release commitments.
 | Publishing reliability | Retry and duplicate-post behavior | A failed or repeated request cannot silently create duplicate public posts |
 | Discovery | Better event coverage and publication freshness | Output identifies retrieval date, event date and source, with a refresh process |
 
+Engineering detail for each hardening item, with evidence and fixes: [HARDENING.md](HARDENING.md).
+
 Follow [Issues](https://github.com/juyoungml/nemo-k-cards/issues) for specific work. A useful report includes the observed behavior, expected behavior and a reproducible input.
