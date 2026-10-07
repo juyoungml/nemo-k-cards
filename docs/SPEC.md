@@ -224,6 +224,8 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 
 **프로세스**: Figma 목업(4화면) → shadcn/ui + Tailwind 구현
 
+**Figma**: [What's On Korea — Admin Mockups](https://www.figma.com/design/OrkSDRFk7FwMzJ5WFxgYDY) — 화면 4개 + 공통 컴포넌트(Button, Badge, NavItem, StatCard, Sidebar) + `Color` 변수. 폰트는 Geist / Noto Sans KR. 화면 속 데이터는 예시입니다.
+
 | 화면 | 구성 요소 |
 |---|---|
 | **Dashboard** | SNS/Channel 리스트, 채널별 followers·reach·views (IG Insights 실데이터 + mock), 최근 카드뉴스와 상태 뱃지 |
