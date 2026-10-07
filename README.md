@@ -35,3 +35,16 @@ cd backend && cp .env.example .env && uv sync && uv run uvicorn app.main:app --r
 ```bash
 cd apps/web && pnpm install && pnpm dev
 ```
+
+## 배포 (Admin · Railway)
+
+- URL: https://admin-production-3db0.up.railway.app (프로젝트 `whatsonkorea-admin`, 서비스 `admin`)
+- 설정: [apps/web/railway.json](apps/web/railway.json) (Railpack, `pnpm build` / `pnpm start`, Node 22)
+- 현재 **mock 모드**입니다(`NEXT_PUBLIC_API_URL` 미설정 → `/api/mock`). mock 상태는 메모리에 있으니 인스턴스는 1개로 유지하세요.
+
+```bash
+cd apps/web && railway link   # 최초 1회: whatsonkorea-admin / admin 선택
+railway up --service admin --ci
+```
+
+실제 백엔드로 전환하려면 `railway variables --set NEXT_PUBLIC_API_URL=https://<fastapi-host>`를 실행하고 다시 배포하세요(빌드 시점에 값이 들어감). FastAPI CORS에 Admin 도메인도 추가해야 합니다.

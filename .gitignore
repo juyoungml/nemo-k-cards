@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -218,8 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-# Python template ignores lib/ — keep the web app source
-!apps/web/src/lib/
 
 # Backend runtime data (rendered slides, SQLite)
 backend/.data/
