@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Backend runtime data (rendered slides, SQLite)
+backend/.data/
