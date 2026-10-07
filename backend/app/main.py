@@ -100,8 +100,10 @@ async def approve(job_id: str, req: ApproveRequest) -> Job:
     job = _job_or_404(job_id)
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
-    if any(i.severity == "block" for i in job.issues):
-        raise HTTPException(409, "job has blocking issues")
+    # Blocking issues are advisory: the operator saw them in Review and chose to approve.
+    # Hard stop only for leaked credentials — those must never be published.
+    if any(i.category == "pii" and "credential" in i.message for i in job.issues):
+        raise HTTPException(409, "deck contains a credential-like string; regenerate before publishing")
     if req.caption:
         from app.services.visual_qa import HASHTAG, scan_text
         if len(HASHTAG.findall(req.caption)) > 5 or scan_text(req.caption, "caption",

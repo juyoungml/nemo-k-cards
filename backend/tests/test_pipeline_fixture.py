@@ -52,9 +52,11 @@ async def test_good_scenario_is_ready(no_network):
     assert set(job.verification.excluded_event_ids) == {"ev-kpop-giveaway", "ev-hongdae-character"}
 
 
-async def test_bad_scenario_is_rejected_with_policy_events(no_network):
+async def test_bad_scenario_waits_for_operator_with_block_issues(no_network):
     job = await run_quick("bad")
-    assert job.status == JobStatus.REJECTED
+    # BACKEND §11 #4 (v1.1): checks never auto-reject; blocking issues wait for the operator in Review.
+    assert job.status == JobStatus.READY_FOR_REVIEW
+    assert any(i.severity == "block" for i in job.issues)
     cats = {(i.category, i.severity) for i in job.issues}
     assert ("sensitive", "block") in cats
     assert ("pii", "block") in cats  # phone number on slide 2, found by host QA (not the fixture)
@@ -98,7 +100,9 @@ async def test_brainstorm_dead_source_blocks_and_demotes_facts(no_network):
     job = await run_brainstorm(d)  # url is not in the fixture -> fake checker says 404
     assert job.verification.checks[0].status == "dead"
     assert job.verification.excluded_event_ids == [job.briefs[0].id]
-    assert job.status == JobStatus.REJECTED
+    # BACKEND §11 #4 (v1.1): checks never auto-reject; blocking issues wait for the operator in Review.
+    assert job.status == JobStatus.READY_FOR_REVIEW
+    assert any(i.severity == "block" for i in job.issues)
     assert any(i.category == "link" and i.severity == "block" for i in job.issues)
     assert any("marked unverified" in line.message for line in job.log)
 
@@ -108,7 +112,9 @@ async def test_brainstorm_without_sources_is_blocked(no_network):
     d.facts = [f.model_copy(update={"source_url": None}) for f in d.facts]
     job = await run_brainstorm(d)
     assert job.briefs == []
-    assert job.status == JobStatus.REJECTED
+    # BACKEND §11 #4 (v1.1): checks never auto-reject; blocking issues wait for the operator in Review.
+    assert job.status == JobStatus.READY_FOR_REVIEW
+    assert any(i.severity == "block" for i in job.issues)
     assert any(i.category == "fact" and "source URL" in i.message for i in job.issues)
 
 

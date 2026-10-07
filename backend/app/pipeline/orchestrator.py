@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from app import drafts, store
 from app.config import settings
 from app.pipeline.agent_runner import run_stage
-from app.renderer.html import HtmlRenderer
+from app.renderer.html import HtmlRenderer, weekend_label
 from app.schemas import (
     CardDeck,
     Draft,
@@ -241,7 +241,8 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                  "board_facts": [f.model_dump() for f in draft.facts] if draft else None,
                  "sensitive_topics_yaml": (settings.agent_dir.parent / "policies/content/sensitive_topics.yaml")
                  .read_text(encoding="utf-8"),
-                 "today": datetime.now(KST).date().isoformat()},
+                 "today": datetime.now(KST).date().isoformat(),
+                 "cover_label": weekend_label(datetime.now(KST).date())},
                 ReviewVerdict)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
@@ -251,9 +252,13 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
         r.step("review", "done", f"{verdict.verdict} · {len(verdict.issues)} issue(s)")
 
         job.issues = host_issues + qa.issues + verdict.issues
-        blocked = verdict.verdict == "fail" or any(i.severity == "block" for i in job.issues)
-        job.status = JobStatus.REJECTED if blocked else JobStatus.READY_FOR_REVIEW
-        r.save()
+        # Automated checks advise; the human decides. Never auto-reject — blocking issues are shown in Review.
+        n_block = sum(i.severity == "block" for i in job.issues)
+        if n_block:
+            r.log("review", f"{n_block} blocking issue(s) flagged for the operator — decide in Review", "warn")
+        job.status = JobStatus.READY_FOR_REVIEW
+        r.step("publish", "pending", f"Review {n_block} blocking issue(s), then decide" if n_block
+               else "Approve in Review")
     except Exception as e:
         log.exception("job %s failed at %s", job_id, current)
         job.error = f"{STEPS[current][0]} failed: {e}"
@@ -301,7 +306,9 @@ async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
         job.deck.caption = caption
     job.status = JobStatus.PUBLISHING
     r.step("publish", "running", f"publishing ({mode})")
-    r.log("publish", f"approved by operator → publisher on host (mode: {mode})")
+    n_block = sum(i.severity == "block" for i in job.issues)
+    r.log("publish", f"approved by operator → publisher on host (mode: {mode})"
+          + (f" · operator overrode {n_block} blocking issue(s)" if n_block else ""))
     try:
         if mode in ("graph", "dryrun"):
             paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
