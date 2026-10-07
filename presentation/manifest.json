@@ -1,0 +1,97 @@
+{
+  "checked_at": "2026-10-07",
+  "screenshots": [
+    {
+      "file": "assets/reddit-events.jpg",
+      "url": "https://www.reddit.com/r/koreatravel/comments/1appf8f/",
+      "published_at": "2024-02-13",
+      "evidence_type": "정성적 사용자 질문",
+      "score_at_capture": 5,
+      "comments_at_capture": 8,
+      "processing": "본문 무수정; 사용자명·주변 UI 제외한 영역 캡처"
+    },
+    {
+      "file": "assets/reddit-english.jpg",
+      "url": "https://www.reddit.com/r/seoul/comments/1oxplhg/",
+      "published_at": "2025-11-15",
+      "evidence_type": "정성적 사용자 질문",
+      "score_at_capture": 2,
+      "comments_at_capture": 5,
+      "processing": "본문 무수정; 사용자명·주변 UI 제외한 영역 캡처"
+    },
+    {
+      "file": "assets/reddit-kpop.jpg",
+      "url": "https://www.reddit.com/r/koreatravel/comments/1lg8h50/",
+      "published_at": "2025-06-20",
+      "evidence_type": "정성적 사용자 질문",
+      "score_at_capture": 5,
+      "comments_at_capture": 7,
+      "processing": "본문 무수정; 사용자명·주변 UI 제외한 영역 캡처"
+    },
+    {
+      "file": "assets/seongsu-source.jpg",
+      "url": "https://culture.seoul.go.kr/culture/culture/cultureEvent/view.do?cultcode=159252&menuNo=200010",
+      "published_at": null,
+      "evidence_type": "공식 공지",
+      "score_at_capture": null,
+      "comments_at_capture": null,
+      "processing": "실제 화면 캡처"
+    },
+    {
+      "file": "assets/bitseom-source.jpg",
+      "url": "https://culture.seoul.go.kr/culture/culture/cultureEvent/view.do?cultcode=159242&menuNo=200010",
+      "published_at": null,
+      "evidence_type": "공식 공지",
+      "score_at_capture": null,
+      "comments_at_capture": null,
+      "processing": "실제 화면 캡처"
+    },
+    {
+      "file": "assets/admin-review.jpg",
+      "url": "https://admin-production-3db0.up.railway.app/review/3f9a1c",
+      "published_at": null,
+      "evidence_type": "실제 UI, mock 데이터",
+      "score_at_capture": null,
+      "comments_at_capture": null,
+      "processing": "실제 화면 캡처"
+    },
+    {
+      "file": "assets/admin-policy.jpg",
+      "url": "https://admin-production-3db0.up.railway.app/policy",
+      "published_at": null,
+      "evidence_type": "실제 UI, 모의 로그",
+      "score_at_capture": null,
+      "comments_at_capture": null,
+      "processing": "실제 화면 캡처"
+    }
+  ],
+  "card_renders": {
+    "files": [
+      "assets/seongsu-card-01.jpg",
+      "assets/seongsu-card-02.jpg",
+      "assets/seongsu-card-03.jpg",
+      "assets/seongsu-card-04.jpg"
+    ],
+    "source": "backend/.data/five-decks/second-preview/seongsu",
+    "status": "디자인 시안, 자동 생성·게시 검증 결과 아님"
+  },
+  "research": {
+    "url": "https://www.yanolja-research.com/insight/view/752?lang=en",
+    "published_at": "2026-04-26",
+    "period": "2023-01 through 2025-12",
+    "values": {
+      "digital": 27.8,
+      "tourist_information": 16.4,
+      "transportation": 13.1,
+      "payment": 12.0
+    },
+    "denominator_note": "연구가 분류한 한국 관련 불편의 구성비. 관광객 전체의 불만율 아님."
+  },
+  "limitations": [
+    "Reddit 사례는 모집단 대표 표본이 아님",
+    "공식 공지의 게시일은 확인하지 못함",
+    "Reddit 캡처 폭 750px, 공식 공지 캡처 폭 1728px: 원본 해상도를 유지하고 인위적으로 확대하지 않음",
+    "선택 항목인 출처 간 정보 불일치 사례는 포함하지 않음",
+    "실제 게시 성공 및 OpenShell 차단 로그 미확보"
+  ]
+}

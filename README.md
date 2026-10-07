@@ -48,3 +48,9 @@ railway up --service admin --ci
 ```
 
 실제 백엔드로 전환하려면 `railway variables --set NEXT_PUBLIC_API_URL=https://<fastapi-host>`를 실행하고 다시 배포하세요(빌드 시점에 값이 들어감). FastAPI CORS에 Admin 도메인도 추가해야 합니다.
+
+## 웹 발표
+
+- [5분 발표 슬라이드](https://juyoung.site/nemo-k-cards/)
+- [관객 체험 안내](https://juyoung.site/nemo-k-cards/try/)
+- 소스: `presentation/`. `main`에 변경을 푸시하면 GitHub Actions가 이 폴더만 Pages에 배포합니다.
