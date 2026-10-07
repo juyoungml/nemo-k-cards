@@ -56,17 +56,72 @@ POLICY_SEED = [
 ]
 
 
+_insights_cache: dict = {"at": 0.0, "data": None}
+
+
+def ig_insights() -> dict | None:
+    """Real reach (last 7 days vs the 7 before) and saves per post, cached 5 minutes. None without a token."""
+    if not (settings.ig_access_token and settings.ig_user_id):
+        return None
+    if time.time() - _insights_cache["at"] < 300:
+        return _insights_cache["data"]
+    base, token = "https://graph.instagram.com/v24.0", settings.ig_access_token
+    now = int(time.time())
+
+    def reach(since: int, until: int) -> int | None:
+        r = httpx.get(f"{base}/me/insights", timeout=8, params={
+            "metric": "reach", "period": "day", "metric_type": "total_value",
+            "since": since, "until": until, "access_token": token})
+        if r.status_code != 200:
+            return None
+        data = r.json().get("data") or [{}]
+        return int(data[0].get("total_value", {}).get("value", 0))
+
+    try:
+        week = 7 * 86400
+        this_week, last_week = reach(now - week, now), reach(now - 2 * week, now - week)
+        media = httpx.get(f"{base}/me/media", timeout=8,
+                          params={"fields": "id", "limit": 25, "access_token": token}).json().get("data", [])
+        saves = []
+        for m in media:
+            r = httpx.get(f"{base}/{m['id']}/insights", timeout=8, params={"metric": "saved", "access_token": token})
+            if r.status_code == 200:
+                saves.append(int((r.json().get("data") or [{}])[0].get("values", [{}])[0].get("value", 0)))
+        data = {"reach": this_week, "reach_prev": last_week, "saves": saves}
+    except httpx.HTTPError:
+        data = None
+    _insights_cache.update(at=time.time(), data=data)
+    return data
+
+
+def _compact(n: int) -> str:
+    return f"{n / 1_000_000:.1f}M" if n >= 1_000_000 else f"{n / 1000:.1f}K" if n >= 10_000 else f"{n:,}"
+
+
 def metrics(jobs: list[Job]) -> list[Metric]:
     published = sum(j.status == JobStatus.PUBLISHED and "/p/MOCK" not in (j.published_url or "") for j in jobs)
     waiting = sum(j.status == JobStatus.READY_FOR_REVIEW for j in jobs)
-    ig = ig_account()
-    followers = (Metric(label="Followers", value=f"{ig.get('followers_count', 0):,}",
-                        delta=f"{ig.get('media_count', 0)} posts · live from Instagram") if ig
-                 else Metric(label="Followers", value="12,480", delta="seed data (no IG token)"))
+    ig, ins = ig_account(), ig_insights()
+    if not ig:
+        followers = Metric(label="Followers", value="—", delta="connect Instagram (no token)")
+    else:
+        followers = Metric(label="Followers", value=f"{ig.get('followers_count', 0):,}",
+                           delta=f"{ig.get('media_count', 0)} posts · live from Instagram")
+    if ins and ins["reach"] is not None:
+        prev = ins["reach_prev"]
+        delta = (f"{(ins['reach'] - prev) / prev:+.0%} vs previous 7 days" if prev
+                 else "first week of data · live from Instagram")
+        reach = Metric(label="Reach (7d)", value=_compact(ins["reach"]), delta=delta)
+    else:
+        reach = Metric(label="Reach (7d)", value="—", delta="needs Instagram insights access")
+    if ins and ins["saves"]:
+        avg = sum(ins["saves"]) / len(ins["saves"])
+        saves = Metric(label="Avg. saves / post", value=f"{avg:.1f}".removesuffix(".0"),
+                       delta=f"across {len(ins['saves'])} post{'s' * (len(ins['saves']) != 1)} · live")
+    else:
+        saves = Metric(label="Avg. saves / post", value="—", delta="no posts yet" if ins else "needs Instagram insights access")
     return [
-        followers,
-        Metric(label="Reach (7d)", value="48.2K", delta="+11.8% vs last week"),
-        Metric(label="Avg. saves / post", value="312", delta="+38 vs last week"),
+        followers, reach, saves,
         Metric(label="Published this week", value=str(published), delta=f"{waiting} waiting for review"),
     ]
 
