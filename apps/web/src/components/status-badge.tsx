@@ -42,7 +42,8 @@ const JOB_STATUS: Record<JobStatus, [Tone, string]> = {
   FAILED: ["danger", "Failed"],
 };
 
-export function JobStatusBadge({ status }: { status: JobStatus }) {
+export function JobStatusBadge({ status, mock = false }: { status: JobStatus; mock?: boolean }) {
+  if (status === "PUBLISHED" && mock) return <StatusBadge tone="neutral">Published (mock)</StatusBadge>;
   const [tone, label] = JOB_STATUS[status];
   return <StatusBadge tone={tone}>{label}</StatusBadge>;
 }

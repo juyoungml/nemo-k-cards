@@ -50,6 +50,14 @@ function linkBadge(check: LinkCheck | undefined, excluded: boolean) {
   return <StatusBadge tone={tone}>{excluded ? `Excluded · ${label}` : label}</StatusBadge>;
 }
 
+function reviewSummary(job: Job) {
+  if (job.status !== "READY_FOR_REVIEW") return job.status.toLowerCase().replaceAll("_", " ");
+  const blocks = job.issues.filter((i) => i.severity === "block").length;
+  const warns = job.issues.length - blocks;
+  if (!job.issues.length) return "all automated checks passed · waiting for your decision";
+  return [blocks && `${blocks} blocking`, warns && `${warns} warning${warns > 1 ? "s" : ""}`].filter(Boolean).join(" · ") + " · your decision";
+}
+
 export function ReviewDetailView({ id }: { id: string }) {
   const { data: job, error, setData } = useApi(() => api.getJob(id), [id], 1000);
   if (!job) return <LoadState error={error} />;
@@ -60,14 +68,14 @@ export function ReviewDetailView({ id }: { id: string }) {
     <>
       <PageHeader
         title={deck?.title ?? job.prompt}
-        description={`job ${job.id} · ${deck?.slides.length ?? 0} slides · ${job.status === "READY_FOR_REVIEW" ? "automated checks passed · waiting for your decision" : job.status.toLowerCase().replaceAll("_", " ")}`}
+        description={`job ${job.id} · ${deck?.slides.length ?? 0} slides · ${reviewSummary(job)}`}
       >
         {job.published_url && (
           <a href={job.published_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
             View post <ExternalLink className="size-3.5" />
           </a>
         )}
-        <JobStatusBadge status={job.status} />
+        <JobStatusBadge status={job.status} mock={!!job.published_url?.includes("/p/MOCK")} />
       </PageHeader>
 
       <div className="flex items-start gap-5">

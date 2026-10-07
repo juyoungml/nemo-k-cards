@@ -44,7 +44,7 @@ export function ReviewQueueView() {
                 <TableCell>{j.issues.length || "—"}</TableCell>
                 <TableCell>{formatDateTime(j.created_at)}</TableCell>
                 <TableCell>
-                  <JobStatusBadge status={j.status} />
+                  <JobStatusBadge status={j.status} mock={!!j.published_url?.includes("/p/MOCK")} />
                 </TableCell>
               </TableRow>
             ))}

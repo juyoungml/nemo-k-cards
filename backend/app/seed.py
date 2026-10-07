@@ -26,7 +26,7 @@ POLICY_SEED = [
 
 
 def metrics(jobs: list[Job]) -> list[Metric]:
-    published = sum(j.status == JobStatus.PUBLISHED for j in jobs)
+    published = sum(j.status == JobStatus.PUBLISHED and "/p/MOCK" not in (j.published_url or "") for j in jobs)
     waiting = sum(j.status == JobStatus.READY_FOR_REVIEW for j in jobs)
     return [
         Metric(label="Followers", value="12,480", delta="+4.2% vs last week"),
