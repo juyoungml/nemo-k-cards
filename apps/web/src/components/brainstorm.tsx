@@ -90,9 +90,9 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
   const sourceOk = draft.facts.some((f) => f.verified && f.source_url);
 
   return (
-    <div className="flex items-stretch gap-4">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
       {/* ---- Chat */}
-      <section className="flex w-[440px] shrink-0 flex-col gap-3 rounded-xl border bg-card p-5">
+      <section className="flex w-full flex-col gap-3 rounded-xl border bg-card p-4 md:p-5 lg:w-[440px] lg:shrink-0">
         <div className="flex items-center">
           <h2 className="flex-1 text-[15px] font-semibold">Brainstorm with agent</h2>
           <StatusBadge tone="neutral">planner · sandbox</StatusBadge>

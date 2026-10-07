@@ -20,8 +20,8 @@ export function DashboardView() {
     <>
       <StatRow metrics={metrics.data} />
 
-      <div className="flex items-start gap-4">
-        <Panel title="SNS / Channels" description="Connected accounts · live from Instagram" className="w-[520px] shrink-0">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <Panel title="SNS / Channels" description="Connected accounts · live from Instagram" className="w-full lg:w-[520px] lg:shrink-0">
           <Table>
             <TableHeader>
               <TableRow>
