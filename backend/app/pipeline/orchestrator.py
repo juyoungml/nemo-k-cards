@@ -140,6 +140,10 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
             job.briefs = briefs
             n_src = sum(len(b.sources) for b in briefs)
             r.log("research", f"{len(briefs)} EventBrief validated (schema ok)")
+            # Nothing for the operator to decide in Review, and copy / review would only fill an empty deck.
+            if not briefs:
+                raise RuntimeError("the researcher found no events for this request — try a broader one "
+                                   "(another city or date range)")
             r.step("research", "done", f"{len(briefs)} events · {n_src} sources")
 
         # 2. Verify (host) -------------------------------------------------------------------
@@ -180,6 +184,10 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                 host_issues.append(Issue(severity="block", category="link", message=(
                     "Every source for this event failed link verification — add the official event page in "
                     "Brainstorm and generate again.")))
+        elif not included:
+            # Quick: every event lost its sources — the deck would have no verified event to show.
+            raise RuntimeError(f"all {len(job.briefs)} event(s) failed link verification "
+                               f"({len(report.excluded_event_ids)} excluded) — run the request again")
 
         # Photos (host): vet the researcher's candidates; events without one get the Poster style.
         vetted: dict[str, photos.Vetted] = {}

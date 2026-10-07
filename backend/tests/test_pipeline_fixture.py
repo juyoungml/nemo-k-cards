@@ -73,6 +73,29 @@ async def test_fail_scenario_fails_at_render(no_network):
     assert states["Render"] == "failed" and states["Visual QA"] == "pending"
 
 
+async def test_research_without_events_fails_before_copy(no_network, monkeypatch):
+    monkeypatch.setattr(orchestrator, "_scenario", lambda name="good": lambda f: [] if f == "briefs.json" else None)
+    job = await run_quick("good")
+    assert job.status == JobStatus.FAILED and "found no events" in job.error
+    states = {s.name: s.state for s in job.pipeline}
+    assert states["Research"] == "failed" and states["Outline & copy"] == "pending"
+    assert job.deck is None
+
+
+async def test_quick_job_fails_when_every_event_loses_its_sources(monkeypatch):
+    async def all_dead(url, client=None):
+        return LinkCheck(url=url, status="dead", http_code=404)
+    monkeypatch.setattr(link_checker, "check_url", all_dead)
+    real = orchestrator._scenario("good")
+    # Drop the fixture's precomputed link checks so every source goes through the (dead) checker.
+    monkeypatch.setattr(orchestrator, "_scenario", lambda name="good": lambda f: None if f == "verification.json"
+                        else real(f))
+    job = await run_quick("good")
+    assert job.status == JobStatus.FAILED and "failed link verification" in job.error
+    states = {s.name: s.state for s in job.pipeline}
+    assert states["Verify links"] == "failed" and states["Outline & copy"] == "pending"
+
+
 def test_unknown_scenario_is_rejected_by_the_api():
     from fastapi.testclient import TestClient
 
