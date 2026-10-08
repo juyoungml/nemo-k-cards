@@ -13,4 +13,6 @@ These are proposed priorities, not shipped features or release commitments.
 
 Engineering detail for each hardening item, with evidence and fixes: [HARDENING.md](HARDENING.md).
 
+The v1 plan (path to first sale: workstreams, architecture, data model, API, pseudocode, acceptance checks): [spec/v1.md](spec/v1.md).
+
 Follow [Issues](https://github.com/juyoungml/nemo-k-cards/issues) for specific work. A useful report includes the observed behavior, expected behavior and a reproducible input.
