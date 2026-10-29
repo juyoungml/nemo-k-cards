@@ -3,11 +3,9 @@
 from datetime import date
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app import store
 from app.config import settings
-from app.main import app
 from app.pipeline import orchestrator
 from app.schemas import CardDeck, JobStatus, SafeguardFinding, SafeguardModelOutput
 from app.services import safeguard
@@ -136,128 +134,128 @@ def test_hash_covers_image_choices_and_rendered_slides(tmp_path):
 
 
 # ---------------------------------------------------------------- approve / reject / publish
+# `client` is signed in as the Admin (so also an Approver) of a fresh Organization; `org` is a fresh Organization
+# for tests that call the orchestrator directly (both from conftest).
 
-def blocked_job():
+def blocked_job(org_id):
     job = allowed_job()
     job.status = JobStatus.BLOCKED
     job.safeguard = job.safeguard.model_copy(update={"decision": "block", "summary": "Mocks 5·18."})
-    return store.save_job(job)
+    return store.save_job(org_id, job)
 
 
-def test_blocked_job_cannot_be_approved_but_can_be_rejected(monkeypatch):
-    called = []
+async def _no_publish(*a):
+    raise AssertionError("must not publish")
 
-    async def fake_publish(*a):
-        called.append(a)
-    monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
-    c = TestClient(app)
-    job = blocked_job()
-    r = c.post(f"/jobs/{job.id}/approve", json={})
+
+def test_blocked_job_cannot_be_approved_but_can_be_rejected(monkeypatch, client):
+    monkeypatch.setattr(orchestrator, "publish_job", _no_publish)
+    job = blocked_job(client.org_id)
+    r = client.post(f"/jobs/{job.id}/approve", json={})
     assert r.status_code == 409 and "Mocks 5·18." in r.json()["detail"]
-    assert called == []
-    assert c.post(f"/jobs/{job.id}/reject", json={"reason": "harmful"}).json()["status"] == "REJECTED"
+    assert client.post(f"/jobs/{job.id}/reject", json={"reason": "harmful"}).json()["status"] == "REJECTED"
 
 
-def test_block_verdict_wins_even_if_status_says_ready(monkeypatch):
-    monkeypatch.setattr(orchestrator, "publish_job", lambda *a: None)
-    job = blocked_job()
+def test_an_override_reason_does_not_unblock(monkeypatch, client):
+    monkeypatch.setattr(orchestrator, "publish_job", _no_publish)
+    job = blocked_job(client.org_id)
+    r = client.post(f"/jobs/{job.id}/approve", json={"override_reason": "I checked it, it's fine"})
+    assert r.status_code == 409 and "blocked by safeguard" in r.json()["detail"]
+
+
+def test_block_verdict_wins_even_if_status_says_ready(monkeypatch, client):
+    monkeypatch.setattr(orchestrator, "publish_job", _no_publish)
+    job = blocked_job(client.org_id)
     job.status = JobStatus.READY_FOR_REVIEW
-    store.save_job(job)
-    assert TestClient(app).post(f"/jobs/{job.id}/approve", json={}).status_code == 409
+    store.save_job(client.org_id, job)
+    assert client.post(f"/jobs/{job.id}/approve", json={}).status_code == 409
 
 
-def test_job_without_a_verdict_cannot_be_approved():
+def test_job_without_a_verdict_cannot_be_approved(monkeypatch, client):
+    monkeypatch.setattr(orchestrator, "publish_job", _no_publish)
     job = allowed_job()
     job.safeguard = None
-    store.save_job(job)
-    r = TestClient(app).post(f"/jobs/{job.id}/approve", json={})
+    store.save_job(client.org_id, job)
+    r = client.post(f"/jobs/{job.id}/approve", json={})
     assert r.status_code == 409 and "no safeguard verdict" in r.json()["detail"]
 
 
-def test_edited_caption_with_a_blocked_phrase_is_refused_at_approve_and_explained(monkeypatch):
-    monkeypatch.setattr(orchestrator, "publish_job", lambda *a: None)
-    job = store.save_job(allowed_job())
-    r = TestClient(app).post(f"/jobs/{job.id}/approve", json={"caption": "탱크데이 특가! #seoul"})
+def test_edited_caption_with_a_blocked_phrase_is_refused_at_approve_and_explained(monkeypatch, client):
+    monkeypatch.setattr(orchestrator, "publish_job", _no_publish)
+    job = store.save_job(client.org_id, allowed_job())
+    r = client.post(f"/jobs/{job.id}/approve", json={"caption": "탱크데이 특가! #seoul"})
     assert r.status_code == 422 and "blocked by safeguard" in r.json()["detail"]
-    saved = store.get_job(job.id)
+    saved = store.get_job(client.org_id, job.id)
     assert saved.status == JobStatus.READY_FOR_REVIEW and saved.deck.caption == job.deck.caption
     [f] = saved.blocked_edit.verdict.findings
     assert f.location == "caption" and f.excerpt == "탱크데이" and f.explanation
 
 
-async def test_blocked_caption_edit_keeps_the_original_deck(monkeypatch):
-    job = store.save_job(allowed_job())
+def test_graph_post_of_an_edit_is_refused_on_a_fixture_server(monkeypatch, client):
+    monkeypatch.setattr(orchestrator, "publish_job", _no_publish)
+    monkeypatch.setattr(settings, "publish_mode", "graph")
+    job = store.save_job(client.org_id, allowed_job())
+    r = client.post(f"/jobs/{job.id}/approve", json={"caption": "Safe new caption #seoul"})
+    assert r.status_code == 409 and "safeguard model" in r.json()["detail"]
+
+
+async def test_blocked_caption_edit_keeps_the_original_deck(monkeypatch, org):
+    job = store.save_job(org, allowed_job())
     original = job.deck.caption
 
     # A caption that passes the fast rules at approve but that the full check blocks.
-    async def blocking(job_id, deck, paths, fx=None, *, use_model=True):
+    async def blocking(job_id, deck, paths, fx=None, *, org_id, use_model=True):
         return await safeguard.check(deck, slide_paths=paths, today=date(2026, 10, 29),
                                      model=model_says("block", summary="Sexualised framing of a venue."))
     monkeypatch.setattr(orchestrator, "run_safeguard", blocking)
-    await orchestrator.publish_job(job.id, "Edited caption #seoul", "mock")
-    job = store.get_job(job.id)
+    await orchestrator.publish_job(org, job.id, "Edited caption #seoul", "mock")
+    job = store.get_job(org, job.id)
     assert job.status == JobStatus.READY_FOR_REVIEW and job.published_url is None
     assert job.deck.caption == original and job.safeguard.decision == "allow"
     assert job.blocked_edit.caption == "Edited caption #seoul"
     assert job.blocked_edit.verdict.summary == "Sexualised framing of a venue."
     assert job.publish_progress.step == "failed" and "Sexualised" in job.publish_progress.error
-    # The original Deck is still approvable.
-    monkeypatch.setattr(orchestrator, "run_safeguard", None)  # unchanged content must not be re-checked
-    await orchestrator.publish_job(job.id, None, "mock")
-    assert store.get_job(job.id).status == JobStatus.PUBLISHED
+    # The original Deck is still approvable, and unchanged content is not checked again.
+    monkeypatch.setattr(orchestrator, "run_safeguard", None)
+    await orchestrator.publish_job(org, job.id, None, "mock")
+    assert store.get_job(org, job.id).status == JobStatus.PUBLISHED
 
 
-async def test_unverifiable_deck_is_blocked_at_publish():
+async def test_unverifiable_deck_is_blocked_at_publish(org):
     job = allowed_job()
     job.deck.slides[1].body = "Tank Day sale"  # changed after the check, not through a caption edit
-    store.save_job(job)
-    await orchestrator.publish_job(job.id, None, "mock")
-    job = store.get_job(job.id)
+    store.save_job(org, job)
+    await orchestrator.publish_job(org, job.id, None, "mock")
+    job = store.get_job(org, job.id)
     assert job.status == JobStatus.BLOCKED and job.published_url is None
     assert job.safeguard.decision == "block"
 
 
-def test_graph_post_of_an_edit_is_refused_on_a_fixture_server(monkeypatch):
-    called = []
-
-    async def fake_publish(*a):
-        called.append(a)
-    monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
-    monkeypatch.setattr(settings, "publish_mode", "graph")
-    job = store.save_job(allowed_job())
-    r = TestClient(app).post(f"/jobs/{job.id}/approve", json={"caption": "Safe new caption #seoul"})
-    assert r.status_code == 409 and "safeguard model" in r.json()["detail"]
-    assert called == []
-
-
-async def test_publish_refuses_a_graph_post_of_unchecked_content_on_a_fixture_server(monkeypatch):
-    posted = []
-
-    async def fake_upload(*a, **k):
-        posted.append(a)
-        return []
-    monkeypatch.setattr(orchestrator.image_host, "publish_images", fake_upload)
-    job = store.save_job(allowed_job())
-    await orchestrator.publish_job(job.id, "Safe new caption #seoul", "graph")
-    job = store.get_job(job.id)
-    assert posted == [] and job.status == JobStatus.READY_FOR_REVIEW and job.published_url is None
+async def test_publish_refuses_a_graph_post_of_unchecked_content_on_a_fixture_server(monkeypatch, org):
+    def no_upload(*a, **k):
+        raise AssertionError("must not upload")
+    monkeypatch.setattr(orchestrator.image_host, "exposed", no_upload)
+    job = store.save_job(org, allowed_job())
+    await orchestrator.publish_job(org, job.id, "Safe new caption #seoul", "graph")
+    job = store.get_job(org, job.id)
+    assert job.status == JobStatus.READY_FOR_REVIEW and job.published_url is None
     assert "can't check this edit" in job.publish_progress.label
 
 
-async def test_publish_with_unchanged_text_skips_the_recheck(monkeypatch):
-    job = store.save_job(allowed_job())
+async def test_publish_with_unchanged_text_skips_the_recheck(monkeypatch, org):
+    job = store.save_job(org, allowed_job())
 
     async def boom(*a, **k):
         raise AssertionError("should not re-check unchanged content")
     monkeypatch.setattr(orchestrator, "run_safeguard", boom)
-    await orchestrator.publish_job(job.id, None, "mock")
-    assert store.get_job(job.id).status == JobStatus.PUBLISHED
+    await orchestrator.publish_job(org, job.id, None, "mock")
+    assert store.get_job(org, job.id).status == JobStatus.PUBLISHED
 
 
-async def test_publish_with_a_safe_edit_rechecks_and_posts():
-    job = store.save_job(allowed_job())
-    await orchestrator.publish_job(job.id, "Three easy things to do in Seoul. #seoul", "mock")
-    job = store.get_job(job.id)
+async def test_publish_with_a_safe_edit_rechecks_and_posts(org):
+    job = store.save_job(org, allowed_job())
+    await orchestrator.publish_job(org, job.id, "Three easy things to do in Seoul. #seoul", "mock")
+    job = store.get_job(org, job.id)
     assert job.status == JobStatus.PUBLISHED
     assert job.safeguard.content_hash == safeguard.content_hash(job.deck)
     assert any("checking again" in line.message for line in job.log)

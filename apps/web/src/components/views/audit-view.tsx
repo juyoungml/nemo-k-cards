@@ -1,0 +1,117 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+
+import { LoadState, Panel } from "@/components/page";
+import { StatusBadge, type Tone } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { IS_MOCK, api } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
+import { ROLE_LABEL, atLeast, useMe } from "@/lib/roles";
+import type { AuditEvent, Role } from "@/lib/types";
+import { useApi } from "@/lib/use-api";
+
+const ACTION: Record<string, [Tone, string]> = {
+  "deck.overridden": ["danger", "Override"],
+  "deck.approved": ["success", "Approved"],
+  "deck.rejected": ["warning", "Rejected"],
+  "deck.edited": ["info", "Edited"],
+  "job.created": ["neutral", "Deck started"],
+  "member.invited": ["neutral", "Invited"],
+  "invitation.revoked": ["neutral", "Invitation withdrawn"],
+  "member.joined": ["neutral", "Joined"],
+  "member.role_changed": ["info", "Role changed"],
+  "member.removed": ["warning", "Removed"],
+  "org.created": ["neutral", "Organization created"],
+};
+
+const role = (r: unknown) => (typeof r === "string" && r in ROLE_LABEL ? ROLE_LABEL[r as Role] : String(r ?? ""));
+
+/** One readable line for an event's detail; the full JSON is in the row's title. */
+function describe(e: AuditEvent): React.ReactNode {
+  const d = e.detail;
+  switch (e.action) {
+    case "deck.overridden":
+      return <>Reason: “{String(d.reason)}” · {(d.issues as unknown[] | undefined)?.length ?? 0} blocking issue(s)</>;
+    case "deck.rejected":
+      return <>Reason: “{String(d.reason)}”</>;
+    case "deck.edited":
+      return <>Caption changed</>;
+    case "member.invited":
+    case "member.joined":
+      return <>as {role(d.role)}</>;
+    case "member.role_changed":
+      return <>{role(d.before)} → {role(d.after)}</>;
+    case "member.removed":
+      return <>was {role(d.role)}</>;
+    case "org.created":
+      return <>{String(d.name)}</>;
+    default:
+      return null;
+  }
+}
+
+function Target({ e }: { e: AuditEvent }) {
+  if (!e.target) return null;
+  if (e.action.startsWith("deck.") || e.action === "job.created") {
+    return <Link href={`/review/${e.target}`} className="font-mono text-xs hover:underline">{e.target}</Link>;
+  }
+  return <span className="text-[13px]">{e.target}</span>;
+}
+
+export function AuditView() {
+  const { role: myRole, loading } = useMe();
+  const isAdmin = atLeast(myRole, "admin");
+  const { data, error, setData } = useApi(() => (isAdmin && !IS_MOCK ? api.getAudit() : Promise.resolve([] as AuditEvent[])), [isAdmin]);
+  const [more, setMore] = useState(true);
+
+  if (IS_MOCK) return <LoadState error={new Error("The audit log needs the real API: set NEXT_PUBLIC_API_URL and sign in.")} />;
+  if (loading) return <LoadState />;
+  if (!isAdmin) return <LoadState error={new Error("Only Admins can read the audit log.")} />;
+  if (!data) return <LoadState error={error} />;
+
+  const older = async () => {
+    const next = await api.getAudit(data[data.length - 1]?.id);
+    setMore(next.length === 100);
+    setData([...data, ...next]);
+  };
+
+  return (
+    <Panel description="Append-only: entries can't be edited or deleted.">
+      {data.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Time</TableHead>
+              <TableHead>Who</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>On</TableHead>
+              <TableHead>Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.map((e) => {
+              const [tone, label] = ACTION[e.action] ?? (["neutral", e.action] as [Tone, string]);
+              return (
+                <TableRow key={e.id} title={JSON.stringify(e.detail, null, 2)}>
+                  <TableCell className="text-muted-foreground tabular-nums">{formatDateTime(e.at)}</TableCell>
+                  <TableCell className="text-[13px]">{e.actor_email ?? e.actor.slice(0, 8)}</TableCell>
+                  <TableCell><StatusBadge tone={tone}>{label}</StatusBadge></TableCell>
+                  <TableCell><Target e={e} /></TableCell>
+                  <TableCell className="max-w-[28rem] text-[13px] whitespace-normal">{describe(e)}</TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+      {data.length >= 100 && more && (
+        <Button variant="outline" size="lg" className="mt-3 w-full" onClick={older}>Load older entries</Button>
+      )}
+    </Panel>
+  );
+}

@@ -130,6 +130,14 @@ def slide_image(slide: Slide) -> dict | None:
     return {"url": url, "credit": None, "allow_overlay": True} if url else None
 
 
+async def offline(route) -> None:
+    """Playwright route handler: slides are local files, so Chromium never touches the network (SEC-1)."""
+    if route.request.url.startswith(("file:", "data:")):
+        await route.continue_()
+    else:
+        await route.abort()
+
+
 class HtmlRenderer:
     def __init__(self, theme: Theme = "clean",
                  account: str = "@whatsonkorea", as_of: date | None = None) -> None:
@@ -154,7 +162,8 @@ class HtmlRenderer:
         cat = event.category if event and event.category in CATEGORY else "other"
         label, line, color, poster_fg, poster_title = CATEGORY[cat]
         ends_soon = event and (event.end_date - self.today).days <= 14
-        photo = img if img and img.get("url") and img.get("allow_overlay") else None
+        # Local files only (the host's vetted copies and stock): never let Chromium fetch a remote URL.
+        photo = img if img and str(img.get("url") or "").startswith("file:") and img.get("allow_overlay") else None
         # Cover Hangul: the place the headline names, else a neighborhood every event shares, else 서울.
         def place(text: str) -> str | None:
             return next((ko for en, ko in HANGUL.items() if en in text.lower()), None)
@@ -196,6 +205,7 @@ class HtmlRenderer:
         async with async_playwright() as p:
             browser = await p.chromium.launch()
             page = await browser.new_page(viewport={"width": 1080, "height": 1350}, device_scale_factor=1)
+            await page.route("**/*", offline)
             for slide in sorted(deck.slides, key=lambda s: s.index):
                 html_path = out_dir / f"slide-{slide.index:02d}.html"
                 html_path.write_text(self.html(deck, slide, by_id), encoding="utf-8")

@@ -13,9 +13,9 @@ def scenario_deck(name: str = "good") -> CardDeck:
     return CardDeck.model_validate(json.loads((settings.scenarios_dir / name / "deck.json").read_text()))
 
 
-def allowed_job() -> Job:
+def allowed_job(prompt: str = "approve test") -> Job:
     """A READY_FOR_REVIEW job with the good deck and an "allow" safeguard verdict for exactly that deck."""
-    job = orchestrator.new_job(secrets.token_hex(3), "approve test")
+    job = orchestrator.new_job(secrets.token_hex(4), prompt)
     job.status = JobStatus.READY_FOR_REVIEW
     job.deck = scenario_deck("good")
     job.safeguard = SafeguardVerdict(decision="allow", summary="ok", content_hash=safeguard.content_hash(job.deck))

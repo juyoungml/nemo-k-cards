@@ -24,8 +24,8 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 | [AGT-2](#agt-2-sandbox-allowlist-vs-real-event-sites) | P1 | Sandbox allowlist vs real event sites |
 | [AGT-3](#agt-3-no-quality-regression-checks-for-prompts-and-models) | P1 | No quality-regression checks for prompts and models |
 | [AGT-4](#agt-4-prompt-injection-is-tested-by-one-demo-not-a-suite) | P1 | Prompt injection is tested by one demo, not a suite |
-| [REL-1](#rel-1-jobs-run-inside-the-api-process) | P1 | Jobs run inside the API process |
-| [REL-2](#rel-2-storage-sqlite-with-one-shared-connection-no-migrations-no-backups) | P1 | SQLite with one shared connection, no migrations, no backups |
+| [REL-1](#rel-1-jobs-run-inside-the-api-process) | P1 | Jobs run inside the API process (pipeline durable since #17; publish open) |
+| [REL-2](#rel-2-storage-no-backups-or-retention) | P1 | Storage: no backups or retention |
 | [REL-3](#rel-3-outbound-calls-lack-consistent-timeouts-and-retries) | P2 | Outbound calls lack consistent timeouts and retries |
 | [TEN-1](#ten-1-no-per-user-or-per-org-rate-limits-and-quotas) | P1 | No per-user or per-org rate limits and quotas |
 | [LEG-2](#leg-2-image-licensing-records-and-takedowns) | P1 | Image licensing records and takedowns |
@@ -116,7 +116,7 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 ### SEC-1 SSRF: the host fetches agent- and user-supplied URLs
 **P0** *(verified)*
 
-**Evidence:** `link_checker.py:69,101`, `photos.py:153` and `drafts.py:71` all fetch URLs that came from the agent or the user, with `follow_redirects=True`. `link_checker.suspicious_reason()` only blocks *literal* IP addresses.
+**Evidence:** `link_checker.py:69,101`, `photos.py:153` and `brainstorms.py:71` all fetch URLs that came from the agent or the user, with `follow_redirects=True`. `link_checker.suspicious_reason()` only blocks *literal* IP addresses.
 
 **Why it matters:** a hostname that resolves to `127.0.0.1`, or a redirect to `169.254.169.254` (the AWS instance-metadata endpoint; Brev runs on AWS), gets fetched by the trusted host. A prompt-injected page can steer the agent's URLs, so this is a real attack path *around* the sandbox.
 
@@ -150,6 +150,34 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 - Use longer random job IDs.
 
 **Done when:** after a publish or reject, no slide URL from that job resolves.
+
+**Status (#18 Private slides):** done except longer job ids (a separate PR).
+- Nothing serves `/assets/<job>/<file>` any more. The API returns slides as signed links,
+  `/assets/<org>/<job>/slide-NN.jpg?exp&sig` (`backend/app/assets.py`), that last 15 to 20 minutes. A link works
+  only for slides, before `exp`, and while the Job belongs to that Organization (checked under RLS). The Admin
+  polls the Job, so its `<img>` tags always hold fresh links. A cookie was not used because the Admin and the API
+  are on different origins and the session lives in supabase-js, not in a cookie.
+- Instagram links (`backend/app/services/image_host.py`) expire after `PUBLISH_LINK_TTL_S` (15 min). With
+  `IMAGE_HOST=supabase`, slides are uploaded to the **private** bucket `slides` under `<org>/<job>/` and signed
+  with Storage signed URLs, then deleted when the publish attempt ends. A public bucket is refused. With
+  `IMAGE_HOST=local`, the links are signed `/assets` links that work only while the Job is `PUBLISHING`.
+- Bucket and policies: `supabase/migrations/20261029150000_private_slides.sql` makes `slides` private (JPEG only,
+  10 MB max) and drops any storage.objects policy that names it. With no policies, `anon` and `authenticated`
+  can't list, read or sign objects; only the host's service key can.
+- Leftovers: a crash in the middle of a publish can leave objects in the bucket. They are private and their links
+  expire, so this wastes storage but exposes nothing. A periodic sweep is still open (REL-2).
+
+**Staging (k-nemo-card) migration:** run these steps in order. The old backend flips the bucket back to public
+on its next publish, so deploy the new backend first.
+1. Deploy the backend from this change.
+2. Run `supabase db push` (or run the migration's SQL in the SQL editor). This flips `slides` to private and drops
+   policies that open it. To do it by hand instead: Storage, then `slides`, then Edit bucket, then turn off
+   "Public bucket".
+3. Optionally empty the bucket. The old objects sit at `<job_id>/slide-NN.jpg` with no Organization prefix,
+   nothing reads them, and Instagram has its own copies.
+4. Check that `curl -I https://<ref>.supabase.co/storage/v1/object/public/slides/<any key>` returns 400 and not 200.
+   Then run one `PUBLISH_MODE=dryrun` approve. The log says "links that expire in 15 min", and the bucket is
+   empty afterwards.
 
 ### SEC-4 Shared access code, no roles, no audit log
 **P1**
@@ -194,18 +222,23 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 ## Reliability and data
 
 ### REL-1 Jobs run inside the API process
-**P1** *(verified: `orchestrator.spawn()` at `main.py:101,158,206`; `recover_interrupted` at `main.py:32` marks them failed after a restart)*
+**P1** *(pipeline done in #17; publishing still open, #21)*
 
-**Why it matters:** any deploy, crash or `--reload` kills running agent jobs and publishes.
+**Why it matters:** any deploy, crash or `--reload` killed running agent jobs and publishes.
 
-**Robust fix:** a persisted queue and a separate worker process: the API only enqueues, and the worker claims jobs with a lease. Each stage's output is already stored on the job, so a restarted worker **resumes from the last completed stage** instead of failing. Publishing follows PUB-1's state machine.
+**Done for the pipeline (#17, ADR 0002):** a Job is a DBOS workflow, with one checkpointed step per stage (`backend/app/pipeline/orchestrator.py` `STAGES`). The checkpoints sit in the `dbos` schema of the same Postgres. The API enqueues each Job on a queue partitioned by Organization (`JOBS_PER_ORG`, `JOBS_PER_WORKER`). On restart, DBOS resumes each Job at its first unfinished stage, so finished stages don't run again. A Job that can't resume is marked failed at startup instead of being left stuck. DBOS still runs inside the API process (lifespan), but on its own event loop thread.
 
-**Done when:** killing the worker mid-job and restarting it completes the job without re-running the finished stages.
+**Still open:**
+- Publishing still runs as a background task, and a restart sends it back to Review. It becomes a workflow with PUB-1's state machine in #21.
+- A separate worker process (#28) is the same code with `durable.launch()` in a worker, while the API uses `launch(listen=False)` and only enqueues. Each process needs a stable `DBOS__VMID`.
+- Stage files (vetted photos, rendered slides) live on the local disk. A worker on another machine needs shared storage (#18) first.
 
-### REL-2 Storage: SQLite with one shared connection, no migrations, no backups
-**P1** *(verified: `store.py:13,29`)*
+### REL-2 Storage: no backups or retention
+**P1**
 
-**Robust fix:** Postgres for production (or, while it's one machine, SQLite in WAL mode with one connection per thread). Schema migrations (Alembic), nightly backups with a tested restore, and a retention policy for job data and rendered assets.
+Storage moved from SQLite (one shared connection, no migrations) to Postgres on Supabase with a connection pool and versioned migrations in `supabase/migrations/` (#8, 2026-10-29). Backups and retention are still open.
+
+**Robust fix:** schema changes only through Supabase CLI migrations (`supabase/migrations/`, applied to staging from `main` and then to production), nightly backups with a tested restore, and a retention policy for job data and rendered assets.
 
 ### REL-3 Outbound calls lack consistent timeouts and retries
 **P2**

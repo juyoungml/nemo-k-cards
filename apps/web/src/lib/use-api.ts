@@ -33,6 +33,14 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = [], pollMs?: n
 
 export const TERMINAL_STATUSES = ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "PUBLISHED", "FAILED"];
 
+/** The part of EventSource useLiveJob needs (api.openJobEvents returns a fetch-based one that sends the session). */
+export interface LiveStream {
+  onopen: ((ev: Event) => unknown) | null;
+  onmessage: ((ev: MessageEvent) => unknown) | null;
+  onerror: ((ev: Event) => unknown) | null;
+  close(): void;
+}
+
 /**
  * Keep a running job fresh. SSE is the fast path; it reconnects with backoff when the stream drops
  * (backend reload, proxy/tunnel idle timeout), and a 2s poll is the safety net so the screen can never
@@ -41,7 +49,7 @@ export const TERMINAL_STATUSES = ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "PU
 export function useLiveJob<T extends { id: string; status: string }>(
   job: T | undefined,
   onUpdate: (j: T) => void,
-  eventsUrl: (id: string) => string,
+  openEvents: (id: string) => LiveStream,
   fetchJob: (id: string) => Promise<T>,
 ) {
   const cb = useRef(onUpdate);
@@ -53,7 +61,7 @@ export function useLiveJob<T extends { id: string; status: string }>(
 
   useEffect(() => {
     if (!id) return;
-    let es: EventSource | null = null;
+    let es: LiveStream | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let closed = false;
@@ -63,7 +71,7 @@ export function useLiveJob<T extends { id: string; status: string }>(
       cb.current(j);
     };
     const connect = () => {
-      es = new EventSource(eventsUrl(id));
+      es = openEvents(id);
       es.onopen = () => {
         attempt = 0;
       };
@@ -84,7 +92,7 @@ export function useLiveJob<T extends { id: string; status: string }>(
       clearTimeout(retry);
       clearInterval(poll);
     };
-  }, [id, eventsUrl, fetchJob]);
+  }, [id, openEvents, fetchJob]);
 
   return { live: !!id, stale: !!id && stale };
 }

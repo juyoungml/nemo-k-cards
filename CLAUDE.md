@@ -15,6 +15,17 @@ A publishing agent finds what's on in Korea, then researches, verifies, writes a
 cd backend && uv sync && uv run playwright install chromium
 ```
 
+Postgres holds Jobs, Brainstorms and policy events. Locally it comes from the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) (Docker), so dev matches staging and production (both Supabase Cloud). The schema is plain SQL in `supabase/migrations/` (timestamped); the same files go to local, staging and production. Tests create and drop their own `wok_test_*` database on the local server and apply those files themselves.
+
+```bash
+supabase db start          # Postgres only, migrations applied (lighter); `supabase start` adds Auth, Storage, Vault
+supabase migration new <name>   # new migration in supabase/migrations/
+supabase migration up      # apply pending migrations locally
+supabase stop              # data is kept in a Docker volume, outside the repo
+```
+
+Staging is one shared Supabase Cloud project, updated only from `main` (CI will apply migrations); nobody edits it by hand. Production is a separate project. The old SQLite file `backend/.data/app.db` is not imported.
+
 `backend/.env` is gitignored. Copy `backend/.env.example` and ask the team for real values. Never commit or print secrets.
 
 ## Run the API (port 8000)
@@ -36,13 +47,16 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `PUBLISH_MODE` | `mock` \| `dryrun` \| `graph` | **`graph` posts to the real @whatsonkorea account.** Use `dryrun` unless a human asked to go live |
 | `IMAGE_HOST` | `local` \| `supabase` | Instagram needs public URLs; supabase uploads slides to the public `slides` bucket |
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
+| `DATABASE_URL` | `postgresql://…` | default is the local Supabase database (`127.0.0.1:54322/postgres`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL`'s server (default: the same local server) |
+| `JOBS_PER_ORG` / `JOBS_PER_WORKER` | default `2` / `4` | Jobs one Organization runs at once (the rest wait as `QUEUED`) / Jobs one process runs at once |
+| `WORKFLOW_VERSION` | default `2` (2 added the Safeguard stage) | bump it when the pipeline's stage list or order changes (`STAGES` in `orchestrator.py`) |
+| `SUPABASE_URL` | e.g. `http://127.0.0.1:54321` | Supabase project for sign-in (and slide hosting with `IMAGE_HOST=supabase`). Every route except `/health` needs a session from it; empty = every route 401 |
+| `ADMIN_URL` | default `http://localhost:3000` | where invitation links point (`/invite?token=…`); must be on the Supabase project's Auth redirect allow list |
+| `SUPABASE_JWT_SECRET` | secret | only for projects still signing with the legacy HS256 secret. The local CLI and new cloud projects use asymmetric keys from `SUPABASE_URL/auth/v1/.well-known/jwks.json` (cached 10 min) |
 
 Always use `--reload`. Without it, a long-running API keeps old Python while Jinja templates load fresh from disk, and renders fail (`'slide_class' is undefined`).
 
-**Before restarting the API**, check that nothing is in flight. Restarting kills running agents and publishes:
-```bash
-curl -s localhost:8000/jobs | python3 -c "import json,sys;print([(j['id'],j['status']) for j in json.load(sys.stdin) if j['status'] in ('QUEUED','RESEARCHING','VERIFYING','WRITING','RENDERING','QA','REVIEWING','PUBLISHING')])"
-```
+**Restarting is safe for Jobs** (#17). The pipeline runs as a DBOS workflow (`backend/app/pipeline/durable.py`, ADR 0002), with each stage checkpointed in the `dbos` schema of the same Postgres. On a restart, including a `--reload`, a running Job resumes at the stage it was in. Stages that had finished don't run again. A stage that was cut off reruns from its start, so a live agent stage costs one more `claude -p` call. Jobs that were waiting stay `QUEUED` until a slot frees up. A Job that can't resume (it ran out of recovery attempts, or it was started under a different `WORKFLOW_VERSION`) is marked `FAILED` at startup. **Publishing is not durable yet** (#21): a restart during `PUBLISHING` sends the Job back to Review, so avoid restarting mid-publish.
 
 ## Run the Admin UI (port 3000)
 
@@ -51,15 +65,38 @@ cd apps/web && pnpm install
 NEXT_PUBLIC_API_URL=http://localhost:8000 pnpm dev --port 3000
 ```
 
-Without `NEXT_PUBLIC_API_URL` the Admin silently uses its in-memory mock API (a yellow "Mock API" box appears in the sidebar). The value is read at startup, so restart `pnpm dev` after changing it. CORS allows `localhost:3000`.
+Without `NEXT_PUBLIC_API_URL` the Admin silently uses its in-memory mock API (a yellow "Mock API" box appears in the sidebar) and needs no sign-in. The value is read at startup, so restart `pnpm dev` after changing it. CORS allows `localhost:3000`.
+
+## Sign-in (Supabase Auth)
+
+With the real API, the Admin requires sign-in and the API rejects every route except `/health` without a valid Supabase session (401). Signing up creates an Organization and makes you its Admin (`POST /orgs`, called by the Admin; `GET /me` shows user, Organization and Role). Local setup:
+
+```bash
+supabase start -x realtime,storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+supabase status            # API URL (54321), Publishable key, Mailpit URL (54324)
+cd apps/web && NEXT_PUBLIC_API_URL=http://localhost:8000 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 \
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<sb_publishable_…> pnpm dev --port 3000
+```
+
+Backend: `SUPABASE_URL=http://127.0.0.1:54321` in `backend/.env`. Then open http://localhost:3000/sign-up. Local sign-up needs no email confirmation (`enable_confirmations = false` in `supabase/config.toml`); password-reset and confirmation emails land in Mailpit at http://127.0.0.1:54324, and their links must be opened in the browser that asked for them. A token for curl:
+
+```bash
+TOKEN=$(curl -s "http://127.0.0.1:54321/auth/v1/token?grant_type=password" -H "apikey: <publishable key>" \
+  -H 'content-type: application/json' -d '{"email":"you@example.com","password":"…"}' | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/me
+```
+
+**Members and Roles (#14).** Every route declares its least Role (`auth.Viewer` / `Editor` / `Approver` / `Admin`, or `auth.SignedIn` for `/me`, `POST /orgs`, `POST /invitations/accept`); `backend/tests/test_roles.py` holds the matrix and fails on a route that declares none. A person in several Organizations picks one in the sidebar; the Admin sends it as `X-Org-Id` and the API refuses (403) an Organization the caller isn't a Member of. Admins invite on the Team page: the link is `ADMIN_URL/invite?token=…`, emailed by Supabase Auth when `SUPABASE_SERVICE_KEY` is set (locally it lands in Mailpit) and always shown to the Admin to copy. Approving a Deck with blocking Issues needs `override_reason`. Approvals, Overrides, rejections, caption edits and Member changes go to `audit_events` (append-only; Admins read it at `/audit`).
+
+`/assets/*` (rendered slides) stays public because Instagram fetches it anonymously. Tests sign their own tokens with a throwaway key (`backend/tests/conftest.py`), so they need no Supabase Auth.
 
 ## Run the agents
 
 The API runs them. You normally start a job, not an agent:
 
 ```bash
-curl -s -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{"prompt":"Seongsu pop-ups this weekend"}'
-curl -N localhost:8000/jobs/<id>/events        # SSE: full Job snapshots
+curl -s -X POST localhost:8000/jobs -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"prompt":"Seongsu pop-ups this weekend"}'
+curl -N -H "Authorization: Bearer $TOKEN" localhost:8000/jobs/<id>/events   # SSE: full Job snapshots ($TOKEN: see Sign-in)
 ```
 
 Pipeline: research → verify (host link check) → copy → render (Jinja2 + Playwright) → visual QA → review → **safeguard** → `READY_FOR_REVIEW` → human approves in the Admin → publish. QA and review issues are advisory: they're shown and the operator decides. The safeguard is the one hard gate. If it blocks, the job ends `BLOCKED`, the API refuses to approve it, and the only options are to regenerate or reject. It fails closed, and an edited caption is checked again before publishing. The code is in `backend/app/services/safeguard.py`, the policy in `policies/content/safeguard_policy.md` plus `sensitive_topics.yaml`, and the decision record in `docs/adr/0004-safeguard-hard-gate.md`.
@@ -79,7 +116,7 @@ Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `review
 
 ## Checks
 
-Safe to run next to a live server: tests use a temp data dir, fixture mode and blanked credentials (`backend/tests/conftest.py` refuses to start otherwise), run in-process with no ports, and don't trigger `--reload`. Don't run `pnpm build` in `apps/web` while `pnpm dev` is running (they share `.next/`); CI builds it.
+Safe to run next to a live server: tests use a temp data dir, a throwaway Postgres database, fixture mode and blanked credentials (`backend/tests/conftest.py` refuses to start otherwise), run in-process with no ports, and don't trigger `--reload`. Don't run `pnpm build` in `apps/web` while `pnpm dev` is running (they share `.next/`); CI builds it.
 
 ```bash
 cd backend && uv run pytest -q                       # unit + API tests
@@ -87,11 +124,24 @@ cd backend && uv run python -m app.renderer.preview  # renders demo deck → bac
 cd apps/web && npx tsc --noEmit && pnpm lint
 ```
 
+**Golden set** (HARDENING AGT-3): fixed requests in `backend/golden/cases.json` (bump `version` when a case changes), checked for schema, slide structure, ≤ 5 hashtags, valid links, no invented facts, relevant photos and the case's expectations. Checks marked `[llm]` read the recorded reviewer verdict; everything else is a deterministic rule (`backend/app/golden/checks.py`).
+
+```bash
+cd backend && uv run python -m app.golden            # replay recordings: free, deterministic, what CI runs
+cd backend && uv run python -m app.golden --live --case seongsu-popups --record   # real agents, costs tokens
+```
+
+Run it after editing `agent/**`, the orchestrator's stage tasks, stage output schemas or `AGENT_MODEL`. Replay re-checks recorded outputs, so it marks a recording STALE when any of those changed (a hash of all of them) or when it was made on another model than the `model` pinned in `cases.json` (override with `--model`). Re-record stale cases with `--live --record` (one case ≈ three `claude -p` stages) and commit the JSON; a recording stores the model id and `claude` CLI version the run actually used. Recordings built from demo data (`demo-scenario`, `synthetic`) report as FIXTURE and never count as a pass.
+
+Live runs never publish (`PUBLISH_MODE=mock`, publishing credentials blanked) and never write the Admin's data: slides go under `--out` (default `backend/.data/golden`). With the SQLite store its database sits there too; with the Postgres store live mode uses `GOLDEN_DATABASE_URL` (its database name must contain `golden` or `test`) or creates a scratch database on `TEST_DATABASE_URL`'s server, applies `supabase/migrations` and drops it at exit, and refuses to start otherwise. CI (`.github/workflows/golden-set.yml`) runs replay; live CI needs an `ANTHROPIC_API_KEY` secret (steps in that file).
+
 ## Rules
 
 - Never set `PUBLISH_MODE=graph` or approve a job unless a human explicitly asked. It posts publicly.
 - Secrets (`IG_ACCESS_TOKEN`, `SUPABASE_SERVICE_KEY`, Anthropic keys) stay in `backend/.env` on the host and never go into the sandbox, the agent workspace, logs or commits.
 - Data and caches don't live in the repo (`/data` is a gitignored symlink).
+- Organization data goes through `app/store.py` with the caller's Organization (`ctx.org_id`): `store.tenant(org_id)` runs as the `wok_api` role so row-level security applies. `store.system()` bypasses it and is only for work that spans Organizations (creating one, restart recovery). DBOS's checkpoint tables (schema `dbos`) are system tables of the same kind: `wok_api` and Supabase's API roles can't reach them. New Organization-owned tables need `org_id`, RLS and a `wok_api` policy (see `supabase/migrations/20261029140000_org_isolation.sql`).
+- Pipeline stages run as DBOS steps (`orchestrator.STAGES`). Every side effect (agent call, HTTP, rendering, file or store write) happens inside a stage function, never in `job_workflow` itself, or a resumed Job repeats it. A stage saves the Job before it returns; whatever a later stage needs that isn't on the Job goes in `s.out` as small JSON.
 - Card or UI changes must follow `DESIGN.md`. Re-run the renderer preview after template edits.
 
 ## Agent skills

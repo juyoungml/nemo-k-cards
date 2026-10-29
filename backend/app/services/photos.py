@@ -19,7 +19,8 @@ from urllib.parse import urlparse
 import httpx
 
 from app.schemas import CardDeck, EventBrief, ImageAsset
-from app.services.link_checker import UA, _registrable, suspicious_reason
+from app.services import safe_fetch
+from app.services.link_checker import _registrable, suspicious_reason
 
 OVERLAY_LICENSES = {"official_permission", "kogl_1", "cc0", "cc_by", "unsplash", "pexels"}
 # Public tourism / government hosts whose photos are published for reuse with credit.
@@ -53,8 +54,12 @@ def reject_reason(img: ImageAsset, brief: EventBrief, ok_urls: set[str]) -> str 
         return "license marked no-overlay"
     if not img.credit.strip():
         return "no credit"
-    host = (urlparse(img.url).hostname or "").lower()
-    if urlparse(img.url).scheme != "https" or not host:
+    try:
+        parsed = urlparse(img.url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return "invalid URL"
+    if parsed.scheme != "https" or not host:
         return "not an https URL"
     if reason := suspicious_reason(img.url):
         return f"suspicious URL ({reason})"
@@ -66,7 +71,10 @@ def reject_reason(img: ImageAsset, brief: EventBrief, ok_urls: set[str]) -> str 
     if not (_is_public_host(reg) or reg in official):
         return f"{reg} is not the event's verified official domain or a public tourism host"
     if img.source_url:
-        src_reg = _registrable(urlparse(img.source_url).hostname or "")
+        try:
+            src_reg = _registrable(urlparse(img.source_url).hostname or "")
+        except ValueError:
+            return "invalid source page URL"
         if not (_is_public_host(src_reg) or src_reg in official):
             return f"source page {src_reg} is not official"
     return None
@@ -107,7 +115,11 @@ def image_size(data: bytes) -> tuple[int, int] | None:
 async def _download(img: ImageAsset, dest: Path, client: httpx.AsyncClient) -> str | None:
     """Fetch and validate; write to dest (extension added). Returns a reject reason or None."""
     try:
-        resp = await client.get(img.url)
+        resp = await safe_fetch.fetch(client, "GET", img.url, max_bytes=MAX_BYTES)
+    except safe_fetch.BlockedURL as e:
+        return f"blocked ({e.reason})"
+    except safe_fetch.TooLarge:
+        return f"larger than {MAX_BYTES // 1_000_000} MB"
     except httpx.HTTPError as e:
         return f"download failed ({type(e).__name__})"
     if resp.status_code != 200:
@@ -150,9 +162,21 @@ async def collect(briefs: list[EventBrief], ok_urls: set[str], out_dir: Path) ->
             log.append(f"{brief.id}: photo ok ({img.license}, {img.credit})")
             return
 
-    async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=UA) as client:
+    async with safe_fetch.client(timeout=8) as client:
         await asyncio.gather(*(one(b, client) for b in briefs))
     return found, log
+
+
+def attach_vetted(deck: CardDeck, vetted: dict[str, Vetted]) -> list[str]:
+    """Slide images come only from the host: an event slide gets its event's vetted local copy, every other
+    image an agent put on a slide is dropped (it was never checked and the renderer would fetch it).
+    Run before `attach_stock`. Returns log lines."""
+    log: list[str] = []
+    for sl in deck.slides:
+        if sl.image and not (sl.event_id in vetted and sl.image.url == vetted[sl.event_id].asset.url):
+            log.append(f"slide {sl.index + 1}: ignored agent-supplied image URL")
+        sl.image = vetted[sl.event_id].asset if sl.layout == "event" and sl.event_id in vetted else None
+    return log
 
 
 # ---------------------------------------------------------------- stock (AI-generated mood shots)

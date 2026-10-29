@@ -26,6 +26,7 @@ Follow [Getting started](docs/GETTING_STARTED.md) using fixture data and mock pu
 cd backend
 uv sync --frozen
 uv run playwright install chromium
+supabase db start   # local Postgres with supabase/migrations applied
 uv run pytest -q
 ```
 

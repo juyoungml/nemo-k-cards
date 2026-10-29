@@ -3,12 +3,14 @@
 Render and QA run for real, so these need Playwright's Chromium (`uv run playwright install chromium`).
 """
 
+import functools
 import secrets
+import uuid
 from datetime import date
 
 import pytest
 
-from app import drafts, store
+from app import brainstorms, orgs, store
 from app.pipeline import orchestrator
 from app.schemas import Fact, JobStatus, LinkCheck
 from app.services import link_checker
@@ -31,17 +33,23 @@ def no_network(monkeypatch):
     return answers
 
 
+@functools.cache
+def org() -> uuid.UUID:
+    """The Organization these pipeline runs belong to."""
+    return orgs.create_org(uuid.uuid4(), "Pipeline tests").org_id
+
+
 async def run_quick(scenario: str):
-    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "test prompt"))
-    await orchestrator.run_job(job.id, scenario=scenario)
-    return store.get_job(job.id)
+    job = store.save_job(org(), orchestrator.new_job(secrets.token_hex(3), "test prompt"))
+    await orchestrator.run_job(org(), job.id, scenario=scenario)
+    return store.get_job(org(), job.id)
 
 
-async def run_brainstorm(draft):
-    store.save_draft(draft)
-    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "bs", "brainstorm", draft.id))
-    await orchestrator.run_job(job.id, draft=draft)
-    return store.get_job(job.id)
+async def run_brainstorm(brainstorm):
+    store.save_brainstorm(org(), brainstorm)
+    job = store.save_job(org(), orchestrator.new_job(secrets.token_hex(3), "bs", "brainstorm", brainstorm.id))
+    await orchestrator.run_job(org(), job.id, brainstorm=brainstorm)
+    return store.get_job(org(), job.id)
 
 
 # ---------------------------------------------------------------- scenarios
@@ -67,7 +75,7 @@ async def test_bad_scenario_is_blocked_by_the_safeguard(no_network):
     cats = {(i.category, i.severity) for i in job.issues}
     assert ("sensitive", "block") in cats
     assert ("pii", "block") in cats  # phone number on slide 2, found by host QA (not the fixture)
-    events = [e for e in store.list_policy_events() if e.job_id == job.id]
+    events = [e for e in store.list_policy_events(org()) if e.job_id == job.id]
     assert {(e.host, e.result) for e in events} >= {("graph.facebook.com", "policy_denied"),
                                                     ("pastebin.com", "policy_denied")}
 
@@ -103,29 +111,26 @@ async def test_quick_job_fails_when_every_event_loses_its_sources(monkeypatch):
     assert states["Verify links"] == "failed" and states["Outline & copy"] == "pending"
 
 
-def test_unknown_scenario_is_rejected_by_the_api():
-    from fastapi.testclient import TestClient
-
-    from app.main import app
-    r = TestClient(app).post("/jobs", json={"prompt": "hello there", "scenario": "../etc"})
+def test_unknown_scenario_is_rejected_by_the_api(client):
+    r = client.post("/jobs", json={"prompt": "hello there", "scenario": "../etc"})
     assert r.status_code == 422
 
 
 # ---------------------------------------------------------------- brainstorm verify
 
 async def test_brainstorm_sample_verifies_its_own_source(no_network):
-    job = await run_brainstorm(drafts.sample_draft())
+    job = await run_brainstorm(brainstorms.sample_brainstorm())
     assert job.status == JobStatus.READY_FOR_REVIEW
     [brief] = job.briefs
     assert brief.title_en == "Mangwon Night Market" and brief.title_ko == "망원 야시장"
     assert (brief.start_date.month, brief.start_date.day, brief.end_date.day) == (10, 17, 19)
-    assert [c.url for c in job.verification.checks] == [drafts.SAMPLE_URL]
+    assert [c.url for c in job.verification.checks] == [brainstorms.SAMPLE_URL]
     assert job.safeguard.decision == "allow"  # Brainstorm jobs go through the safeguard too
     assert job.deck.slides[1].event_id == brief.id
 
 
 async def test_brainstorm_dead_source_blocks_and_demotes_facts(no_network):
-    d = drafts.sample_draft()
+    d = brainstorms.sample_brainstorm()
     url = "https://www.visitseoul.net/en/mangwon-gone"
     d.facts = [f.model_copy(update={"source_url": url}) if f.source_url else f for f in d.facts]
     job = await run_brainstorm(d)  # url is not in the fixture -> fake checker says 404
@@ -139,7 +144,7 @@ async def test_brainstorm_dead_source_blocks_and_demotes_facts(no_network):
 
 
 async def test_brainstorm_without_sources_is_blocked(no_network):
-    d = drafts.sample_draft()
+    d = brainstorms.sample_brainstorm()
     d.facts = [f.model_copy(update={"source_url": None}) for f in d.facts]
     job = await run_brainstorm(d)
     assert job.briefs == []
@@ -150,9 +155,9 @@ async def test_brainstorm_without_sources_is_blocked(no_network):
 
 
 def test_demote_unverified_keeps_only_checked_sources():
-    d = drafts.sample_draft()
+    d = brainstorms.sample_brainstorm()
     d.facts.append(Fact(key="other", value="x", verified=True, source_url="https://example.com"))
-    out, demoted = drafts.demote_unverified(d, {drafts.SAMPLE_URL})
+    out, demoted = brainstorms.demote_unverified(d, {brainstorms.SAMPLE_URL})
     assert demoted == 1
     assert [f.verified for f in out.facts] == [True, True, True, False, False]
 
@@ -168,54 +173,30 @@ def test_demote_unverified_keeps_only_checked_sources():
     ("Weekends", None),
 ])
 def test_parse_dates(text, expected):
-    assert drafts.parse_dates(text, date(2026, 10, 7)) == expected
+    assert brainstorms.parse_dates(text, date(2026, 10, 7)) == expected
 
 
-def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):
-    from fastapi.testclient import TestClient
-
+def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch, client):
     from app.config import settings
-    from app.main import app
     calls = []
 
-    async def fake_publish(job_id, caption, mode):
+    async def fake_publish(org_id, job_id, caption, mode):
         calls.append(mode)
     monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
     monkeypatch.setattr(settings, "publish_mode", "mock")
-    client = TestClient(app)
     for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
-        job = store.save_job(allowed_job())
+        job = store.save_job(client.org_id, allowed_job())
         r = client.post(f"/jobs/{job.id}/approve", json={"mode": mode} if mode else {})
         assert r.status_code == code, (mode, r.text)
     assert calls == ["mock", "mock"]
 
 
-def test_admin_token_guards_the_api(monkeypatch):
-    from fastapi.testclient import TestClient
-
+def test_live_server_starts_brainstorm_with_an_empty_board(monkeypatch, client):
     from app.config import settings
-    from app.main import app
-    monkeypatch.setattr(settings, "admin_token", "s3cret")
-    c = TestClient(app)
-    assert c.get("/health").status_code == 200
-    assert c.get("/jobs").status_code == 401
-    assert c.get("/jobs", headers={"Authorization": "Bearer wrong"}).status_code == 401
-    assert c.get("/jobs", headers={"Authorization": "Bearer s3cret"}).status_code == 200
-    assert c.post("/reset").status_code == 401
-    assert c.get("/jobs?token=s3cret").status_code == 401  # query token only for SSE
-    r = c.get("/jobs", headers={"Origin": "http://localhost:3000"})
-    assert r.status_code == 401 and r.headers.get("access-control-allow-origin") == "http://localhost:3000"
-
-
-def test_live_server_starts_brainstorm_with_an_empty_board(monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from app.config import settings
-    from app.main import app
-    c = TestClient(app)
+    c = client
     monkeypatch.setattr(settings, "demo_mode", "live")
-    live = c.post("/drafts", json={"sample": True}).json()
+    live = c.post("/brainstorms", json={"sample": True}).json()
     assert live["messages"] == [] and live["facts"] == [] and live["angles"] == []
     monkeypatch.setattr(settings, "demo_mode", "fixture")
-    demo = c.post("/drafts", json={"sample": True}).json()
+    demo = c.post("/brainstorms", json={"sample": True}).json()
     assert any("Mangwon" in f["value"] for f in demo["facts"])

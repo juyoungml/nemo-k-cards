@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "model": "claude-opus-5-5",
+  "cases": [
+    {
+      "id": "seongsu-popups",
+      "prompt": "Seongsu pop-ups this weekend",
+      "why": "The flagship request: a neighbourhood, a category and a short window.",
+      "expect": {"categories_any": ["popup"], "every_event_mentions_any": ["Seongsu", "성수", "Seongdong", "성동"],
+                 "window_days": 9}
+    },
+    {
+      "id": "hongdae-free",
+      "prompt": "Free things to do in Hongdae this weekend",
+      "why": "Tempts the copywriter to call things free; the facts check holds it to the briefs' prices.",
+      "expect": {"every_event_mentions_any": ["Hongdae", "홍대", "Hongik", "홍익", "Mapo", "마포", "Yeonnam", "연남",
+                                              "Hapjeong", "합정", "Sangsu", "상수"],
+                 "window_days": 9}
+    },
+    {
+      "id": "regional-festival",
+      "prompt": "Regional festivals outside Seoul in the next 30 days",
+      "why": "A regional festival: the researcher must leave Seoul and stay inside the window.",
+      "expect": {"categories_any": ["festival"], "no_event_mentions": ["서울"], "window_days": 30}
+    },
+    {
+      "id": "busan-weekend",
+      "prompt": "What's on in Busan this weekend",
+      "why": "A city other than the Seoul default.",
+      "expect": {"every_event_mentions_any": ["Busan", "부산"], "window_days": 9}
+    },
+    {
+      "id": "seoul-exhibitions-english",
+      "prompt": "Art exhibitions in Seoul this month with English information for foreigners",
+      "why": "An exhibition request; the stock gallery photo must only go on painting shows.",
+      "expect": {"categories_any": ["exhibition"], "window_days": 31}
+    },
+    {
+      "id": "gugak-performances",
+      "prompt": "Traditional Korean music (gugak) performances in Seoul in the next two weeks",
+      "why": "Performances; the Western-theater stock photo must never go on a gugak show.",
+      "expect": {"categories_any": ["performance"], "window_days": 14}
+    },
+    {
+      "id": "nothing-to-find",
+      "prompt": "Underwater K-pop concerts on Jeju this weekend",
+      "why": "Nothing like this exists: the right result is no Deck, not invented events.",
+      "expect": {"outcome": "no_deck", "min_events": 0}
+    },
+    {
+      "id": "ambiguous-weekend",
+      "prompt": "Something fun to do this weekend",
+      "why": "Ambiguous: the researcher should fall back to Seoul and the coming weekend.",
+      "expect": {"min_events": 3, "window_days": 9}
+    }
+  ]
+}

@@ -119,7 +119,7 @@ export interface Job {
   blocked_edit?: BlockedEdit | null;
   published_url?: string | null;
   error?: string | null;
-  slide_urls?: string[]; // rendered JPEGs, relative to API_URL (/assets/{id}/slide-NN.jpg)
+  slide_urls?: string[]; // rendered JPEGs: short-lived signed links relative to API_URL (/assets/{org}/{id}/slide-NN.jpg?exp=…&sig=…)
   publish_progress?: PublishProgress | null; // live sub-steps after Approve & Publish
   // View extras returned by GET /jobs/{id} and the SSE stream.
   source?: "quick" | "brainstorm";
@@ -143,7 +143,7 @@ export type Scenario = "good" | "bad" | "fail";
 
 // Admin-only view models (no backend schema yet).
 
-export interface Channel {
+export interface InstagramAccount {
   handle: string;
   platform: string;
   followers: number;
@@ -208,7 +208,7 @@ export interface ChatMessage {
   urls?: string[];
 }
 
-export interface Draft {
+export interface Brainstorm {
   id: string;
   messages: ChatMessage[];
   facts: Fact[];
@@ -220,9 +220,57 @@ export interface Draft {
   job_id?: string | null;
 }
 
-export interface DraftUpdate {
+export interface BrainstormUpdate {
   reply: string;
   facts?: Fact[] | null;
   angles?: Angle[] | null;
   outline?: OutlineItem[] | null;
+}
+
+// ---------------------------------------------------------------- sign-in (backend/app/orgs.py)
+
+export type Role = "viewer" | "editor" | "approver" | "admin";
+
+export interface Org {
+  id: string;
+  name: string;
+  role: Role;
+}
+
+export interface Me {
+  user: { id: string; email: string };
+  org: Org | null; // the Organization this session acts for; null until one is created
+  orgs: Org[];
+}
+
+export interface Member {
+  user_id: string;
+  email: string | null;
+  role: Role;
+  invited_by: string | null;
+  joined_at: string;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  invited_by: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export interface InvitationCreated extends Invitation {
+  invite_url: string; // works only for the invited email address
+  email_sent: boolean;
+}
+
+export interface AuditEvent {
+  id: number;
+  actor: string;
+  actor_email: string | null;
+  action: string;
+  target: string | null;
+  detail: Record<string, unknown>;
+  at: string;
 }

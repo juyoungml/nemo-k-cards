@@ -61,13 +61,14 @@ For a UI-only preview, run `pnpm install --frozen-lockfile` and `pnpm dev` in `a
 
 ### 1. Run the backend with sample data
 
-Requires **Python 3.12+**, [uv](https://docs.astral.sh/uv/), **Node.js 22** and **pnpm 10**. Playwright Chromium is needed for card rendering.
+Requires **Python 3.12+**, [uv](https://docs.astral.sh/uv/), **Node.js 22**, **pnpm 10**, plus Docker and the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) for the local database. Playwright Chromium is needed for card rendering.
 
 ```bash
 git clone https://github.com/juyoungml/nemo-k-cards.git
 cd nemo-k-cards/backend
 uv sync --frozen
 uv run playwright install chromium
+supabase db start   # local Postgres with supabase/migrations applied (full stack: supabase start)
 DEMO_MODE=fixture PUBLISH_MODE=mock uv run uvicorn app.main:app --port 8000 --reload --reload-dir app
 ```
 
@@ -100,7 +101,7 @@ flowchart LR
     admin["Admin Page"] -->|"Request / approve"| backend["FastAPI backend"]
     backend -->|"Create stage sandbox"| agent["Claude Code in OpenShell"]
     agent -->|"Validated JSON + policy logs"| backend
-    backend --> store["SQLite + rendered files"]
+    backend --> store["Postgres + rendered files"]
     backend -->|"After operator approval"| instagram["Instagram Graph API"]
     backend -->|"Upload JPEGs"| images["Public image host"]
     images -->|"Images fetched by Instagram"| instagram
@@ -135,7 +136,7 @@ The October 7 Admin capture displays denied file-write, external-connection and 
 | Run with isolation | `DEMO_MODE=live` | `AGENT_RUNNER=openshell` | Start with `mock` |
 | Publish to your account | Configured workflow | Local or OpenShell | `PUBLISH_MODE=graph`, credentials and approval required |
 
-`dryrun` uploads images and creates Instagram containers but does not publish the final post. It is not an offline mode. Set `ADMIN_TOKEN` and restrict `CORS_ORIGINS` before exposing a real backend. Keep a publicly shared sample demo separate from an account with live publishing credentials.
+`dryrun` uploads images and creates Instagram containers but does not publish the final post. It is not an offline mode. The API requires a Supabase Auth session on every route except `/health` (`SUPABASE_URL`); restrict `CORS_ORIGINS` before exposing a real backend. Keep a publicly shared sample demo separate from an account with live publishing credentials.
 
 ## Develop and contribute
 

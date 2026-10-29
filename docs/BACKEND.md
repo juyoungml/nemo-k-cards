@@ -1,7 +1,7 @@
 # Backend Spec: What's On Korea
 
 > Status: **FROZEN v1.3** (2026-10-29; v1.1: no auto-reject — the operator decides). Changes after this point need a team heads-up in Slack + a version bump here.
-> v1.3: the Safeguard is a hard gate, the one exception to "no auto-reject" (§2.1, §3, §4, §5, §10, §11 #4 and #14, [ADR 0004](adr/0004-safeguard-hard-gate.md)). Agreed with Luke on 2026-10-29.
+> v1.3: the Safeguard is a hard gate, the one exception to "no auto-reject" (§2.1, §3, §4, §5, §10, §11 #4 and #14, [ADR 0004](adr/0004-safeguard-hard-gate.md)). Agreed with Luke on 2026-10-29. The Safeguard is the last DBOS step of the Job workflow, so `WORKFLOW_VERSION` is now 2.
 > v1.2: §6 runner flow and #13 updated from running OpenShell 0.1.2 for real (MicroVM driver, native Claude Code binary).
 > Builds on [SPEC.md](SPEC.md) **v0.3** (incl. Brainstorm §4-1) and the [Admin Figma mockups](https://www.figma.com/design/OrkSDRFk7FwMzJ5WFxgYDY) (5 screens). Where they disagree, **Figma wins for UI behavior** and this doc wins for the backend contract.
 
@@ -25,7 +25,7 @@ flowchart LR
   end
 
   subgraph API["FastAPI backend — host (trusted)"]
-    J[/jobs · /drafts · SSE/] --> O[Orchestrator]
+    J[/jobs · /brainstorms · SSE/] --> O[Orchestrator]
     O --> LC[Link checker]
     O --> RN[Renderer<br/>Jinja2 + Playwright]
     O --> QA[Visual QA<br/>overflow · tofu · PII]
@@ -61,7 +61,7 @@ flowchart LR
 
 Stage order inside the orchestrator:
 `Research (sandbox) → Verify (host) → Copy (sandbox) → Render (host) → QA (host) → Review (sandbox) → READY_FOR_REVIEW → human Approve → Publish (host)`.
-Brainstorm: host fetches user URLs → `planner` (sandbox) returns `DraftUpdate` per chat turn → **Generate** enters the pipeline at Verify.
+Brainstorm: host fetches user URLs → `planner` (sandbox) returns `BrainstormUpdate` per chat turn → **Generate** enters the pipeline at Verify.
 
 ## 0.2 Tooling (open source unless noted)
 
@@ -112,9 +112,9 @@ Rules for secrets:
 
 | Screen (Figma node) | Reads | Writes | Live |
 |---|---|---|---|
-| **01 Dashboard** (`3:6`) | `GET /metrics`, `GET /channels`, `GET /jobs?limit=6` | — | — |
+| **01 Dashboard** (`3:6`) | `GET /metrics`, `GET /instagram-accounts`, `GET /jobs?limit=6` | — | — |
 | **02 New Job · Quick** (`3:186`) | `GET /jobs/{id}` | `POST /jobs` | `GET /jobs/{id}/events` (SSE) |
-| **02b New Job · Brainstorm** (`13:183`) | `GET /drafts/{id}` | `POST /drafts`, `POST /drafts/{id}/messages`, `PATCH /drafts/{id}`, `POST /drafts/{id}/generate` | — (request/response) |
+| **02b New Job · Brainstorm** (`13:183`) | `GET /brainstorms/{id}` | `POST /brainstorms`, `POST /brainstorms/{id}/messages`, `PATCH /brainstorms/{id}`, `POST /brainstorms/{id}/generate` | — (request/response) |
 | **03 Review** (`3:311`) | `GET /jobs/{id}`, `GET /assets/{job_id}/slide-NN.jpg` | `POST /jobs/{id}/approve`, `/reject`, `/regenerate` | SSE while publishing |
 | **04 Policy Log** (`3:447`) | `GET /policy-events`, `GET /policy-events/summary` | — | poll every 5 s |
 
@@ -139,10 +139,10 @@ any stage error ─────────────────────�
 - Quick: starts at `RESEARCHING`. Brainstorm `generate`: starts at `VERIFYING` (Research step = `skipped`).
 - Review/QA issues (`block` or `warn`) never change the status; they're shown in Review and the human approves or rejects. Only the Safeguard can block (§11 #4).
 
-### 2.2 Draft (Brainstorm, SPEC §4-1)
-- One draft = **one event**. Roundups go through Quick.
-- Each chat turn is stateless: host sends the full Draft JSON + new message + fetched page text to a fresh sandbox; `planner` returns `DraftUpdate`; host merges and saves.
-- `generate` creates a new Job each time; `Draft.job_id` points to the latest one.
+### 2.2 Brainstorm (SPEC §4-1)
+- One Brainstorm = **one event**. Roundups go through Quick.
+- Each chat turn is stateless: host sends the full Brainstorm JSON + new message + fetched page text to a fresh sandbox; `planner` returns `BrainstormUpdate`; host merges and saves.
+- `generate` creates a new Job each time; `Brainstorm.job_id` points to the latest one.
 
 ---
 
@@ -183,7 +183,7 @@ class QAReport / ReviewVerdict: unchanged
 
 # --- Job
 ~ class Job:             ...existing...
-                         + title: str · mode: "quick"|"brainstorm" · draft_id?
+                         + title: str · mode: "quick"|"brainstorm" · brainstorm_id?
                          + steps: list[PipelineStep]       # Quick stepper
                          + sources: list[SourceRow]        # Review table
                          + checks: list[CheckResult]       # Review chips
@@ -208,12 +208,12 @@ class Fact:              key("event"|"dates"|"venue"|"price"|"booking"|"other") 
 class Angle:             id · title · hook
 class OutlineItem:       layout · heading · updated_from_chat
 class ChatMessage:       role · text · urls
-class Draft:             id · messages · facts · angles · selected_angle_id · targets · tones · outline · job_id?
-class DraftUpdate:       reply · facts? · angles? · outline?   (None = unchanged)
+class Brainstorm:             id · messages · facts · angles · selected_angle_id · targets · tones · outline · job_id?
+class BrainstormUpdate:       reply · facts? · angles? · outline?   (None = unchanged)
 
 # --- Admin
 + class Metric:          label · value · delta                         (display-ready, matches types.ts)
-+ class Channel:         handle · platform · followers · live
++ class InstagramAccount:         handle · platform · followers · live
 + class PolicyEvent:     time · sandbox · binary · host · request · result("policy_denied"|"fs_denied"|"audit"|"allowed")
                          + note? · job_id?
 + class PolicyStats:     denied_24h · publish_delete_attempts_24h · audited_24h · sandboxes_run_24h · policy_version · prover
@@ -238,13 +238,13 @@ Base `http://localhost:8000` (`NEXT_PUBLIC_API_URL`). JSON. Errors: `{"error": c
 | POST | `/jobs/{id}/reject` | `{reason}` → `Job` | from READY_FOR_REVIEW or BLOCKED |
 | POST | `/jobs/{id}/approve` | `{caption, mode?:"mock"\|"dryrun"\|"graph"}` → `Job` | **only publish path**; 409 unless READY_FOR_REVIEW, if the Safeguard blocked or never checked the Deck, if a credential leak was found, or for a `graph` post of an edited caption on a `DEMO_MODE=fixture` server; an edited caption that hits a blocked phrase → 422 + `blocked_edit`; re-runs PII + secret + hashtag checks on the edited caption. Any content that differs from what the Safeguard checked is checked again before upload |
 | GET | `/assets/{job_id}/slide-NN.jpg` | image/jpeg | exists (StaticFiles); public via tunnel for Graph API |
-| POST | `/drafts` | `{}` → `Draft` | |
-| GET | `/drafts/{id}` | → `Draft` | |
-| PATCH | `/drafts/{id}` | partial `Draft` (`selected_angle_id`, `targets`, `tones`, `outline`) → `Draft` | board edits |
-| POST | `/drafts/{id}/messages` | `{text, urls}` → `{reply, draft}` | host Fetch (link_checker + text extract) → `planner` → merge |
-| POST | `/drafts/{id}/generate` | → `Job` | starts at VERIFYING |
+| POST | `/brainstorms` | `{}` → `Brainstorm` | |
+| GET | `/brainstorms/{id}` | → `Brainstorm` | |
+| PATCH | `/brainstorms/{id}` | partial `Brainstorm` (`selected_angle_id`, `targets`, `tones`, `outline`) → `Brainstorm` | board edits |
+| POST | `/brainstorms/{id}/messages` | `{text, urls}` → `{reply, brainstorm}` | host Fetch (link_checker + text extract) → `planner` → merge |
+| POST | `/brainstorms/{id}/generate` | → `Job` | starts at VERIFYING |
 | GET | `/metrics` | → `Metric[]` | IG Insights for @whatsonkorea, rest seed |
-| GET | `/channels` | → `Channel[]` | |
+| GET | `/instagram-accounts` | → `InstagramAccount[]` | |
 | GET | `/policy-events` | `?result&since&job_id` → `PolicyEvent[]` | |
 | GET | `/policy-events/summary` | → `PolicyStats` | |
 | GET | `/policy-events/export.csv` | text/csv | |
@@ -258,7 +258,7 @@ No auth (localhost demo). CORS: `http://localhost:3000`.
 | # | Stage | Where | Runner / service | In → Out | Timeout | Retry | Fixture |
 |---|---|---|---|---|---|---|---|
 | B1 | Fetch (brainstorm) | host | `link_checker` + text extract | urls → page text | 15 s | — | `brainstorm/page.txt` |
-| B2 | Plan (brainstorm) | sandbox `planner` | `run_stage` | Draft + msg + text → `DraftUpdate` | 90 s | 1 | `brainstorm/turns.json` |
+| B2 | Plan (brainstorm) | sandbox `planner` | `run_stage` | Brainstorm + msg + text → `BrainstormUpdate` | 90 s | 1 | `brainstorm/turns.json` |
 | 1 | Research | sandbox `researcher` | `run_stage` | prompt → `EventBrief[]` | 180 s | 1 | `briefs.json` |
 | 2 | Verify | host | `link_checker.verify` | briefs → `VerificationReport` + `SourceRow[]` | 30 s | — | `verification.json` |
 | 3 | Copy | sandbox `copywriter` | `run_stage` | briefs (+ angle/targets/tones/outline) → `CardDeck` | 120 s | 1 | `deck.json` |
@@ -304,7 +304,7 @@ stdin: JSON payload  →  stdout: {"result": "<json>"}  →  TypeAdapter(T).vali
 ---
 
 ## 8. Storage
-SQLite `backend/.data/app.db` — tables `jobs`, `drafts`, `job_events`, `policy_events` (model JSON + indexed `status`, `created_at`). Files in `backend/.data/out/{job_id}/` (served at `/assets`).
+SQLite `backend/.data/app.db` — tables `jobs`, `brainstorms`, `job_events`, `policy_events` (model JSON + indexed `status`, `created_at`). Files in `backend/.data/out/{job_id}/` (served at `/assets`).
 
 ## 9. Config (`backend/.env`, gitignored — never put real values in `.env.example`)
 `DEMO_MODE=fixture|live` · `AGENT_RUNNER=local|openshell` · `PUBLISH_MODE=mock|dryrun|graph` · `OPENSHELL_POLICY` · `OPENSHELL_IMAGE` · `IG_USER_ID` · `IG_ACCESS_TOKEN` · `PUBLIC_ASSET_BASE_URL`.
@@ -325,8 +325,8 @@ brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 
 | # | Decision |
 |---|---|
-| 1 | Brainstorm: one event per draft; roundups via Quick |
-| 2 | Re-generate a draft → new Job; `Draft.job_id` = latest |
+| 1 | One event per Brainstorm; roundups via Quick |
+| 2 | Re-generate a Brainstorm → new Job; `Brainstorm.job_id` = latest |
 | 3 | Brainstorm chat: request/response (no streaming) in v1 |
 | 4 | Automated checks never auto-reject: every finished deck goes to READY_FOR_REVIEW with its issues; the operator decides (approving over `block` issues is logged as an override). Credential leaks hard-stop publishing, and the Safeguard (#14) is the one check that blocks a Deck |
 | 5 | Storage: SQLite |
@@ -348,6 +348,6 @@ brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 | 2 | Store + orchestrator (fixture mode) + all routes + SSE | B |
 | 3 | `HtmlRenderer` + card templates + visual QA | C |
 | 4 | Local runner + researcher / planner / copywriter / reviewer prompts | A |
-| 5 | Drafts API (Fetch → planner → merge) | A + B |
+| 5 | Brainstorms API (Fetch → planner → merge) | A + B |
 | 6 | Link checker, publisher modes, policy-log parser, secret scanner | B + D |
 | 7 | OpenShell runner on Brev (Docker ≥ 28), policy fixes (#7, #13) | D |
