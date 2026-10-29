@@ -138,6 +138,7 @@ Live runs never publish (`PUBLISH_MODE=mock`, publishing credentials blanked) an
 - Never set `PUBLISH_MODE=graph` or approve a job unless a human explicitly asked. It posts publicly.
 - Secrets (`IG_ACCESS_TOKEN`, `SUPABASE_SERVICE_KEY`, Anthropic keys) stay in `backend/.env` on the host and never go into the sandbox, the agent workspace, logs or commits.
 - Data and caches don't live in the repo (`/data` is a gitignored symlink).
+- Organization data goes through `app/store.py` with the caller's Organization (`ctx.org_id`): `store.tenant(org_id)` runs as the `wok_api` role so row-level security applies. `store.system()` bypasses it and is only for work that spans Organizations (creating one, restart recovery). New Organization-owned tables need `org_id`, RLS and a `wok_api` policy (see `supabase/migrations/20261029140000_org_isolation.sql`).
 - Card or UI changes must follow `DESIGN.md`. Re-run the renderer preview after template edits.
 
 ## Agent skills

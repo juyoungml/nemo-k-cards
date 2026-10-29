@@ -10,6 +10,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,7 @@ def cli_version() -> str:
 
 
 async def run_case(case: Case, set_version: int) -> Recording:
-    from app import store
+    from app import orgs, store
     from app.config import settings
     from app.pipeline import agent_runner, orchestrator
 
@@ -77,10 +78,12 @@ async def run_case(case: Case, set_version: int) -> Recording:
 
     agent_runner._parse = parse_and_note_model
     try:
-        job = store.save_job(orchestrator.new_job(f"golden-{secrets.token_hex(3)}", case.prompt))
+        # Each case runs as its own Organization in the scratch database, like any other Job.
+        org = orgs.create_org(uuid.uuid4(), f"Golden {case.id}"[:100]).org_id
+        job = store.save_job(org, orchestrator.new_job(f"golden-{secrets.token_hex(3)}", case.prompt))
         today = datetime.now(orchestrator.KST).date()
-        await orchestrator.run_job(job.id)
+        await orchestrator.run_job(org, job.id)
     finally:
         agent_runner._parse = real_parse
-    return recording_from_job(store.get_job(job.id), case, set_version, today, models,
+    return recording_from_job(store.get_job(org, job.id), case, set_version, today, models,
                               cli_version() if settings.agent_runner == "local" else "", settings.agent_runner)
