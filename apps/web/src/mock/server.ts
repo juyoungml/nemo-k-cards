@@ -5,11 +5,11 @@
 import bad from "./scenarios/bad.json";
 import fail from "./scenarios/fail.json";
 import good from "./scenarios/good.json";
-import { seedChannels, seedDraft, seedPolicyEvents } from "./seed";
+import { seedInstagramAccounts, seedBrainstorm, seedPolicyEvents } from "./seed";
 import type {
   CardDeck,
-  Draft,
-  DraftUpdate,
+  Brainstorm,
+  BrainstormUpdate,
   EventBrief,
   Issue,
   Job,
@@ -62,7 +62,7 @@ interface MockJob {
 
 interface Store {
   jobs: Map<string, MockJob>;
-  drafts: Map<string, Draft>;
+  brainstorms: Map<string, Brainstorm>;
 }
 
 const g = globalThis as unknown as { __wokMock?: Store };
@@ -77,7 +77,7 @@ function seed(): Store {
     { id: "c3d810", prompt: "3 exhibitions worth visiting this week", scenario: "good", source: "quick", createdAt: now - 46 * H, titleOverride: "3 exhibitions worth visiting this week", decision: { kind: "approve", at: now - 45 * H } },
     { id: "9be7f3", prompt: "Hidden local events beyond the checklist", scenario: "good", source: "quick", createdAt: now - 70 * H, titleOverride: "Hidden local events beyond the checklist", decision: { kind: "approve", at: now - 69 * H } },
   ];
-  return { jobs: new Map(jobs.map((j) => [j.id, j])), drafts: new Map() };
+  return { jobs: new Map(jobs.map((j) => [j.id, j])), brainstorms: new Map() };
 }
 
 export const store = () => (g.__wokMock ??= seed());
@@ -154,7 +154,7 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     }
     stageStart += s.ms;
   });
-  if (job.source === "brainstorm") log.unshift({ time: fmt(job.createdAt), stage: "draft", message: "Generated from Brainstorm draft — Research skipped" });
+  if (job.source === "brainstorm") log.unshift({ time: fmt(job.createdAt), stage: "brainstorm", message: "Generated from a Brainstorm — Research skipped" });
 
   const briefs = job.override?.briefs ?? sc.briefs;
   const deckSrc = job.override?.deck ?? sc.deck;
@@ -216,7 +216,7 @@ export function metrics(): Metric[] {
   ];
 }
 
-export const channels = () => seedChannels;
+export const instagramAccounts = () => seedInstagramAccounts;
 
 export function policyEvents(): PolicyEvent[] {
   const now = Date.now();
@@ -261,30 +261,30 @@ export function policyStats(): Metric[] {
   ];
 }
 
-// ---------------------------------------------------------------- drafts (Brainstorm)
+// ---------------------------------------------------------------- brainstorms
 
-export function createDraft(sample = true): Draft {
-  const d: Draft = sample
-    ? { ...structuredClone(seedDraft), id: `d-${newId()}` }
+export function createBrainstorm(sample = true): Brainstorm {
+  const d: Brainstorm = sample
+    ? { ...structuredClone(seedBrainstorm), id: `d-${newId()}` }
     : { id: `d-${newId()}`, messages: [], facts: [], angles: [], selected_angle_id: null, targets: [], tones: [], outline: [] };
-  store().drafts.set(d.id, d);
+  store().brainstorms.set(d.id, d);
   return d;
 }
 
-export const getDraft = (id: string) => store().drafts.get(id);
+export const getBrainstorm = (id: string) => store().brainstorms.get(id);
 
-export function patchDraft(id: string, patch: Partial<Draft>) {
-  const d = store().drafts.get(id);
+export function patchBrainstorm(id: string, patch: Partial<Brainstorm>) {
+  const d = store().brainstorms.get(id);
   if (!d) return undefined;
   const next = { ...d, ...patch, id: d.id, messages: d.messages };
-  store().drafts.set(id, next);
+  store().brainstorms.set(id, next);
   return next;
 }
 
 const SUSPICIOUS = /\.(xyz|top|click|zip|icu)\b|bit\.ly|tinyurl|visitkorea-/i;
 
 /** Deterministic stand-in for the sandboxed `planner` subagent (SPEC §4-1). */
-function mockPlanner(d: Draft, text: string, urls: string[]): DraftUpdate {
+function mockPlanner(d: Brainstorm, text: string, urls: string[]): BrainstormUpdate {
   const bad = urls.filter((u) => SUSPICIOUS.test(u));
   if (bad.length) {
     return { reply: `⚠️ 링크 검증에서 막혔어요: ${bad.join(", ")} → 의심 도메인(lookalike/단축 URL)이라 사용하지 않을게요. 공식 페이지 URL을 주시면 다시 확인할게요.` };
@@ -319,23 +319,23 @@ function mockPlanner(d: Draft, text: string, urls: string[]): DraftUpdate {
 }
 
 export function sendMessage(id: string, text: string, urls: string[]) {
-  const d = store().drafts.get(id);
+  const d = store().brainstorms.get(id);
   if (!d) return undefined;
   const update = mockPlanner(d, text, urls);
-  const next: Draft = {
+  const next: Brainstorm = {
     ...d,
     messages: [...d.messages, { role: "user", text, urls }, { role: "agent", text: update.reply }],
     facts: update.facts ?? d.facts,
     angles: update.angles ?? d.angles,
     outline: update.outline ?? d.outline,
   };
-  store().drafts.set(id, next);
+  store().brainstorms.set(id, next);
   return next;
 }
 
-export function generateFromDraft(id: string): { job: Job } | { error: string } {
-  const d = store().drafts.get(id);
-  if (!d) return { error: "draft not found" };
+export function generateFromBrainstorm(id: string): { job: Job } | { error: string } {
+  const d = store().brainstorms.get(id);
+  if (!d) return { error: "brainstorm not found" };
   if (!d.selected_angle_id) return { error: "pick an angle first" };
   const angle = d.angles.find((a) => a.id === d.selected_angle_id)!;
   const factText = d.facts.filter((f) => f.verified).map((f) => f.value).join("\n");
@@ -358,6 +358,6 @@ export function generateFromDraft(id: string): { job: Job } | { error: string } 
     },
   };
   store().jobs.set(job.id, job);
-  store().drafts.set(id, { ...d, job_id: job.id });
+  store().brainstorms.set(id, { ...d, job_id: job.id });
   return { job: snapshot(job) };
 }

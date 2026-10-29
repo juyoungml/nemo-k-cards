@@ -11,28 +11,28 @@ import { useApi } from "@/lib/use-api";
 
 export function DashboardView() {
   const metrics = useApi(api.getMetrics, [], 5000);
-  const channels = useApi(api.getChannels);
+  const accounts = useApi(api.getInstagramAccounts);
   const jobs = useApi(api.listJobs, [], 3000);
 
-  if (!metrics.data || !channels.data || !jobs.data) return <LoadState error={metrics.error ?? channels.error ?? jobs.error} />;
+  if (!metrics.data || !accounts.data || !jobs.data) return <LoadState error={metrics.error ?? accounts.error ?? jobs.error} />;
 
   return (
     <>
       <StatRow metrics={metrics.data} />
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <Panel title="SNS / Channels" description="Connected accounts · live from Instagram" className="w-full lg:w-[520px] lg:shrink-0">
+        <Panel title="Instagram accounts" description="Connected accounts · live from Instagram" className="w-full lg:w-[520px] lg:shrink-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Channel</TableHead>
+                <TableHead>InstagramAccount</TableHead>
                 <TableHead>Platform</TableHead>
                 <TableHead className="text-right">Followers</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {channels.data.map((c) => (
+              {accounts.data.map((c) => (
                 <TableRow key={`${c.handle}-${c.platform}`}>
                   <TableCell>{c.handle}</TableCell>
                   <TableCell>{c.platform}</TableCell>
@@ -47,7 +47,7 @@ export function DashboardView() {
         </Panel>
 
         <Panel
-          title="Recent card news"
+          title="Recent decks"
           className="min-w-0 flex-1"
           action={
             <Link href="/review" className="text-[13px] font-medium text-primary hover:underline">

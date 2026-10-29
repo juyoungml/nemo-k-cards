@@ -10,7 +10,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.schemas import Draft, Job, PolicyEvent
+from app.schemas import Brainstorm, Job, PolicyEvent
 
 _lock = threading.Lock()
 _pool: ConnectionPool | None = None
@@ -79,14 +79,14 @@ def list_jobs(limit: int = 50) -> list[Job]:
     return [j for r in rows if (j := _load(Job, r))]
 
 
-def save_draft(draft: Draft) -> Draft:
-    _put("drafts", draft.id, draft)
-    return draft
+def save_brainstorm(brainstorm: Brainstorm) -> Brainstorm:
+    _put("brainstorms", brainstorm.id, brainstorm)
+    return brainstorm
 
 
-def get_draft(draft_id: str) -> Draft | None:
-    rows = _rows("select doc::text from drafts where id = %s", (draft_id,))
-    return _load(Draft, rows[0]) if rows else None
+def get_brainstorm(brainstorm_id: str) -> Brainstorm | None:
+    rows = _rows("select doc::text from brainstorms where id = %s", (brainstorm_id,))
+    return _load(Brainstorm, rows[0]) if rows else None
 
 
 def add_policy_events(events: list[PolicyEvent]) -> None:

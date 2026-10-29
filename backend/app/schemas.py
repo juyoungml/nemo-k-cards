@@ -7,7 +7,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import AliasChoices, BaseModel, Field, HttpUrl
 
 
 class JobStatus(StrEnum):
@@ -179,7 +179,8 @@ class Job(BaseModel):
     publish_progress: PublishProgress | None = None
     pipeline: list[PipelineStep] = Field(default_factory=list)
     log: list[LogLine] = Field(default_factory=list)
-    draft_id: str | None = None
+    # Stored before the glossary rename as "draft_id"; both keys load, new documents are written as brainstorm_id.
+    brainstorm_id: str | None = Field(default=None, validation_alias=AliasChoices("brainstorm_id", "draft_id"))
 
 
 Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend
@@ -207,7 +208,7 @@ class Metric(BaseModel):
     delta: str
 
 
-class Channel(BaseModel):
+class InstagramAccount(BaseModel):
     handle: str
     platform: str
     followers: int
@@ -252,7 +253,7 @@ class ChatMessage(BaseModel):
     urls: list[str] = Field(default_factory=list)
 
 
-class Draft(BaseModel):
+class Brainstorm(BaseModel):
     id: str
     messages: list[ChatMessage] = Field(default_factory=list)
     facts: list[Fact] = Field(default_factory=list)
@@ -264,7 +265,7 @@ class Draft(BaseModel):
     job_id: str | None = None
 
 
-class DraftUpdate(BaseModel):
+class BrainstormUpdate(BaseModel):
     """planner output; None = unchanged."""
     reply: str
     facts: list[Fact] | None = None
@@ -272,16 +273,16 @@ class DraftUpdate(BaseModel):
     outline: list[OutlineItem] | None = None
 
 
-class CreateDraftRequest(BaseModel):
+class CreateBrainstormRequest(BaseModel):
     sample: bool = True
 
 
-class DraftMessageRequest(BaseModel):
+class BrainstormMessageRequest(BaseModel):
     text: str = ""
     urls: list[str] = Field(default_factory=list)
 
 
-class DraftPatch(BaseModel):
+class BrainstormPatch(BaseModel):
     facts: list[Fact] | None = None
     angles: list[Angle] | None = None
     selected_angle_id: str | None = None

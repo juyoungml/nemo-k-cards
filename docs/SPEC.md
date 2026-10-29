@@ -107,18 +107,18 @@
 
 ### 4-1. Brainstorm 모드
 
-기획형 사용자를 위한 사전 단계입니다. 결과물은 **Draft**(기획 보드)이고, Generate하면 Job으로 전환되어 위 파이프라인 2번(Verify)부터 진행합니다.
+기획형 사용자를 위한 사전 단계입니다. 결과물은 **Brainstorm**(기획 보드)이고, Generate하면 Job으로 전환되어 위 파이프라인 2번(Verify)부터 진행합니다.
 
 | # | Step | 실행 위치 | 입력 → 출력 |
 |---|---|---|---|
 | B1 | **Fetch** | host | 메시지 속 URL → `link_checker` 검증 → 통과한 페이지 본문을 텍스트로 추출해 `/sandbox/input`에 전달 |
-| B2 | **Plan** | sandbox · `planner` | Draft JSON + 새 메시지 + 페이지 텍스트 → `DraftUpdate` (답장 + 보드 변경분) |
+| B2 | **Plan** | sandbox · `planner` | Brainstorm JSON + 새 메시지 + 페이지 텍스트 → `BrainstormUpdate` (답장 + 보드 변경분) |
 | B3 | **Edit** | Admin | 운영자가 보드를 직접 수정 (앵글 선택, 타깃·톤, 슬라이드 순서·문구) |
-| B4 | **Generate** | host | Draft → Job 생성. `facts` → `EventBrief`, 앵글·타깃·톤·아웃라인 → copywriter 제약 조건 |
+| B4 | **Generate** | host | Brainstorm → Job 생성. `facts` → `EventBrief`, 앵글·타깃·톤·아웃라인 → copywriter 제약 조건 |
 
 **원칙**
 
-- **매 턴 stateless**: 채팅 한 턴마다 Draft 전체를 JSON으로 넘기고 샌드박스를 새로 만들었다 버립니다. 대화 상태는 host(DB)에만 있습니다.
+- **매 턴 stateless**: 채팅 한 턴마다 Brainstorm 전체를 JSON으로 넘기고 샌드박스를 새로 만들었다 버립니다. 대화 상태는 host(DB)에만 있습니다.
 - **사용자 URL은 host가 가져옴**: 사용자가 준 URL은 도메인이 제각각이라, 샌드박스 allowlist를 넓히는 대신 host가 검증 후 본문만 넘깁니다. 페이지에 숨은 지시문도 데이터로만 전달됩니다(§7 인젝션 케이스와 같은 원칙).
 - **미확인 정보는 표시만**: 출처에서 확인되지 않은 정보(예: 메뉴 가격)는 `verified: false`로 보드에 노란색으로 표시합니다. copywriter는 이를 사실로 단정해 쓰지 않고, reviewer가 다시 확인합니다.
 - **Generate 후에도 검증은 그대로**: Verify(링크 재확인) → Copy → Render → QA → Review → 사람 승인. 기획 모드라고 검수를 생략하지 않습니다.
@@ -205,7 +205,7 @@ class ChatMessage(BaseModel):
     text: str
     urls: list[str] = []
 
-class Draft(BaseModel):
+class Brainstorm(BaseModel):
     id: str
     messages: list[ChatMessage]
     facts: list[Fact]
@@ -216,7 +216,7 @@ class Draft(BaseModel):
     outline: list[OutlineItem]         # 6~8개
     job_id: str | None                 # Generate 후 연결
 
-class DraftUpdate(BaseModel):         # planner 출력
+class BrainstormUpdate(BaseModel):         # planner 출력
     reply: str
     facts: list[Fact] | None = None    # None = 변경 없음
     angles: list[Angle] | None = None
@@ -261,7 +261,7 @@ class DraftUpdate(BaseModel):         # planner 출력
 | Network – 웹 조사 | 행사·예매 도메인 allowlist에 GET만 허용 (데모 전에 `audit` 모드로 필요한 도메인을 수집한 뒤 `enforce`로 전환) |
 | Network – Instagram | `graph.facebook.com`을 **read-only + enforce**로 지정해 POST/DELETE가 L7에서 `policy_denied`. 토큰도 주입하지 않음 |
 | 그 외 | default deny. 차단 이벤트는 `openshell logs <sandbox> --source sandbox`로 수집해 Admin Policy Log에 표시 |
-| Publish / Delete | 샌드박스 밖 백엔드만 수행. `POST /drafts/{id}/publish`는 Admin 승인 세션에서만 호출 가능 |
+| Publish / Delete | 샌드박스 밖 백엔드만 수행. `POST /jobs/{id}/approve`는 Admin 승인 세션에서만 호출 가능 |
 
 > 운영 팁: 새 도메인이 필요하면 `openshell policy update`로 추가합니다. 위험한 변경은 OpenShell prover가 사람 검토 대기로 돌립니다. 이것 자체가 Human-in-the-loop 데모 포인트가 될 수 있습니다.
 
@@ -297,9 +297,9 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 
 | 화면 | 구성 요소 |
 |---|---|
-| **Dashboard** | SNS/Channel 리스트, 채널별 followers·reach·views (IG Insights 실데이터 + mock), 최근 카드뉴스와 상태 뱃지 |
+| **Dashboard** | Instagram account 리스트, 계정별 followers·reach·views (IG Insights 실데이터 + mock), 최근 카드뉴스와 상태 뱃지 |
 | **New Job · Quick** | 모드 선택(Quick / Brainstorm), 프롬프트 입력, 프리셋("This weekend in Seoul", "Pop-ups this week"), 파이프라인 stepper(실시간 SSE), 단계별 로그 |
-| **New Job · Brainstorm** | 왼쪽 채팅(URL 첨부, 메모, 포스터 P1) + 오른쪽 기획 보드: ① Event facts(검증 배지, 미확인 노란색) ② 앵글 3개 + 타깃·톤 ③ 슬라이드 아웃라인(채팅으로 바뀐 항목 표시), Save draft / **Generate card news** |
+| **New Job · Brainstorm** | 왼쪽 채팅(URL 첨부, 메모, 포스터 P1) + 오른쪽 기획 보드: ① Event facts(검증 배지, 미확인 노란색) ② 앵글 3개 + 타깃·톤 ③ 슬라이드 아웃라인(채팅으로 바뀐 항목 표시), Save brainstorm / **Generate card news** |
 | **Review** | 슬라이드 캐러셀 미리보기, 캡션 편집, 행사별 출처·링크 상태 표, QA/Review issues(block/warn), **Approve & Publish** / Reject / Regenerate |
 | **Policy Log** | OpenShell 차단 이벤트 타임라인 (시간, sandbox, binary, host, method/path, 결과), 데모 하이라이트 |
 
@@ -314,12 +314,12 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 | GET | `/jobs/{id}/events` | SSE 진행 상황 |
 | POST | `/jobs/{id}/approve` | 운영자 승인 → 게시 |
 | POST | `/jobs/{id}/reject` | 반려 (사유) |
-| GET | `/channels`, `/metrics` | Dashboard |
+| GET | `/instagram-accounts`, `/metrics` | Dashboard |
 | GET | `/policy-events` | OpenShell 차단 로그 |
-| POST | `/drafts` | Brainstorm 초안 생성 → `Draft` |
-| GET / PATCH | `/drafts/{id}` | 조회 / 보드 직접 편집 (앵글 선택, 타깃·톤, 아웃라인) |
-| POST | `/drafts/{id}/messages` | `{text, urls}` → Fetch → `planner` → 갱신된 `Draft` (SSE로 진행 상황) |
-| POST | `/drafts/{id}/generate` | Draft → Job 생성, Verify부터 파이프라인 시작 → `Job` |
+| POST | `/brainstorms` | Brainstorm 생성 → `Brainstorm` |
+| GET / PATCH | `/brainstorms/{id}` | 조회 / 보드 직접 편집 (앵글 선택, 타깃·톤, 아웃라인) |
+| POST | `/brainstorms/{id}/messages` | `{text, urls}` → Fetch → `planner` → 갱신된 `Brainstorm` (SSE로 진행 상황) |
+| POST | `/brainstorms/{id}/generate` | Brainstorm → Job 생성, Verify부터 파이프라인 시작 → `Job` |
 
 - 응답 형식: `GET /jobs/{id}`와 SSE 이벤트는 `Job` 전체 스냅샷이고, 화면용 `pipeline`(단계 상태)과 `log`를 포함합니다. `GET /policy-events`는 `{stats, events}`, 에러는 `{detail}` + 4xx를 반환합니다.
 - **Mock 백엔드**: Admin은 `NEXT_PUBLIC_API_URL`이 없으면 같은 앱의 `/api/mock/*`(위 계약 그대로)를 씁니다. QA 방법은 [docs/QA.md](QA.md)를 참고하세요.
@@ -330,7 +330,7 @@ API 키는 전부 **OpenShell provider로 주입**합니다. 샌드박스 env나
 
 | 역할 | 담당 | 첫 마일스톤 |
 |---|---|---|
-| A. Agent | `agent/` 서브에이전트·스킬·프롬프트, JSON 스키마 출력 | `researcher`가 `EventBrief[]`를, `planner`가 `DraftUpdate`를 안정적으로 출력 |
+| A. Agent | `agent/` 서브에이전트·스킬·프롬프트, JSON 스키마 출력 | `researcher`가 `EventBrief[]`를, `planner`가 `BrainstormUpdate`를 안정적으로 출력 |
 | B. Backend | FastAPI, 파이프라인, link checker, Graph API | `/jobs` happy path 완주 (mock agent) |
 | C. Render & QA | HTML 템플릿, Playwright, Visual QA | `CardDeck` fixture → PNG 7장 + QAReport |
 | D. Frontend & Policy | Figma → Admin, OpenShell 정책·Policy Log | Review·Brainstorm 화면 + 무단 DELETE 차단 시연 |

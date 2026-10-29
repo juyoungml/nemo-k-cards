@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 export default function DashboardPage() {
   return (
     <>
-      <PageHeader title="Dashboard" description="Channels, reach and recent card news for @whatsonkorea">
+      <PageHeader title="Dashboard" description="Instagram accounts, reach and recent decks for @whatsonkorea">
         <Button size="lg" asChild>
           <Link href="/jobs/new">
-            <Plus /> New Job
+            <Plus /> New deck
           </Link>
         </Button>
       </PageHeader>

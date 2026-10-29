@@ -98,7 +98,7 @@ export type Scenario = "good" | "bad" | "fail";
 
 // Admin-only view models (no backend schema yet).
 
-export interface Channel {
+export interface InstagramAccount {
   handle: string;
   platform: string;
   followers: number;
@@ -163,7 +163,7 @@ export interface ChatMessage {
   urls?: string[];
 }
 
-export interface Draft {
+export interface Brainstorm {
   id: string;
   messages: ChatMessage[];
   facts: Fact[];
@@ -175,7 +175,7 @@ export interface Draft {
   job_id?: string | null;
 }
 
-export interface DraftUpdate {
+export interface BrainstormUpdate {
   reply: string;
   facts?: Fact[] | null;
   angles?: Angle[] | null;

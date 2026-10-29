@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 
-from app import drafts, store
+from app import brainstorms, store
 from app.pipeline import orchestrator
 from app.schemas import Fact, JobStatus, LinkCheck
 from app.services import link_checker
@@ -36,10 +36,10 @@ async def run_quick(scenario: str):
     return store.get_job(job.id)
 
 
-async def run_brainstorm(draft):
-    store.save_draft(draft)
-    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "bs", "brainstorm", draft.id))
-    await orchestrator.run_job(job.id, draft=draft)
+async def run_brainstorm(brainstorm):
+    store.save_brainstorm(brainstorm)
+    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "bs", "brainstorm", brainstorm.id))
+    await orchestrator.run_job(job.id, brainstorm=brainstorm)
     return store.get_job(job.id)
 
 
@@ -107,17 +107,17 @@ def test_unknown_scenario_is_rejected_by_the_api():
 # ---------------------------------------------------------------- brainstorm verify
 
 async def test_brainstorm_sample_verifies_its_own_source(no_network):
-    job = await run_brainstorm(drafts.sample_draft())
+    job = await run_brainstorm(brainstorms.sample_brainstorm())
     assert job.status == JobStatus.READY_FOR_REVIEW
     [brief] = job.briefs
     assert brief.title_en == "Mangwon Night Market" and brief.title_ko == "망원 야시장"
     assert (brief.start_date.month, brief.start_date.day, brief.end_date.day) == (10, 17, 19)
-    assert [c.url for c in job.verification.checks] == [drafts.SAMPLE_URL]
+    assert [c.url for c in job.verification.checks] == [brainstorms.SAMPLE_URL]
     assert job.deck.slides[1].event_id == brief.id
 
 
 async def test_brainstorm_dead_source_blocks_and_demotes_facts(no_network):
-    d = drafts.sample_draft()
+    d = brainstorms.sample_brainstorm()
     url = "https://www.visitseoul.net/en/mangwon-gone"
     d.facts = [f.model_copy(update={"source_url": url}) if f.source_url else f for f in d.facts]
     job = await run_brainstorm(d)  # url is not in the fixture -> fake checker says 404
@@ -131,7 +131,7 @@ async def test_brainstorm_dead_source_blocks_and_demotes_facts(no_network):
 
 
 async def test_brainstorm_without_sources_is_blocked(no_network):
-    d = drafts.sample_draft()
+    d = brainstorms.sample_brainstorm()
     d.facts = [f.model_copy(update={"source_url": None}) for f in d.facts]
     job = await run_brainstorm(d)
     assert job.briefs == []
@@ -142,9 +142,9 @@ async def test_brainstorm_without_sources_is_blocked(no_network):
 
 
 def test_demote_unverified_keeps_only_checked_sources():
-    d = drafts.sample_draft()
+    d = brainstorms.sample_brainstorm()
     d.facts.append(Fact(key="other", value="x", verified=True, source_url="https://example.com"))
-    out, demoted = drafts.demote_unverified(d, {drafts.SAMPLE_URL})
+    out, demoted = brainstorms.demote_unverified(d, {brainstorms.SAMPLE_URL})
     assert demoted == 1
     assert [f.verified for f in out.facts] == [True, True, True, False, False]
 
@@ -160,7 +160,7 @@ def test_demote_unverified_keeps_only_checked_sources():
     ("Weekends", None),
 ])
 def test_parse_dates(text, expected):
-    assert drafts.parse_dates(text, date(2026, 10, 7)) == expected
+    assert brainstorms.parse_dates(text, date(2026, 10, 7)) == expected
 
 
 def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):
@@ -208,8 +208,8 @@ def test_live_server_starts_brainstorm_with_an_empty_board(monkeypatch):
     from app.main import app
     c = TestClient(app)
     monkeypatch.setattr(settings, "demo_mode", "live")
-    live = c.post("/drafts", json={"sample": True}).json()
+    live = c.post("/brainstorms", json={"sample": True}).json()
     assert live["messages"] == [] and live["facts"] == [] and live["angles"] == []
     monkeypatch.setattr(settings, "demo_mode", "fixture")
-    demo = c.post("/drafts", json={"sample": True}).json()
+    demo = c.post("/brainstorms", json={"sample": True}).json()
     assert any("Mangwon" in f["value"] for f in demo["facts"])

@@ -116,7 +116,7 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 ### SEC-1 SSRF: the host fetches agent- and user-supplied URLs
 **P0** *(verified)*
 
-**Evidence:** `link_checker.py:69,101`, `photos.py:153` and `drafts.py:71` all fetch URLs that came from the agent or the user, with `follow_redirects=True`. `link_checker.suspicious_reason()` only blocks *literal* IP addresses.
+**Evidence:** `link_checker.py:69,101`, `photos.py:153` and `brainstorms.py:71` all fetch URLs that came from the agent or the user, with `follow_redirects=True`. `link_checker.suspicious_reason()` only blocks *literal* IP addresses.
 
 **Why it matters:** a hostname that resolves to `127.0.0.1`, or a redirect to `169.254.169.254` (the AWS instance-metadata endpoint; Brev runs on AWS), gets fetched by the trusted host. A prompt-injected page can steer the agent's URLs, so this is a real attack path *around* the sandbox.
 

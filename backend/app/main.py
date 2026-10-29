@@ -10,18 +10,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import drafts, seed, store
+from app import brainstorms, seed, store
 from app.config import settings
 from app.pipeline import orchestrator
 from app.schemas import (
     TERMINAL,
     ApproveRequest,
-    Channel,
-    CreateDraftRequest,
+    Brainstorm,
+    BrainstormMessageRequest,
+    BrainstormPatch,
+    CreateBrainstormRequest,
     CreateJobRequest,
-    Draft,
-    DraftMessageRequest,
-    DraftPatch,
+    InstagramAccount,
     Job,
     JobStatus,
     Metric,
@@ -82,9 +82,9 @@ def _job_or_404(job_id: str) -> Job:
     return job
 
 
-def _draft_or_404(draft_id: str) -> Draft:
-    if not (d := store.get_draft(draft_id)):
-        raise HTTPException(404, "draft not found")
+def _brainstorm_or_404(brainstorm_id: str) -> Brainstorm:
+    if not (d := store.get_brainstorm(brainstorm_id)):
+        raise HTTPException(404, "brainstorm not found")
     return d
 
 
@@ -171,41 +171,41 @@ def reject(job_id: str, req: RejectRequest) -> Job:
     return store.save_job(job)
 
 
-# ---------------------------------------------------------------- drafts (Brainstorm)
+# ---------------------------------------------------------------- brainstorms
 
-@app.post("/drafts", response_model=Draft, status_code=201)
-def create_draft(req: CreateDraftRequest | None = None) -> Draft:
+@app.post("/brainstorms", response_model=Brainstorm, status_code=201)
+def create_brainstorm(req: CreateBrainstormRequest | None = None) -> Brainstorm:
     # The Mangwon sample (its facts are marked verified against a page that doesn't exist) is for demos only;
     # a live server starts every Brainstorm from an empty board.
-    return drafts.create((req.sample if req else True) and settings.demo_mode == "fixture")
+    return brainstorms.create((req.sample if req else True) and settings.demo_mode == "fixture")
 
 
-@app.get("/drafts/{draft_id}", response_model=Draft)
-def get_draft(draft_id: str) -> Draft:
-    return _draft_or_404(draft_id)
+@app.get("/brainstorms/{brainstorm_id}", response_model=Brainstorm)
+def get_brainstorm(brainstorm_id: str) -> Brainstorm:
+    return _brainstorm_or_404(brainstorm_id)
 
 
-@app.patch("/drafts/{draft_id}", response_model=Draft)
-def patch_draft(draft_id: str, patch: DraftPatch) -> Draft:
-    d = _draft_or_404(draft_id)
-    return store.save_draft(d.model_copy(update=patch.model_dump(exclude_unset=True)))
+@app.patch("/brainstorms/{brainstorm_id}", response_model=Brainstorm)
+def patch_brainstorm(brainstorm_id: str, patch: BrainstormPatch) -> Brainstorm:
+    d = _brainstorm_or_404(brainstorm_id)
+    return store.save_brainstorm(d.model_copy(update=patch.model_dump(exclude_unset=True)))
 
 
-@app.post("/drafts/{draft_id}/messages", response_model=Draft)
-async def draft_message(draft_id: str, req: DraftMessageRequest) -> Draft:
-    return await drafts.send_message(await asyncio.to_thread(_draft_or_404, draft_id), req.text, req.urls)
+@app.post("/brainstorms/{brainstorm_id}/messages", response_model=Brainstorm)
+async def brainstorm_message(brainstorm_id: str, req: BrainstormMessageRequest) -> Brainstorm:
+    return await brainstorms.send_message(await asyncio.to_thread(_brainstorm_or_404, brainstorm_id), req.text, req.urls)
 
 
-@app.post("/drafts/{draft_id}/generate", response_model=Job, status_code=201)
-async def generate(draft_id: str) -> Job:
-    d = await asyncio.to_thread(_draft_or_404, draft_id)
+@app.post("/brainstorms/{brainstorm_id}/generate", response_model=Job, status_code=201)
+async def generate(brainstorm_id: str) -> Job:
+    d = await asyncio.to_thread(_brainstorm_or_404, brainstorm_id)
     angle = next((a for a in d.angles if a.id == d.selected_angle_id), None)
     if not angle:
         raise HTTPException(422, "pick an angle first")
     job = orchestrator.new_job(secrets.token_hex(3), f"Brainstorm: {angle.title}", "brainstorm", d.id)
     await asyncio.to_thread(store.save_job, job)
-    await asyncio.to_thread(store.save_draft, d.model_copy(update={"job_id": job.id}))
-    orchestrator.spawn(orchestrator.run_job(job.id, draft=d))
+    await asyncio.to_thread(store.save_brainstorm, d.model_copy(update={"job_id": job.id}))
+    orchestrator.spawn(orchestrator.run_job(job.id, brainstorm=d))
     return job
 
 
@@ -216,9 +216,9 @@ def metrics() -> list[Metric]:
     return seed.metrics(store.list_jobs(200))
 
 
-@app.get("/channels", response_model=list[Channel])
-def channels() -> list[Channel]:
-    return seed.channels()
+@app.get("/instagram-accounts", response_model=list[InstagramAccount])
+def instagram_accounts() -> list[InstagramAccount]:
+    return seed.instagram_accounts()
 
 
 @app.get("/policy-events")
