@@ -3,12 +3,14 @@
 Render and QA run for real, so these need Playwright's Chromium (`uv run playwright install chromium`).
 """
 
+import functools
 import secrets
+import uuid
 from datetime import date
 
 import pytest
 
-from app import brainstorms, store
+from app import brainstorms, orgs, store
 from app.pipeline import orchestrator
 from app.schemas import Fact, JobStatus, LinkCheck
 from app.services import link_checker
@@ -30,17 +32,23 @@ def no_network(monkeypatch):
     return answers
 
 
+@functools.cache
+def org() -> uuid.UUID:
+    """The Organization these pipeline runs belong to."""
+    return orgs.create_org(uuid.uuid4(), "Pipeline tests").org_id
+
+
 async def run_quick(scenario: str):
-    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "test prompt"))
-    await orchestrator.run_job(job.id, scenario=scenario)
-    return store.get_job(job.id)
+    job = store.save_job(org(), orchestrator.new_job(secrets.token_hex(3), "test prompt"))
+    await orchestrator.run_job(org(), job.id, scenario=scenario)
+    return store.get_job(org(), job.id)
 
 
 async def run_brainstorm(brainstorm):
-    store.save_brainstorm(brainstorm)
-    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), "bs", "brainstorm", brainstorm.id))
-    await orchestrator.run_job(job.id, brainstorm=brainstorm)
-    return store.get_job(job.id)
+    store.save_brainstorm(org(), brainstorm)
+    job = store.save_job(org(), orchestrator.new_job(secrets.token_hex(3), "bs", "brainstorm", brainstorm.id))
+    await orchestrator.run_job(org(), job.id, brainstorm=brainstorm)
+    return store.get_job(org(), job.id)
 
 
 # ---------------------------------------------------------------- scenarios
@@ -60,7 +68,7 @@ async def test_bad_scenario_waits_for_operator_with_block_issues(no_network):
     cats = {(i.category, i.severity) for i in job.issues}
     assert ("sensitive", "block") in cats
     assert ("pii", "block") in cats  # phone number on slide 2, found by host QA (not the fixture)
-    events = [e for e in store.list_policy_events() if e.job_id == job.id]
+    events = [e for e in store.list_policy_events(org()) if e.job_id == job.id]
     assert {(e.host, e.result) for e in events} >= {("graph.facebook.com", "policy_denied"),
                                                     ("pastebin.com", "policy_denied")}
 
@@ -164,14 +172,14 @@ def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch, client):
     from app.config import settings
     calls = []
 
-    async def fake_publish(job_id, caption, mode):
+    async def fake_publish(org_id, job_id, caption, mode):
         calls.append(mode)
     monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
     monkeypatch.setattr(settings, "publish_mode", "mock")
     for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
         job = orchestrator.new_job(secrets.token_hex(3), "approve test")
         job.status = JobStatus.READY_FOR_REVIEW
-        store.save_job(job)
+        store.save_job(client.org_id, job)
         r = client.post(f"/jobs/{job.id}/approve", json={"mode": mode} if mode else {})
         assert r.status_code == code, (mode, r.text)
     assert calls == ["mock", "mock"]

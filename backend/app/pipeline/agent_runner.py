@@ -13,6 +13,7 @@ import secrets
 import shutil
 from pathlib import Path
 from typing import Any, ClassVar, Protocol
+from uuid import UUID
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -41,7 +42,7 @@ class AgentOutputError(AgentError):
 
 class AgentRunner(Protocol):
     async def run(self, agent: str, task: str, payload: dict, schema: dict,
-                  files: list[Path], job_id: str | None) -> Any: ...
+                  files: list[Path], job_id: str | None, org_id: UUID) -> Any: ...
 
 
 def _cli_args(agent: str, task: str, schema: dict, add_dirs: list[str] = ()) -> list[str]:
@@ -90,7 +91,7 @@ class LocalClaudeRunner:
     """Dev only: `claude -p` on the host with cwd=agent/. No sandbox."""
 
     async def run(self, agent: str, task: str, payload: dict, schema: dict,
-                  files: list[Path], job_id: str | None) -> Any:
+                  files: list[Path], job_id: str | None, org_id: UUID) -> Any:
         claude = shutil.which("claude")
         if not claude:
             raise AgentError("claude CLI not found on PATH")
@@ -141,7 +142,7 @@ class OpenShellRunner:
         return proc.returncode or 0, out, err
 
     async def run(self, agent: str, task: str, payload: dict, schema: dict,
-                  files: list[Path], job_id: str | None) -> Any:
+                  files: list[Path], job_id: str | None, org_id: UUID) -> Any:
         if not self.openshell:
             raise AgentError("openshell CLI not found — install OpenShell or use AGENT_RUNNER=local")
         # OpenShell caps sandbox names at 19 chars: e.g. "revi-0bb413-a1b2".
@@ -151,7 +152,8 @@ class OpenShellRunner:
             "sandbox", "create", "--name", name, "--detach", "--no-tty", "--from", settings.openshell_image,
             "--policy", str(settings.openshell_policy),
             *[a for p in settings.openshell_providers for a in ("--provider", p)],
-            "--label", f"stage={agent}", *(["--label", f"job={job_id}"] if job_id else []), timeout=300)
+            "--label", f"stage={agent}", "--label", f"org={org_id}",
+            *(["--label", f"job={job_id}"] if job_id else []), timeout=300)
         if rc != 0:
             await self._delete(name)
             raise AgentError(f"sandbox create failed: {err.decode()[-300:]}")
@@ -176,10 +178,11 @@ class OpenShellRunner:
                 raise AgentError(f"sandbox exec exited {rc}: {err.decode()[-300:]}")
             return _parse(stdout)
         finally:
-            await self._collect_policy_events(name, job_id)
+            await self._collect_policy_events(name, job_id, org_id)
             await self._delete(name)
 
-    async def _collect_policy_events(self, name: str, job_id: str | None) -> None:
+    async def _collect_policy_events(self, name: str, job_id: str | None, org_id: UUID) -> None:
+        # Stored under the Organization whose job ran in this sandbox (one sandbox per stage of one job).
         # The sandbox ships its log to the gateway asynchronously; a read right after the workload exits
         # misses the last events, so re-read until the log stops growing.
         try:
@@ -191,7 +194,7 @@ class OpenShellRunner:
                     break
                 await asyncio.sleep(1)
             if rc == 0 and (events := policy_log.parse(out.decode(errors="replace"), name, job_id)):
-                await asyncio.to_thread(store.add_policy_events, events)
+                await asyncio.to_thread(store.add_policy_events, org_id, events)
         except Exception:  # a missing log must not fail the stage
             log.exception("could not collect policy log for %s", name)
 
@@ -218,11 +221,13 @@ def get_runner() -> AgentRunner:
 
 
 async def run_stage[T](agent: str, task: str, payload: dict, out_type: type[T], *,
-                       files: list[Path] = (), job_id: str | None = None) -> T:
+                       files: list[Path] = (), job_id: str | None = None, org_id: UUID) -> T:
     """Run one subagent; retry once with the validation error appended (BACKEND §6).
 
     `files` are host files the agent must read (rendered slides); `job_id` tags the sandbox and its
-    policy events.
+    policy events; `org_id` is the Organization the job belongs to: its policy events are stored under it.
+    `payload` and `files` must hold only that Organization's data (the orchestrator builds them from the one
+    job and Brainstorm it loaded under `org_id`).
     """
     adapter = TypeAdapter(out_type)
     schema = adapter.json_schema()
@@ -239,7 +244,7 @@ async def run_stage[T](agent: str, task: str, payload: dict, out_type: type[T], 
     for attempt in range(2):
         t = task if attempt == 0 else f"{task}\n\nYour previous output failed validation:\n{last_err}\nFix it."
         try:
-            raw = await runner.run(agent, t, payload, schema, list(files), job_id)
+            raw = await runner.run(agent, t, payload, schema, list(files), job_id, org_id)
             if wrap and isinstance(raw, list):  # agent returned the bare list
                 raw = {"items": raw}
             return adapter.validate_python(raw["items"] if wrap else raw)

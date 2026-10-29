@@ -10,8 +10,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from app import store
 from app.auth import SignedIn
-from app.store import _db
 
 
 @dataclass(frozen=True)
@@ -30,21 +30,23 @@ _MEMBERSHIPS = ("select m.org_id, o.name, m.role from members m join orgs o on o
 
 
 def memberships(user_id: UUID) -> list[Membership]:
-    with _db().connection() as c:
+    """This person's memberships, read as the API role: RLS shows only rows carrying their own user id."""
+    with store.tenant(None, user_id=user_id) as c:
         return [Membership(*r) for r in c.execute(_MEMBERSHIPS, (user_id,)).fetchall()]
 
 
 def membership(user_id: UUID) -> Membership | None:
     """The Organization this person acts for: their only (or oldest) one until #14 adds switching."""
-    with _db().connection() as c:
+    with store.tenant(None, user_id=user_id) as c:
         row = c.execute(_MEMBERSHIPS + " limit 1", (user_id,)).fetchone()
     return Membership(*row) if row else None
 
 
 def create_org(user_id: UUID, name: str) -> Membership:
     """Create an Organization with `user_id` as its Admin, in one transaction. A per-person advisory lock makes
-    a double-submitted sign-up create one Organization, not two."""
-    with _db().connection() as c, c.transaction():
+    a double-submitted sign-up create one Organization, not two. Runs as the connecting role (`store.system`):
+    the new Organization has no Members yet, so there is no Organization for a policy to scope the writes to."""
+    with store.system() as c:
         c.execute("select pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"create-org:{user_id}",))
         if c.execute("select 1 from members where user_id = %s", (user_id,)).fetchone():
             raise AlreadyMember

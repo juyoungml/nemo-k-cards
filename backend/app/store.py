@@ -1,17 +1,29 @@
 """Postgres store (BACKEND §8). Models are stored as jsonb documents; one table per kind.
 The schema is in supabase/migrations, applied by the Supabase CLI (`supabase start`, `supabase db push`).
-Calls block: async code runs them with `asyncio.to_thread`."""
+Calls block: async code runs them with `asyncio.to_thread`.
+
+Organization isolation (#13): every function that reads or writes an Organization's rows takes that
+Organization first and runs in `tenant(org_id)`: a transaction that has switched to the `wok_api` role (no RLS
+bypass) and set `app.org_id`, so Postgres row-level security limits it to that Organization's rows whatever the
+SQL says. Both settings are transaction-local: they end with the transaction and never reach the next user of
+a pooled connection. `system()` is the narrow exception for work that spans Organizations (creating one,
+restart recovery) and runs as the connecting role."""
 
 import logging
 import re
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from uuid import UUID
 
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.schemas import Brainstorm, Job, PolicyEvent
+from app.schemas import Brainstorm, Job, JobStatus, PolicyEvent
 
+API_ROLE = "wok_api"  # supabase/migrations/20261029140000_org_isolation.sql
 _lock = threading.Lock()
 _pool: ConnectionPool | None = None
 _NUL = re.compile(r"(?<!\\)((?:\\\\)*)\\u0000")
@@ -32,13 +44,20 @@ def _json(model: BaseModel) -> str:
     return _NUL.sub(r"\1", model.model_dump_json())
 
 
+def _reset(c: Connection) -> None:
+    """A connection back in the pool keeps nothing session-level. `tenant` only sets transaction-local values,
+    so this is belt and braces against a future `set role` / `set` without `local`."""
+    c.execute("reset role; reset all")
+    c.commit()
+
+
 def _db() -> ConnectionPool:
     global _pool
     with _lock:
         if _pool is None:
             # prepare_threshold=None: also works behind Supabase's transaction pooler.
             _pool = ConnectionPool(settings.database_url, min_size=1, max_size=8, open=True, timeout=5,
-                                   max_idle=300, check=ConnectionPool.check_connection,
+                                   max_idle=300, check=ConnectionPool.check_connection, reset=_reset,
                                    kwargs={"prepare_threshold": None})
         return _pool
 
@@ -51,50 +70,82 @@ def close() -> None:
             _pool = None
 
 
-def _put(table: str, id_: str, model: BaseModel, extra: dict | None = None) -> None:
+@contextmanager
+def tenant(org_id: UUID | None, *, user_id: UUID | None = None) -> Iterator[Connection]:
+    """One transaction as `wok_api`, scoped to `org_id`; or, before an Organization is chosen (sign-in), to the
+    memberships of `user_id`. Commits on success, rolls back on error."""
+    if org_id is None and user_id is None:
+        raise ValueError("tenant() needs an Organization (or, for sign-in, a user)")
+    with _db().connection() as c, c.transaction():
+        c.execute(f"set local role {API_ROLE}")
+        c.execute("select set_config('app.org_id', %s, true), set_config('app.user_id', %s, true)",
+                  (str(org_id or ""), str(user_id or "")))
+        yield c
+
+
+@contextmanager
+def system() -> Iterator[Connection]:
+    """One transaction as the connecting role, which RLS does not limit. Only for work that belongs to no single
+    Organization: creating one, recovering jobs after a restart."""
+    with _db().connection() as c, c.transaction():
+        yield c
+
+
+def _put(org_id: UUID, table: str, id_: str, model: BaseModel, extra: dict | None = None) -> None:
     cols = {"id": id_, "doc": _json(model), **(extra or {})}
     updates = ", ".join(f"{c} = excluded.{c}" for c in cols if c != "id")
-    with _db().connection() as c:
+    # org_id is the column default (the transaction's Organization) and never updated; RLS refuses to overwrite
+    # another Organization's row that happens to have the same id.
+    with tenant(org_id) as c:
         c.execute(f"insert into {table} ({', '.join(cols)}) values ({', '.join(['%s'] * len(cols))}) "
                   f"on conflict (id) do update set {updates}", list(cols.values()))
 
 
-def _rows(sql: str, params: tuple) -> list[str]:
-    with _db().connection() as c:
+def _rows(org_id: UUID, sql: str, params: tuple) -> list[str]:
+    with tenant(org_id) as c:
         return [r[0] for r in c.execute(sql, params).fetchall()]
 
 
-def save_job(job: Job) -> Job:
-    _put("jobs", job.id, job, {"created_at": job.created_at})
+def save_job(org_id: UUID, job: Job) -> Job:
+    _put(org_id, "jobs", job.id, job, {"created_at": job.created_at})
     return job
 
 
-def get_job(job_id: str) -> Job | None:
-    rows = _rows("select doc::text from jobs where id = %s", (job_id,))
+def get_job(org_id: UUID, job_id: str) -> Job | None:
+    rows = _rows(org_id, "select doc::text from jobs where id = %s", (job_id,))
     return _load(Job, rows[0]) if rows else None
 
 
-def list_jobs(limit: int = 50) -> list[Job]:
-    rows = _rows("select doc::text from jobs order by created_at desc, id desc limit %s", (limit,))
+def list_jobs(org_id: UUID, limit: int = 50) -> list[Job]:
+    rows = _rows(org_id, "select doc::text from jobs order by created_at desc, id desc limit %s", (limit,))
     return [j for r in rows if (j := _load(Job, r))]
 
 
-def save_brainstorm(brainstorm: Brainstorm) -> Brainstorm:
-    _put("brainstorms", brainstorm.id, brainstorm)
+def jobs_in(statuses: set[JobStatus]) -> list[tuple[UUID, Job]]:
+    """Every Organization's Jobs in these states, each with its Organization (restart recovery, via `system`).
+    Rows from before Organizations existed are left alone."""
+    with system() as c:
+        rows = c.execute("select org_id, doc::text from jobs where org_id is not null and doc->>'status' = any(%s)",
+                         ([str(s) for s in statuses],)).fetchall()
+    return [(org, j) for org, raw in rows if (j := _load(Job, raw))]
+
+
+def save_brainstorm(org_id: UUID, brainstorm: Brainstorm) -> Brainstorm:
+    _put(org_id, "brainstorms", brainstorm.id, brainstorm)
     return brainstorm
 
 
-def get_brainstorm(brainstorm_id: str) -> Brainstorm | None:
-    rows = _rows("select doc::text from brainstorms where id = %s", (brainstorm_id,))
+def get_brainstorm(org_id: UUID, brainstorm_id: str) -> Brainstorm | None:
+    rows = _rows(org_id, "select doc::text from brainstorms where id = %s", (brainstorm_id,))
     return _load(Brainstorm, rows[0]) if rows else None
 
 
-def add_policy_events(events: list[PolicyEvent]) -> None:
-    with _db().connection() as c:
+def add_policy_events(org_id: UUID, events: list[PolicyEvent]) -> None:
+    with tenant(org_id) as c:
         c.cursor().executemany("insert into policy_events (job_id, doc) values (%s, %s)",
                                [(e.job_id, _json(e)) for e in events])
 
 
-def list_policy_events(limit: int = 200) -> list[PolicyEvent]:
-    rows = _rows("select doc::text from policy_events order by id desc limit %s", (limit,))
+def list_policy_events(org_id: UUID, limit: int = 200) -> list[PolicyEvent]:
+    rows = _rows(org_id, "select doc::text from policy_events order by id desc limit %s", (limit,))
     return [e for r in rows if (e := _load(PolicyEvent, r))]

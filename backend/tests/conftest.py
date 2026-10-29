@@ -125,11 +125,21 @@ def sign_in(auth_keys):
 
     def make(org: str | None = "Test Org", user_id=None) -> TestClient:
         user_id = user_id or uuid.uuid4()
-        if org:
-            orgs.create_org(user_id, org)
+        org_id = orgs.create_org(user_id, org).org_id if org else None
         token = auth_keys.token(user_id, email=f"{user_id.hex[:8]}@example.com")
-        return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+        c = TestClient(app, headers={"Authorization": f"Bearer {token}"})
+        c.org_id, c.user_id = org_id, user_id  # for tests that also use the store directly
+        return c
     return make
+
+
+@pytest.fixture
+def org():
+    """A fresh Organization's id, for tests that call the store directly."""
+    import uuid
+
+    from app import orgs
+    return orgs.create_org(uuid.uuid4(), "Store test").org_id
 
 
 @pytest.fixture

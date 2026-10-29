@@ -209,8 +209,8 @@ def test_org_tables_have_row_level_security():
 
 def test_job_events_end_when_the_session_expires(auth_keys):
     user = uuid.uuid4()
-    orgs.create_org(user, "SSE")
-    job = store.save_job(orchestrator.new_job(uuid.uuid4().hex[:6], "still running"))  # QUEUED: not terminal
+    org = orgs.create_org(user, "SSE").org_id
+    job = store.save_job(org, orchestrator.new_job(uuid.uuid4().hex[:6], "still running"))  # QUEUED: not terminal
     almost = auth_keys.token(user, ttl=-5)  # expired 5 s ago, still inside the clock-skew leeway
     with anon.stream("GET", f"/jobs/{job.id}/events", headers={"Authorization": f"Bearer {almost}"}) as r:
         assert r.status_code == 200 and r.read() == b""  # closes at once; the Admin reconnects with a new token

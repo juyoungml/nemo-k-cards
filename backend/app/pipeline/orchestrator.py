@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import UTC, datetime
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from app import brainstorms, store
@@ -66,9 +67,11 @@ def new_job(job_id: str, prompt: str, source: str = "quick", brainstorm_id: str 
 
 
 class Run:
-    """Small helper that mutates the job and persists after every change (SSE reads the store)."""
+    """Small helper that mutates the job and persists after every change (SSE reads the store). Everything it
+    stores (the job, policy events) goes under the job's Organization, `org_id`."""
 
-    def __init__(self, job: Job) -> None:
+    def __init__(self, org_id: UUID, job: Job) -> None:
+        self.org_id = org_id
         self.job = job
         self._dirty = False
         self._writer: asyncio.Task | None = None
@@ -83,7 +86,7 @@ class Run:
         while self._dirty:
             self._dirty = False
             try:
-                await asyncio.to_thread(store.save_job, self.job.model_copy(deep=True))
+                await asyncio.to_thread(store.save_job, self.org_id, self.job.model_copy(deep=True))
             except Exception:
                 log.exception("could not save job %s", self.job.id)
 
@@ -119,10 +122,12 @@ def _scenario(name: str = "good"):
     return load
 
 
-async def run_job(job_id: str, brainstorm: Brainstorm | None = None, scenario: str = "good") -> None:
-    if not (job := await asyncio.to_thread(store.get_job, job_id)):
+async def run_job(org_id: UUID, job_id: str, brainstorm: Brainstorm | None = None, scenario: str = "good") -> None:
+    """Run `job_id` of Organization `org_id`. The job (and `brainstorm`, loaded by the caller under the same
+    Organization) is all the agent stages receive; a job id from another Organization is simply not found."""
+    if not (job := await asyncio.to_thread(store.get_job, org_id, job_id)):
         return
-    r = Run(job)
+    r = Run(org_id, job)
     try:
         await _run_job(r, brainstorm, scenario)
     finally:
@@ -155,7 +160,7 @@ async def _run_job(r: Run, brainstorm: Brainstorm | None, scenario: str) -> None
                     "Use the researcher subagent. Research events for this request and return EventBrief items. "
                     f"Today is {datetime.now(KST):%Y-%m-%d} (Asia/Seoul). Request: {job.prompt}",
                     {"prompt": job.prompt, "today": datetime.now(KST).date().isoformat()},
-                    list[EventBrief], job_id=job.id)
+                    list[EventBrief], job_id=job.id, org_id=r.org_id)
             else:
                 await asyncio.sleep(FIXTURE_DELAY)
                 fixture_fail("research")
@@ -238,7 +243,7 @@ async def _run_job(r: Run, brainstorm: Brainstorm | None, scenario: str) -> None
                  "has_official_photo": sorted(vetted),
                  "stock_photos": [{k: c[k] for k in ("id", "shows", "fits", "never_for", "rule")}
                                   for c in photos.stock_catalog()]},
-                CardDeck, job_id=job.id)
+                CardDeck, job_id=job.id, org_id=r.org_id)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
             deck = (_deck_from_brainstorm(brainstorm, included[0].id if included else None) if brainstorm
@@ -292,7 +297,7 @@ async def _run_job(r: Run, brainstorm: Brainstorm | None, scenario: str) -> None
                  .read_text(encoding="utf-8"),
                  "today": datetime.now(KST).date().isoformat(),
                  "cover_label": weekend_label(datetime.now(KST).date())},
-                ReviewVerdict, files=[s.path for s in rendered], job_id=job.id)
+                ReviewVerdict, files=[s.path for s in rendered], job_id=job.id, org_id=r.org_id)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
             verdict = ReviewVerdict.model_validate(fx("review.json") or {"verdict": "pass"})
@@ -322,7 +327,7 @@ async def _replay_policy_events(r: Run, events: list[dict]) -> None:
     now = datetime.now(KST).strftime("%H:%M:%S")
     rows = [PolicyEvent.model_validate({"time": now, **e, "sandbox": f"agent-{r.job.id}", "job_id": r.job.id})
             for e in events]
-    await asyncio.to_thread(store.add_policy_events, rows)
+    await asyncio.to_thread(store.add_policy_events, r.org_id, rows)
     for e in rows:
         r.log("research", f"{e.request.split()[0]} {e.host} → {e.result} (OpenShell)",
               "warn" if e.result.endswith("denied") else "info")
@@ -352,11 +357,11 @@ LABELS = {"upload": "Uploading slides to public storage", "containers": "Sending
           "processing": "Instagram is processing the images", "publish": "Publishing to @whatsonkorea"}
 
 
-async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
-    job = await asyncio.to_thread(store.get_job, job_id)
+async def publish_job(org_id: UUID, job_id: str, caption: str | None, mode: str) -> None:
+    job = await asyncio.to_thread(store.get_job, org_id, job_id)
     if not job or not job.deck:
         return
-    r = Run(job)
+    r = Run(org_id, job)
     try:
         await _publish_job(r, caption, mode)
     finally:
