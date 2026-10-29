@@ -136,7 +136,7 @@ The October 7 Admin capture displays denied file-write, external-connection and 
 | Run with isolation | `DEMO_MODE=live` | `AGENT_RUNNER=openshell` | Start with `mock` |
 | Publish to your account | Configured workflow | Local or OpenShell | `PUBLISH_MODE=graph`, credentials and approval required |
 
-`dryrun` uploads images and creates Instagram containers but does not publish the final post. It is not an offline mode. Set `ADMIN_TOKEN` and restrict `CORS_ORIGINS` before exposing a real backend. Keep a publicly shared sample demo separate from an account with live publishing credentials.
+`dryrun` uploads images and creates Instagram containers but does not publish the final post. It is not an offline mode. The API requires a Supabase Auth session on every route except `/health` (`SUPABASE_URL`); restrict `CORS_ORIGINS` before exposing a real backend. Keep a publicly shared sample demo separate from an account with live publishing credentials.
 
 ## Develop and contribute
 

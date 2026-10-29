@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
-import { FileCheck2, LayoutDashboard, RotateCcw, ShieldAlert, Sparkles } from "lucide-react";
+import { FileCheck2, LayoutDashboard, LogOut, RotateCcw, ShieldAlert, Sparkles } from "lucide-react";
 
 import { IS_MOCK, api } from "@/lib/api";
+import { signOut } from "@/lib/supabase";
+import { useApi } from "@/lib/use-api";
 
 import { cn } from "@/lib/utils";
 
@@ -42,7 +44,7 @@ function ActiveNav() {
   return <NavLinks pathname={usePathname()} />;
 }
 
-function Brand() {
+export function Brand() {
   return (
     <div className="flex items-center gap-2.5">
       <div className="relative size-7 rounded-[8px] after:absolute after:inset-[8px] after:rounded-full after:bg-card after:content-[''] bg-[conic-gradient(from_200deg,var(--taegeuk-red)_0_50%,var(--taegeuk-blue)_50%_100%)]" />
@@ -83,10 +85,13 @@ function ActiveTabs() {
 export function MobileNav() {
   return (
     <>
-      <header className="sticky top-0 z-30 border-b bg-card/95 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3 backdrop-blur md:hidden">
-        <Brand />
+      <header className="admin-chrome sticky top-0 z-30 border-b bg-card/95 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3 backdrop-blur md:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <Brand />
+          {!IS_MOCK && <SignOutButton />}
+        </div>
       </header>
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+      <div className="admin-chrome fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
         <Suspense fallback={<TabLinks pathname={null} />}>
           <ActiveTabs />
         </Suspense>
@@ -95,9 +100,49 @@ export function MobileNav() {
   );
 }
 
+function SignOutButton() {
+  return (
+    <button
+      type="button"
+      onClick={signOut}
+      aria-label="Sign out"
+      title="Sign out"
+      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    >
+      <LogOut className="size-4" />
+    </button>
+  );
+}
+
+/** Who is signed in, for which Organization, and the way out. */
+function Account() {
+  const { data: me } = useApi(() => (IS_MOCK ? Promise.resolve(undefined) : api.me()));
+  if (IS_MOCK) {
+    return (
+      <>
+        <div className="size-7 rounded-full bg-muted" />
+        <span className="text-[13px] font-medium text-muted-foreground">Content Manager</span>
+      </>
+    );
+  }
+  const initial = (me?.user.email || "?").charAt(0).toUpperCase();
+  return (
+    <>
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
+        {initial}
+      </div>
+      <div className="min-w-0 flex-1 leading-tight">
+        <p className="truncate text-[13px] font-semibold">{me?.org?.name ?? " "}</p>
+        <p className="truncate text-[11px] text-muted-foreground" title={me?.user.email}>{me?.user.email ?? " "}</p>
+      </div>
+      <SignOutButton />
+    </>
+  );
+}
+
 export function Sidebar() {
   return (
-    <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card px-4 py-6 md:flex">
+    <aside className="admin-chrome sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card px-4 py-6 md:flex">
       <div className="px-2 pb-6">
         <Brand />
       </div>
@@ -118,8 +163,7 @@ export function Sidebar() {
         </div>
       )}
       <div className={cn("flex items-center gap-2.5 px-2", IS_MOCK ? "mt-4" : "mt-auto")}>
-        <div className="size-7 rounded-full bg-muted" />
-        <span className="text-[13px] font-medium text-muted-foreground">Content Manager</span>
+        <Account />
       </div>
     </aside>
   );

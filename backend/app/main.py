@@ -3,14 +3,15 @@
 import asyncio
 import hashlib
 import secrets
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import brainstorms, seed, store
+from app import auth, brainstorms, orgs, seed, store
 from app.config import settings
 from app.pipeline import orchestrator
 from app.schemas import (
@@ -56,24 +57,15 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="What's On Korea API", lifespan=lifespan)
 
 
-@app.middleware("http")
-async def require_admin_token(request: Request, call_next):
-    """Registered before CORS so CORS wraps it and a 401 still carries CORS headers."""
-    path = request.url.path
-    if settings.admin_token and request.method != "OPTIONS" and path != "/health" and not path.startswith("/assets/"):
-        sent = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-        if path.endswith("/events"):  # EventSource can't set headers
-            sent = sent or request.query_params.get("token", "")
-        if not secrets.compare_digest(sent.encode(), settings.admin_token.encode()):
-            return JSONResponse({"detail": "admin token required"}, status_code=401)
-    return await call_next(request)
-
-
+# Sign-in: every route except /health (and the public slide files under /assets) needs a Supabase session.
+# Registered before CORS so CORS wraps it and a 401 still carries CORS headers.
+app.middleware("http")(auth.require_session)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 # Rendered slides, publicly reachable via PUBLIC_ASSET_BASE_URL so Instagram can fetch them.
 settings.output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=settings.output_dir), name="assets")
+app.include_router(orgs.router)
 
 
 def _job_or_404(job_id: str) -> Job:
@@ -115,13 +107,15 @@ def get_job(job_id: str) -> Job:
 
 
 @app.get("/jobs/{job_id}/events")
-async def job_events(job_id: str, request: Request) -> StreamingResponse:
-    """SSE: a full Job snapshot whenever it changes, until a terminal state (same as the mock backend)."""
+async def job_events(job_id: str, request: Request, ctx: auth.Member) -> StreamingResponse:
+    """SSE: a full Job snapshot whenever it changes, until a terminal state (same as the mock backend).
+    The Admin reads it with fetch so the session token goes in the Authorization header, never the URL; the
+    stream ends when that token expires and the client reconnects with a fresh one."""
     await asyncio.to_thread(_job_or_404, job_id)
 
     async def stream():
         last = ""
-        while not await request.is_disconnected():
+        while not await request.is_disconnected() and time.time() < ctx.user.expires_at:
             job = await asyncio.to_thread(store.get_job, job_id)
             if not job:
                 break

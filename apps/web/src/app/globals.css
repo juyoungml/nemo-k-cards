@@ -162,3 +162,7 @@
     letter-spacing: -0.02em;
   }
 }
+/* Signed-out screens (sign-in, sign-up, password reset, Organization setup) hide the Admin navigation. */
+body:has([data-auth-screen]) .admin-chrome {
+  display: none;
+}

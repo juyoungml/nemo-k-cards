@@ -1,0 +1,197 @@
+"""Sign-in (docs/spec/v1.md, pseudocode 1). Every request except /health carries a Supabase Auth access token
+as `Authorization: Bearer <jwt>`; the middleware verifies it, looks up the caller's Organization and Role in
+`members`, and leaves a `Ctx` on `request.state` for handlers (`Depends(member)` / `Depends(signed_in)`).
+
+Deny by default: a new route is protected without doing anything. Only /health, CORS preflights and the
+rendered-slide files under /assets (Instagram fetches them anonymously) are public.
+
+Token checks: signature, `exp`, `aud == "authenticated"`, `iss == SUPABASE_URL + "/auth/v1"`, `role ==
+"authenticated"`, a UUID `sub`, not anonymous. Supabase signs with an asymmetric key (ES256/RS256, published
+at `/auth/v1/.well-known/jwks.json`) on new cloud projects and on the local CLI (v2.72: ES256); older projects
+sign with HS256 and the shared JWT secret, accepted only when SUPABASE_JWT_SECRET is set."""
+
+import asyncio
+import logging
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Annotated, Protocol
+from uuid import UUID
+
+import httpx
+import jwt
+from fastapi import Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from app.config import settings
+
+log = logging.getLogger("auth")
+
+ASYMMETRIC = ("ES256", "RS256", "EdDSA")
+LEEWAY_S = 30  # clock skew between Supabase and this host
+
+PUBLIC_PATHS = {"/health"}
+PUBLIC_PREFIXES = ("/assets/",)  # rendered slides: Instagram fetches them anonymously via PUBLIC_ASSET_BASE_URL
+# Signed in is enough here: these are how a person without an Organization gets one.
+NO_ORG_ROUTES = {("GET", "/me"), ("POST", "/orgs")}
+
+
+@dataclass(frozen=True)
+class User:
+    id: UUID
+    email: str
+    expires_at: float  # token `exp`; long-lived responses (SSE) end here so the client reconnects with a fresh one
+
+
+@dataclass(frozen=True)
+class Ctx:
+    user: User
+    org_id: UUID | None  # None only on NO_ORG_ROUTES
+    org_name: str | None
+    role: str | None
+
+
+class Identity(Protocol):
+    def verify(self, token: str) -> User | None: ...
+
+
+class SupabaseIdentity:
+    """Verifies Supabase Auth access tokens. JWKS keys are cached for `ttl` seconds; a token with an unknown
+    `kid` (key rotation) triggers a refetch, at most once per `min_refresh` seconds so forged kids can't make
+    this host hammer Supabase. A failed refetch keeps the keys it already has."""
+
+    def __init__(self, supabase_url: str, jwt_secret: str = "", *, ttl: float = 600, min_refresh: float = 30,
+                 fetch: Callable[[str], dict] | None = None):
+        self.issuer = supabase_url.rstrip("/") + "/auth/v1"
+        self.jwks_url = self.issuer + "/.well-known/jwks.json"
+        self._secret = jwt_secret
+        self._ttl, self._min_refresh = ttl, min_refresh
+        self._fetch = fetch or _fetch_json
+        self._keys: dict[str, jwt.PyJWK] = {}
+        self._fetched_at = 0.0  # last successful fetch
+        self._tried_at = float("-inf")  # last attempt, successful or not
+        self._lock = threading.Lock()
+
+    def _refresh(self, unknown_kid: bool) -> None:
+        with self._lock:
+            now = time.monotonic()
+            expired = now - self._fetched_at > self._ttl
+            if not (expired or unknown_kid) or now - self._tried_at < self._min_refresh:
+                return
+            self._tried_at = now
+            try:
+                raw = self._fetch(self.jwks_url).get("keys", [])
+                keys = {}
+                for k in raw:
+                    if k.get("use", "sig") != "sig" or k.get("kty") == "oct" or not k.get("kid"):
+                        continue
+                    try:
+                        keys[k["kid"]] = jwt.PyJWK(k)
+                    except jwt.PyJWTError:
+                        continue  # an algorithm this host can't use; the others still work
+                self._keys, self._fetched_at = keys, now
+            except (httpx.HTTPError, ValueError, TypeError, AttributeError, OSError) as e:
+                # network, HTTP or JSON error: keep serving with the keys we have
+                log.warning("could not fetch Supabase JWKS from %s: %s", self.jwks_url, e)
+
+    def _key(self, kid: str | None) -> jwt.PyJWK | None:
+        if not kid:
+            return None
+        self._refresh(unknown_kid=kid not in self._keys)
+        return self._keys.get(kid)
+
+    def verify(self, token: str) -> User | None:
+        try:
+            header = jwt.get_unverified_header(token)
+            alg = header.get("alg")
+            if alg in ASYMMETRIC:
+                jwk = self._key(header.get("kid"))
+                if jwk is None or jwk.algorithm_name != alg:
+                    return None
+                key = jwk.key
+            elif alg == "HS256" and self._secret:
+                key = self._secret
+            else:  # "none", HS256 without a configured secret, anything unexpected
+                return None
+            claims = jwt.decode(token, key, algorithms=[alg], audience="authenticated", issuer=self.issuer,
+                                leeway=LEEWAY_S, options={"require": ["exp", "sub", "aud", "iss"]})
+            if claims.get("role") != "authenticated" or claims.get("is_anonymous"):
+                return None
+            return User(id=UUID(str(claims["sub"])), email=str(claims.get("email") or ""),
+                        expires_at=float(claims["exp"]))
+        except (jwt.PyJWTError, ValueError, TypeError):
+            return None
+
+
+def _fetch_json(url: str) -> dict:
+    r = httpx.get(url, timeout=5, follow_redirects=False)
+    r.raise_for_status()
+    return r.json()
+
+
+_identity: tuple[tuple[str, str], SupabaseIdentity] | None = None
+_identity_lock = threading.Lock()
+
+
+def identity() -> Identity | None:
+    """The configured Identity, or None when SUPABASE_URL is unset (then every protected route is 401)."""
+    global _identity
+    conf = (settings.supabase_url, settings.supabase_jwt_secret)
+    if not conf[0]:
+        return None
+    with _identity_lock:
+        if _identity is None or _identity[0] != conf:
+            _identity = (conf, SupabaseIdentity(*conf))
+        return _identity[1]
+
+
+def _bearer(request: Request) -> str:
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
+def _deny(status: int, detail: str) -> JSONResponse:
+    headers = {"www-authenticate": "Bearer"} if status == 401 else None
+    return JSONResponse({"detail": detail}, status_code=status, headers=headers)
+
+
+async def require_session(request: Request, call_next):
+    """HTTP middleware. Registered before CORS so CORS wraps it and a 401 still carries CORS headers."""
+    path = request.url.path
+    if request.method == "OPTIONS" or path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
+        return await call_next(request)
+    ident, token = identity(), _bearer(request)
+    if ident is None:
+        return _deny(401, "sign-in is not configured on this server (set SUPABASE_URL)")
+    user = await asyncio.to_thread(ident.verify, token) if token else None
+    if user is None:
+        return _deny(401, "sign in required")
+    from app import orgs  # imported here: orgs imports this module for its dependencies
+
+    m = await asyncio.to_thread(orgs.membership, user.id)
+    if m is None and (request.method, path) not in NO_ORG_ROUTES:
+        return _deny(403, "no Organization yet: create one first")
+    request.state.ctx = Ctx(user, m.org_id if m else None, m.org_name if m else None, m.role if m else None)
+    return await call_next(request)
+
+
+def signed_in(request: Request) -> Ctx:
+    """Dependency: the caller's context (Organization may be None, on NO_ORG_ROUTES only)."""
+    ctx = getattr(request.state, "ctx", None)
+    if ctx is None:  # the middleware always sets it on protected routes; fail closed if it ever doesn't
+        raise HTTPException(401, "sign in required")
+    return ctx
+
+
+def member(request: Request) -> Ctx:
+    """Dependency: a signed-in Member of an Organization."""
+    ctx = signed_in(request)
+    if ctx.org_id is None:
+        raise HTTPException(403, "no Organization yet: create one first")
+    return ctx
+
+
+
+SignedIn = Annotated[Ctx, Depends(signed_in)]
+Member = Annotated[Ctx, Depends(member)]
