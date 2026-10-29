@@ -162,10 +162,9 @@ export interface Job {
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
   safeguard?: SafeguardVerdict | null;
   blocked_edit?: BlockedEdit | null;
-  published_url?: string | null;
   error?: string | null;
   slide_urls?: string[]; // rendered JPEGs: short-lived signed links relative to API_URL (/assets/{org}/{id}/slide-NN.jpg?exp=…&sig=…)
-  publish_progress?: PublishProgress | null; // live sub-steps after Approve & Publish
+  // Publishing lives on Posts (#21): GET /posts?job_id=… (the Job no longer carries published_url / publish_progress).
   // View extras returned by GET /jobs/{id} and the SSE stream.
   source?: "quick" | "brainstorm";
   pipeline?: PipelineStep[];
@@ -211,16 +210,48 @@ export interface SlideSources {
   note?: string | null;
 }
 
-export interface PublishProgress {
-  mode: "mock" | "dryrun" | "graph";
+export interface PostProgress {
   step: "upload" | "containers" | "processing" | "publish" | "done" | "failed";
   label: string;
   done: number;
   total: number;
   percent: number;
-  started_at: string;
+}
+
+export type PostState = "queued" | "container_ready" | "publishing" | "published" | "failed" | "unknown";
+export type PublishMode = "mock" | "dryrun" | "graph";
+
+/**
+ * One publication of an approved Deck to one Instagram account (GLOSSARY "Post", #21). Only `published` and
+ * `failed` are final for a real post; `unknown` means Instagram's answer didn't prove the outcome and the
+ * reconciler is checking. A dry run ends at `container_ready` with `finished_at` set (nothing posted).
+ */
+export interface Post {
+  id: string;
+  job_id: string;
+  deck_version?: number | null;
+  instagram_account_id?: string | null;
+  handle?: string | null; // "@username"; null for a mock post without an account
+  mode: PublishMode;
+  state: PostState;
+  caption?: string | null;
+  creation_id?: string | null;
+  media_id?: string | null;
+  permalink?: string | null;
+  attempts: number;
+  last_error?: string | null;
+  progress?: PostProgress | null;
+  approved_by_email?: string | null;
+  created_at: string;
+  updated_at: string;
+  publishing_started_at?: string | null;
+  unknown_since?: string | null;
+  next_check_at?: string | null; // unknown: the reconciler's next look; null = a person decides
+  alerted_at?: string | null; // unknown for 30 minutes: a person was alerted
+  published_at?: string | null;
   finished_at?: string | null;
-  error?: string | null;
+  resolved_by?: string | null;
+  legacy?: boolean;
 }
 
 export type Scenario = "good" | "bad" | "fail";

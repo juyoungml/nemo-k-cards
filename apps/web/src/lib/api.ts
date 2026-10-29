@@ -8,7 +8,7 @@ import { orgHeader, setActiveOrgId } from "./org";
 import { accessToken, isAuthPath, reloadTo } from "./supabase";
 import type {
   AuditEvent, Brainstorm, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job, Material, MaterialRef, Me,
-  Member, Metric, Org, PolicyEvent, Role, Scenario,
+  Member, Metric, Org, PolicyEvent, Post, PublishMode, Role, Scenario,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
@@ -65,8 +65,19 @@ export const api = {
   // `scenario` is honored by the mock backend only (QA); FastAPI ignores it.
   createJob: (prompt: string, scenario?: Scenario, materialIds: string[] = []) =>
     req<Job>("/jobs", { method: "POST", json: { prompt, scenario, material_ids: materialIds } }),
-  approveJob: (id: string, caption: string, overrideReason?: string) =>
-    req<Job>(`/jobs/${id}/approve`, { method: "POST", json: { caption, override_reason: overrideReason || undefined } }),
+  /** Approve → a Post to the chosen Instagram account (#21). Its outcome is on the Post, not this response. */
+  approveJob: (id: string, caption: string, overrideReason?: string, accountId?: string) =>
+    req<Job>(`/jobs/${id}/approve`, {
+      method: "POST",
+      json: { caption, override_reason: overrideReason || undefined, account_id: accountId || undefined },
+    }),
+  listPosts: (jobId?: string) => req<Post[]>(`/posts${jobId ? `?job_id=${encodeURIComponent(jobId)}` : ""}`),
+  getPost: (id: string) => req<Post>(`/posts/${id}`),
+  /** For an unknown Post: "I checked Instagram: it is posted / not posted" (logged under your name). */
+  resolvePost: (id: string, posted: boolean, permalink?: string) =>
+    req<Post>(`/posts/${id}/resolve`, { method: "POST", json: { posted, permalink: permalink || undefined } }),
+  /** Public server facts: which publish mode Approve uses (mock, dryrun, graph). */
+  health: () => req<{ ok: boolean; publish_mode: PublishMode; demo_mode: string }>("/health"),
   rejectJob: (id: string, reason: string) => req<Job>(`/jobs/${id}/reject`, { method: "POST", json: { reason } }),
   /**
    * Live Job snapshots (SSE). Read with fetch rather than the browser's EventSource so the session token

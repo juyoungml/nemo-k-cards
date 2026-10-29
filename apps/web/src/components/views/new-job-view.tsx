@@ -153,7 +153,7 @@ export function NewJobView() {
           <section className="w-full rounded-xl border bg-card p-4 md:p-5 lg:w-[420px] lg:shrink-0">
             <div className="flex items-center gap-2 pb-3">
               <h2 className="flex-1 text-base font-semibold">Pipeline · {job.id}</h2>
-              <JobStatusBadge status={job.status} mock={!!job.published_url?.includes("/p/MOCK")} />
+              <JobStatusBadge status={job.status} />
             </div>
             <ol>
               {job.pipeline?.map((s, i) => (

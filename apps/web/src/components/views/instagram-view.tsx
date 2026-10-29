@@ -28,6 +28,8 @@ const CALLBACK_ERRORS: Record<string, string> = {
   not_pilot: "Only Pilot Organizations can connect Instagram accounts while Meta reviews our app.",
   not_admin: "Only Admins can connect Instagram accounts.",
   limit: "Your plan's Instagram account limit is reached. Disconnect an account to connect another.",
+  taken:
+    "That Instagram account is already connected to another Organization. One account can belong to one Organization: disconnect it there first.",
   unavailable: "This server can't store Instagram tokens safely yet. Nothing was connected.",
 };
 

@@ -81,7 +81,7 @@ This script creates and deletes a sandbox and makes network probe requests, incl
 
 ## Publishing to your own Instagram account
 
-The backend supports `PUBLISH_MODE=graph` using the Instagram Graph API. Configure an eligible Instagram account and its current API permissions, then set host-only `IG_USER_ID` and `IG_ACCESS_TOKEN`. Meta setup is account-dependent; follow the [official Instagram Platform documentation](https://developers.facebook.com/docs/instagram-platform/).
+The backend supports `PUBLISH_MODE=graph` using the Instagram Graph API. An Admin connects the Organization's own Business or Creator account on the Instagram page (its token is kept in Supabase Vault); the Approver picks that account when approving. `IG_USER_ID` and `IG_ACCESS_TOKEN` are no longer used. Meta setup is account-dependent; follow the [official Instagram Platform documentation](https://developers.facebook.com/docs/instagram-platform/).
 
 Images must be public JPEG URLs so Instagram can fetch them. Configure either:
 

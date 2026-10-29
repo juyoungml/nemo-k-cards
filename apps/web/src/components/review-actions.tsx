@@ -1,19 +1,23 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { MODE } from "@/components/publish-progress";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { ROLE_LABEL, atLeast, useMe } from "@/lib/roles";
 import type { Job } from "@/lib/types";
+import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 
 const STATUS_NOTE: Partial<Record<Job["status"], string>> = {
-  PUBLISHING: "Approved — the host is publishing to Instagram…",
-  PUBLISHED: "Published to @whatsonkorea.",
+  PUBLISHING: "Approved: a Post is in progress or being checked on Instagram. Approve is locked until it settles.",
+  PUBLISHED: "Published. A correction needs a new Post of an edited Deck.",
   REJECTED: "Rejected — this deck will not be posted.",
   BLOCKED: "Blocked by the safeguard — this deck can't be published, not even with an Override. Regenerate it, or reject it.",
   FAILED: "The pipeline failed before review.",
@@ -26,6 +30,15 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
   const { role } = useMe();
+  // Where the Post goes (#21): one of this Organization's connected accounts, preselected when there is only one.
+  const { data: accounts } = useApi(() => api.getInstagramAccounts(), []);
+  const { data: health } = useApi(() => api.health(), []);
+  const live = (accounts ?? []).filter((a) => a.live);
+  const [picked, setPicked] = useState<string>();
+  const accountId = live.length === 1 ? live[0].id : live.find((a) => a.id === picked)?.id;
+  const mode = health?.publish_mode;
+  const needsAccount = mode !== undefined && mode !== "mock" && live.length === 0;
+  const mustPick = live.length > 1 && !accountId;
   // Approve/Reject need the Approver Role, Regenerate (a new Job) the Editor Role; the API enforces both.
   const mayDecide = atLeast(role, "approver");
   const mayStart = atLeast(role, "editor");
@@ -86,6 +99,47 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
         </section>
       )}
 
+      {mayDecide && job.status === "READY_FOR_REVIEW" && !blocked && !unchecked && (
+        <section className="space-y-2 rounded-xl border bg-card p-5" aria-labelledby="post-to">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="post-to" className="flex-1 text-[13px] font-medium text-muted-foreground">
+              Post to
+            </h2>
+            {mode && <StatusBadge tone={MODE[mode][0]}>{MODE[mode][1]}</StatusBadge>}
+          </div>
+          {live.length > 1 ? (
+            <div role="radiogroup" aria-label="Instagram account" className="flex flex-wrap gap-2">
+              {live.map((a) => (
+                <label
+                  key={a.id}
+                  className={cn(
+                    "inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 text-[13px] font-medium",
+                    accountId === a.id ? "border-2 border-primary bg-brand-soft" : "hover:bg-muted",
+                  )}
+                >
+                  <input type="radio" name="account" value={a.id} checked={accountId === a.id} onChange={() => setPicked(a.id)} className="sr-only" />
+                  {a.handle}
+                </label>
+              ))}
+            </div>
+          ) : live.length === 1 ? (
+            <p className="text-[13px] font-medium">{live[0].handle}</p>
+          ) : accounts === undefined ? (
+            <p className="text-xs text-muted-foreground">Loading Instagram accounts…</p>
+          ) : needsAccount ? (
+            <p className="text-xs text-destructive">
+              No Instagram account is connected.{" "}
+              <Link href="/instagram" className="font-medium underline">
+                Connect one
+              </Link>{" "}
+              to publish.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">No Instagram account connected: this is a mock post, nothing leaves the server.</p>
+          )}
+        </section>
+      )}
+
       {/* Decision bar stays reachable at the bottom of the viewport; publish progress shows in the toast + top line. */}
       <div className="sticky bottom-20 z-10 rounded-xl md:bottom-4 border bg-card/95 p-4 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] backdrop-blur supports-[backdrop-filter]:bg-card/80">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -99,7 +153,7 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                   ? "No safeguard verdict: this job was created before the safeguard existed. Regenerate it to publish."
                   : blocks > 0
                   ? `${blocks} blocking issue${blocks > 1 ? "s" : ""} flagged. Approving is an Override; you are the final check.`
-                  : "Publishing runs on the host with the IG token — the agent sandbox cannot post or delete.")}
+                  : "Publishing runs on the host with the account's own token; the agent sandbox cannot post or delete.")}
             </p>
             <Button variant="destructive" size="lg" disabled={!canReject} onClick={() => act(() => api.rejectJob(job.id, "Rejected by operator"))}>
               Reject
@@ -120,16 +174,20 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
             </Button>
             <Button
               size="lg"
-              disabled={!canDecide || reasonMissing}
+              disabled={!canDecide || reasonMissing || needsAccount || mustPick}
               title={
                 blocked
                   ? "The safeguard blocked this deck. No Override can approve it."
+                  : mustPick && mayDecide
+                  ? "Choose the Instagram account to post to"
+                  : needsAccount && mayDecide
+                  ? "Connect an Instagram account first"
                   : reasonMissing && mayDecide
                   ? "Write an Override reason first"
                   : undefined
               }
               onClick={() => {
-                act(() => api.approveJob(job.id, caption, override ? reason.trim() : undefined));
+                act(() => api.approveJob(job.id, caption, override ? reason.trim() : undefined, accountId));
               }}
             >
               {publishing ? (

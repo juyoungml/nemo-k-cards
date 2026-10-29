@@ -65,6 +65,15 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 
 **Done when:** fake-Instagram tests cover rate limit on publish, timeout on publish, double Approve, and restart mid-publish. Each yields exactly one post and an honest status.
 
+**Status (#21 Posts with an honest state):** done. A Post is its own record (`posts`), driven by a DBOS workflow per
+Post (`backend/app/pipeline/publishing.py`); every transition is saved before the Instagram call it guards. The
+`creation_id` is saved before `media_publish` and reused on retry; codes 4/17/32/613 (and 1, 2, 80001-80014,
+`is_transient`, 5xx, timeouts, dropped connections) go to `unknown`; the reconciler checks `status_code` with backoff
+(2, 4, 8, 15 min, then every 30 min, up to 25 h), alerts after 30 min, and an Approver can resolve by hand. A restart
+finds `publishing` and checks, never fails. Unique indexes refuse a second open Post per Job and a second live post of
+a Deck version to one account. `backend/tests/test_posts.py` covers rate limit (posted and not), timeout (posted and
+not), restart mid-publish (DBOS), double Approve, 24 h container expiry, revoked token and two accounts.
+
 ### PUB-2 One Instagram token is used by several machines
 **P0** *(verified: the Mac and the Brev instance both run the API with the same token)*
 
@@ -100,6 +109,11 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 
 **Done when:** a full publish plus a Dashboard session stays under 25 % of the app's quota, and hitting the limit produces a clear message with a retry time.
 
+**Status (#21):** partly. Container polling uses exponential backoff with jitter (1 s doubling to 15 s, 5 min budget),
+and the reconciler backs off. Still open: reading `X-App-Usage` / `X-Business-Use-Case-Usage`, checking
+`content_publishing_limit` before publishing, the single cached insights call (the dashboard now reads the
+Organization's own account, cached 5 min per account), and "try at HH:MM" messages.
+
 ### PUB-5 Single-account, dev-mode Instagram integration
 **P1**
 
@@ -109,7 +123,7 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 
 **Done when:** a non-tester org can connect an account and publish.
 
-**Status (#15 Connect an Instagram account):** the OAuth flow, per-account tokens in Supabase Vault and the Pilot gate are in. Publishing to the connected account is #21, token refresh #22, App Review still to do.
+**Status (#15 Connect an Instagram account):** the OAuth flow, per-account tokens in Supabase Vault and the Pilot gate are in. Publishing to the connected account is in (#21: the Approver picks the account; the env token is gone); token refresh is #22, App Review still to do.
 
 ---
 
