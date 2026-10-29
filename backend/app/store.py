@@ -1,16 +1,20 @@
-"""SQLite store (BACKEND §8). Models are stored as JSON; one table per kind."""
+"""Postgres store (BACKEND §8). Models are stored as jsonb documents; one table per kind."""
 
 import logging
-import sqlite3
 import threading
 from pathlib import Path
 
+from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ValidationError
+from yoyo import get_backend, read_migrations
 
 from app.config import settings
 from app.schemas import Draft, Job, PolicyEvent
 
+MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
+
 _lock = threading.Lock()
+_pool: ConnectionPool | None = None
 log = logging.getLogger("store")
 
 
@@ -23,42 +27,50 @@ def _load[M: BaseModel](model: type[M], raw: str) -> M | None:
         return None
 
 
-def _conn() -> sqlite3.Connection:
-    db: Path = settings.output_dir.parent / "app.db"
-    db.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(db, check_same_thread=False)
-    c.execute("create table if not exists jobs (id text primary key, created_at text, json text)")
-    c.execute("create table if not exists drafts (id text primary key, json text)")
-    c.execute("create table if not exists policy_events (rowid integer primary key, job_id text, json text)")
-    return c
+def migrate() -> None:
+    """Apply pending migrations in backend/migrations (yoyo locks, so concurrent starts are safe)."""
+    backend = get_backend("postgresql+psycopg://" + settings.database_url.split("://", 1)[1])
+    with backend.lock():
+        backend.apply_migrations(backend.to_apply(read_migrations(str(MIGRATIONS))))
 
 
-_db = _conn()
+def _db() -> ConnectionPool:
+    global _pool
+    with _lock:
+        if _pool is None:
+            migrate()
+            # prepare_threshold=None: also works behind Supabase's transaction pooler.
+            _pool = ConnectionPool(settings.database_url, min_size=1, max_size=8, open=True,
+                                   kwargs={"prepare_threshold": None})
+        return _pool
 
 
 def _put(table: str, id_: str, model: BaseModel, extra: dict | None = None) -> None:
-    cols = {"id": id_, "json": model.model_dump_json(), **(extra or {})}
-    with _lock:
-        _db.execute(f"insert or replace into {table} ({','.join(cols)}) values ({','.join('?' * len(cols))})",
-                    list(cols.values()))
-        _db.commit()
+    cols = {"id": id_, "doc": model.model_dump_json(), **(extra or {})}
+    updates = ", ".join(f"{c} = excluded.{c}" for c in cols if c != "id")
+    with _db().connection() as c:
+        c.execute(f"insert into {table} ({', '.join(cols)}) values ({', '.join(['%s'] * len(cols))}) "
+                  f"on conflict (id) do update set {updates}", list(cols.values()))
+
+
+def _rows(sql: str, params: tuple) -> list[str]:
+    with _db().connection() as c:
+        return [r[0] for r in c.execute(sql, params).fetchall()]
 
 
 def save_job(job: Job) -> Job:
-    _put("jobs", job.id, job, {"created_at": job.created_at.isoformat()})
+    _put("jobs", job.id, job, {"created_at": job.created_at})
     return job
 
 
 def get_job(job_id: str) -> Job | None:
-    with _lock:  # one shared connection: reads must not interleave with writes
-        row = _db.execute("select json from jobs where id = ?", (job_id,)).fetchone()
-    return _load(Job, row[0]) if row else None
+    rows = _rows("select doc::text from jobs where id = %s", (job_id,))
+    return _load(Job, rows[0]) if rows else None
 
 
 def list_jobs(limit: int = 50) -> list[Job]:
-    with _lock:  # one shared connection: reads must not interleave with writes
-        rows = _db.execute("select json from jobs order by created_at desc limit ?", (limit,)).fetchall()
-    return [j for r in rows if (j := _load(Job, r[0]))]
+    rows = _rows("select doc::text from jobs order by created_at desc limit %s", (limit,))
+    return [j for r in rows if (j := _load(Job, r))]
 
 
 def save_draft(draft: Draft) -> Draft:
@@ -67,19 +79,16 @@ def save_draft(draft: Draft) -> Draft:
 
 
 def get_draft(draft_id: str) -> Draft | None:
-    with _lock:  # one shared connection: reads must not interleave with writes
-        row = _db.execute("select json from drafts where id = ?", (draft_id,)).fetchone()
-    return _load(Draft, row[0]) if row else None
+    rows = _rows("select doc::text from drafts where id = %s", (draft_id,))
+    return _load(Draft, rows[0]) if rows else None
 
 
 def add_policy_events(events: list[PolicyEvent]) -> None:
-    with _lock:
-        _db.executemany("insert into policy_events (job_id, json) values (?, ?)",
-                        [(e.job_id, e.model_dump_json()) for e in events])
-        _db.commit()
+    with _db().connection() as c:
+        c.cursor().executemany("insert into policy_events (job_id, doc) values (%s, %s)",
+                               [(e.job_id, e.model_dump_json()) for e in events])
 
 
 def list_policy_events(limit: int = 200) -> list[PolicyEvent]:
-    with _lock:  # one shared connection: reads must not interleave with writes
-        rows = _db.execute("select json from policy_events order by rowid desc limit ?", (limit,)).fetchall()
-    return [e for r in rows if (e := _load(PolicyEvent, r[0]))]
+    rows = _rows("select doc::text from policy_events order by id desc limit %s", (limit,))
+    return [e for r in rows if (e := _load(PolicyEvent, r))]

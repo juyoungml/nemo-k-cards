@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     agent_dir: Path = REPO_ROOT / "agent"
     scenarios_dir: Path = REPO_ROOT / "demo/scenarios"
     output_dir: Path = REPO_ROOT / "backend/.data/out"
+    # Postgres for Jobs, Brainstorms and policy events (Supabase in production). Host-only secret.
+    database_url: str = "postgresql://postgres:postgres@localhost:54320/wok"
 
     # Agent runtime
     agent_model: str = ""                 # e.g. "sonnet" to cut cost; empty = CLI default
