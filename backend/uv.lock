@@ -218,6 +218,20 @@ wheels = [
 ]
 
 [[package]]
+name = "httpx-secure"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpcore" },
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/23/5f/dcdc70291c2d705272028d330b1ac11b2a30356b56551dca1f2f59c4c8b6/httpx_secure-2.0.0.tar.gz", hash = "sha256:332f6b2a61ca8faad20fc6d7068d640c424c31a93b04cc7bed7758ff947875c7", size = 21397, upload-time = "2026-10-27T05:02:44.879Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/ef/0bd8d4588885af17b961dad4e06fd94af6f41062ca22ba2a79ac78e2297d/httpx_secure-2.0.0-py3-none-any.whl", hash = "sha256:4dfa9d4d45c74ba1fc420adaa70bac0a36f6538461b95cfea69254510e270182", size = 11062, upload-time = "2026-10-27T05:02:43.793Z" },
+]
+
+[[package]]
 name = "idna"
 version = "3.20"
 source = { registry = "https://pypi.org/simple" }
@@ -919,6 +933,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "httpx-secure" },
     { name = "jinja2" },
     { name = "playwright" },
     { name = "pydantic" },
@@ -937,6 +952,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx-secure", specifier = ">=2.0,<3" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "playwright", specifier = ">=1.63.0" },
     { name = "pydantic", specifier = ">=2.8" },
