@@ -1,10 +1,13 @@
 """SEC-1: the host never fetches internal addresses, directly, through DNS or through a redirect. No network:
 DNS is a dict and HTTP is an httpx.MockTransport that records every request it would have sent."""
 
+import gzip
 import ipaddress
+import zlib
 
 import httpx
 import pytest
+from httpx_secure import SSRFProtectionError
 
 from app import drafts
 from app.schemas import CardDeck, ImageAsset
@@ -31,22 +34,28 @@ def fake_dns(monkeypatch):
     monkeypatch.setattr(safe_fetch, "resolve", resolve)
 
 
-class Web:
-    """Mock web: path → response; remembers every URL actually requested."""
+def raw(status: int = 200, headers=None, body: bytes = b"ok") -> tuple:
+    """A route: (status, headers, body). The body is sent as-is, like a real server's (still compressed)."""
+    return status, headers or {}, body
 
-    def __init__(self, routes: dict[str, httpx.Response]):
+
+class Web:
+    """Mock web: URL → raw response; remembers every URL actually requested."""
+
+    def __init__(self, routes: dict[str, tuple]):
         self.routes, self.seen = routes, []
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.seen.append(str(req.url))
-        return self.routes.get(str(req.url), httpx.Response(200, text="ok"))
+        status, headers, body = self.routes.get(str(req.url), raw())
+        return httpx.Response(status, headers=headers, stream=httpx.ByteStream(body))
 
     def client(self, **_kw) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self), follow_redirects=False)
 
 
-def moved(to: str, code: int = 302) -> httpx.Response:
-    return httpx.Response(code, headers={"location": to})
+def moved(to: str, code: int = 302) -> tuple:
+    return raw(code, [(b"location", to.encode())], b"")
 
 
 # ---------------------------------------------------------------- address policy
@@ -55,6 +64,8 @@ def moved(to: str, code: int = 302) -> httpx.Response:
     "127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "224.0.0.1",
     "0.0.0.0", "255.255.255.255", "::1", "::", "fc00::1", "fd00:ec2::254", "fe80::1", "ff02::1",
     "::ffff:127.0.0.1", "::ffff:169.254.169.254", "2002:7f00:1::", "64:ff9b::a9fe:a9fe",
+    # explicit denylist: not blocked by `ipaddress` flags on every Python version
+    "192.0.0.192", "0.1.2.3", "fec0::1", "100.100.100.200", "168.63.129.16", "198.18.0.1", "240.0.0.1",
 ])
 def test_non_public_addresses_are_blocked(ip):
     assert safe_fetch.blocked_ip_reason(ipaddress.ip_address(ip))
@@ -126,25 +137,106 @@ async def test_redirects_are_followed_and_capped():
 
 
 async def test_body_is_capped():
-    web = Web({"https://public.example/big": httpx.Response(200, content=b"x" * 5000)})
+    web = Web({"https://public.example/big": raw(body=b"x" * 5000)})
     async with web.client() as c:
         with pytest.raises(safe_fetch.TooLarge):
             await safe_fetch.fetch(c, "GET", "https://public.example/big", max_bytes=1000)
         assert (await safe_fetch.fetch(c, "GET", "https://public.example/big", max_bytes=0)).content == b""
 
 
+def _gz(body: bytes, layers: int = 1) -> bytes:
+    for _ in range(layers):
+        body = gzip.compress(body, compresslevel=9)
+    return body
+
+
+async def test_compressed_body_is_capped_while_decoding():
+    """A tiny gzip body can't expand past the cap (no gigabyte allocation), stacked encodings are refused,
+    and an honest gzip response is decoded."""
+    web = Web({
+        "https://public.example/bomb": raw(200, {"content-encoding": "gzip"}, _gz(b"\0" * 50_000_000)),
+        "https://public.example/nested": raw(200, {"content-encoding": "gzip, gzip"}, _gz(b"\0" * 50_000_000, 2)),
+        "https://public.example/br": raw(200, {"content-encoding": "br"}, b"x"),
+        "https://public.example/ok": raw(200, {"content-encoding": "gzip"}, _gz(b"hello" * 100)),
+        "https://public.example/deflate": raw(200, {"content-encoding": "deflate"}, zlib.compress(b"hi" * 10)),
+        "https://public.example/raw-deflate": raw(200, {"content-encoding": "deflate"},
+                                                  zlib.compress(b"hi" * 10)[2:-4]),
+    })
+    assert len(web.routes["https://public.example/nested"][2]) < 2_000
+    async with web.client() as c:
+        for url in ("https://public.example/bomb", "https://public.example/nested", "https://public.example/br"):
+            with pytest.raises(safe_fetch.TooLarge):
+                await safe_fetch.fetch(c, "GET", url, max_bytes=1_000_000)
+        ok = await safe_fetch.fetch(c, "GET", "https://public.example/ok")
+        assert ok.content == b"hello" * 100 and "content-encoding" not in ok.headers
+        for url in ("https://public.example/deflate", "https://public.example/raw-deflate"):
+            assert (await safe_fetch.fetch(c, "GET", url)).content == b"hi" * 10
+
+
+async def test_asks_for_uncompressed_bodies():
+    sent = []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda r: sent.append(r.headers.get("accept-encoding")) or httpx.Response(200, stream=httpx.ByteStream(b""))
+    )) as c:
+        await safe_fetch.fetch(c, "GET", "https://public.example/")
+    assert sent == ["identity"] and safe_fetch.client().headers["accept-encoding"] == "identity"
+
+
+# ---------------------------------------------------------------- invalid URLs fail closed, never crash
+
+@pytest.mark.parametrize("url", ["https://１.visitkorea.or.kr/a.jpg", "https://[::1/x"])
+async def test_invalid_urls_are_blocked(url):
+    web = Web({})
+    async with web.client() as c:
+        with pytest.raises(safe_fetch.BlockedURL, match="invalid URL"):
+            await safe_fetch.fetch(c, "GET", url)
+    assert web.seen == []
+
+
+async def test_redirect_to_invalid_url_is_blocked():
+    web = Web({"https://public.example/a": moved("https://１.visitkorea.or.kr/a.jpg")})
+    async with web.client() as c:
+        with pytest.raises(httpx.HTTPError):
+            await safe_fetch.fetch(c, "GET", "https://public.example/a")
+    assert web.seen == ["https://public.example/a"]
+
+
+def test_invalid_urls_in_static_checks():
+    assert link_checker.suspicious_reason("https://[::1/x") == "invalid URL"
+    brief = photos.EventBrief.model_validate({
+        "id": "ev", "title_en": "t", "title_ko": "t", "start_date": "2026-10-01", "end_date": "2026-10-02",
+        "venue_en": "v", "sources": [{"url": "https://www.visitkorea.or.kr/", "kind": "official"}]})
+    assert photos.reject_reason(ImageAsset(url="https://[::1/x", license="kogl_1", credit="c"), brief, set()) \
+        == "invalid URL"
+
+
+async def test_invalid_photo_url_does_not_fail_collect(tmp_path, monkeypatch):
+    """A URL that passes the static checks but httpx can't parse is skipped, not raised out of gather()."""
+    web = Web({})
+    monkeypatch.setattr(safe_fetch, "client", web.client)
+    brief = photos.EventBrief.model_validate({
+        "id": "ev", "title_en": "t", "title_ko": "t", "start_date": "2026-10-01", "end_date": "2026-10-02",
+        "venue_en": "v", "sources": [{"url": "https://www.visitkorea.or.kr/", "kind": "official"}],
+        "images": [{"url": "https://１.visitkorea.or.kr/a.jpg", "license": "kogl_1", "credit": "© KTO"}]})
+    found, log = await photos.collect([brief], {"https://www.visitkorea.or.kr/"}, tmp_path)
+    assert found == {} and "invalid URL" in log[0] and web.seen == []
+
+
 # ---------------------------------------------------------------- connection pinning (DNS rebinding)
 
 async def test_client_pins_connections_to_public_addresses(monkeypatch):
     """Even if the pre-check were fooled (DNS answered differently a moment ago), the real client re-checks the
-    address it actually connects to and refuses, without opening a connection to it."""
+    address it actually connects to and refuses, without opening a connection to it. The refusal looks exactly
+    like an unreachable host, so it can't be used to probe internal ports."""
     async def fooled(url):
         return None
     monkeypatch.setattr(safe_fetch, "check_url", fooled)
     async with safe_fetch.client(timeout=2) as c:
-        for url in ("http://127.0.0.1:9/", "http://[::1]:9/", "http://169.254.169.254/latest/meta-data/"):
-            with pytest.raises(safe_fetch.BlockedURL):
+        for url in ("http://127.0.0.1:9/", "http://[::1]:9/", "http://169.254.169.254/latest/meta-data/",
+                    "http://192.0.0.192/opc/v1/instance/", "http://[fec0::1]:9/"):
+            with pytest.raises(httpx.ConnectError, match="^connection failed$") as e:
                 await safe_fetch.fetch(c, "GET", url)
+            assert isinstance(e.value.__cause__, SSRFProtectionError), url
 
 
 def test_client_ignores_env_proxies_and_redirects():
@@ -216,3 +308,25 @@ def test_renderer_never_loads_remote_images():
     d = _deck()
     ctx = HtmlRenderer().context(d, d.slides[0], {})
     assert ctx["photo"] is None
+
+
+async def test_renderer_aborts_every_network_request():
+    from types import SimpleNamespace
+
+    from app.renderer.html import offline
+
+    done = []
+
+    class Route:
+        def __init__(self, url):
+            self.request = SimpleNamespace(url=url)
+
+        async def continue_(self):
+            done.append(("continue", self.request.url))
+
+        async def abort(self):
+            done.append(("abort", self.request.url))
+
+    for url in ("file:///x/slide.html", "data:image/svg+xml,x", "http://169.254.169.254/", "https://a.example/x.jpg"):
+        await offline(Route(url))
+    assert [d[0] for d in done] == ["continue", "continue", "abort", "abort"]

@@ -54,8 +54,12 @@ def reject_reason(img: ImageAsset, brief: EventBrief, ok_urls: set[str]) -> str 
         return "license marked no-overlay"
     if not img.credit.strip():
         return "no credit"
-    host = (urlparse(img.url).hostname or "").lower()
-    if urlparse(img.url).scheme != "https" or not host:
+    try:
+        parsed = urlparse(img.url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return "invalid URL"
+    if parsed.scheme != "https" or not host:
         return "not an https URL"
     if reason := suspicious_reason(img.url):
         return f"suspicious URL ({reason})"
@@ -67,7 +71,10 @@ def reject_reason(img: ImageAsset, brief: EventBrief, ok_urls: set[str]) -> str 
     if not (_is_public_host(reg) or reg in official):
         return f"{reg} is not the event's verified official domain or a public tourism host"
     if img.source_url:
-        src_reg = _registrable(urlparse(img.source_url).hostname or "")
+        try:
+            src_reg = _registrable(urlparse(img.source_url).hostname or "")
+        except ValueError:
+            return "invalid source page URL"
         if not (_is_public_host(src_reg) or src_reg in official):
             return f"source page {src_reg} is not official"
     return None

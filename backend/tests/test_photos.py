@@ -65,7 +65,7 @@ async def test_collect_downloads_first_good_photo(tmp_path: Path, monkeypatch):
 
     def handler(req: httpx.Request) -> httpx.Response:
         ctype, body = files[str(req.url)]
-        return httpx.Response(200, headers={"content-type": ctype}, content=body)
+        return httpx.Response(200, headers={"content-type": ctype}, stream=httpx.ByteStream(body))
 
     async def public(host: str, port: int) -> list[str]:
         return ["93.184.215.14"]

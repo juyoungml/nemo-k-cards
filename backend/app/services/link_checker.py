@@ -36,7 +36,10 @@ def _lev(a: str, b: str) -> int:
 
 
 def suspicious_reason(url: str) -> str | None:
-    host = (urlparse(url).hostname or "").lower()
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:  # e.g. an unclosed IPv6 bracket
+        return "invalid URL"
     if not host:
         return "no host"
     try:

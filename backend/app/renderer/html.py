@@ -130,6 +130,14 @@ def slide_image(slide: Slide) -> dict | None:
     return {"url": url, "credit": None, "allow_overlay": True} if url else None
 
 
+async def offline(route) -> None:
+    """Playwright route handler: slides are local files, so Chromium never touches the network (SEC-1)."""
+    if route.request.url.startswith(("file:", "data:")):
+        await route.continue_()
+    else:
+        await route.abort()
+
+
 class HtmlRenderer:
     def __init__(self, theme: Theme = "clean",
                  account: str = "@whatsonkorea", as_of: date | None = None) -> None:
@@ -197,6 +205,7 @@ class HtmlRenderer:
         async with async_playwright() as p:
             browser = await p.chromium.launch()
             page = await browser.new_page(viewport={"width": 1080, "height": 1350}, device_scale_factor=1)
+            await page.route("**/*", offline)
             for slide in sorted(deck.slides, key=lambda s: s.index):
                 html_path = out_dir / f"slide-{slide.index:02d}.html"
                 html_path.write_text(self.html(deck, slide, by_id), encoding="utf-8")
