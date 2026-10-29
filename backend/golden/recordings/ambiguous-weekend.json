@@ -1,0 +1,213 @@
+{
+  "case_id": "ambiguous-weekend",
+  "set_version": 1,
+  "provenance": "demo-scenario",
+  "recorded_at": "2026-10-29T00:00:00Z",
+  "today": "2026-10-08",
+  "model": "",
+  "prompts_sha": "",
+  "prompt": "Something fun to do this weekend",
+  "status": "READY_FOR_REVIEW",
+  "briefs": [
+    {
+      "id": "ev-seongsu-stationery",
+      "title_en": "Seongsu Stationery Pop-up",
+      "title_ko": "성수 문구 팝업",
+      "category": "popup",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-18",
+      "venue_en": "Seongsu-dong",
+      "venue_ko": "성수동",
+      "address_ko": "서울 성동구 연무장길 (샘플)",
+      "nearest_station": "Seongsu Stn. (Line 2) Exit 4",
+      "price": "Free",
+      "booking": "Walk-in · waitlist kiosk",
+      "foreigner_tips": [
+        "Join the kiosk waitlist first, then explore nearby alleys"
+      ],
+      "why_go": "Korean stationery brands you won't find at the airport, plus free stickers.",
+      "sources": [
+        {
+          "url": "https://english.visitkorea.or.kr/",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "id": "ev-lantern-walk",
+      "title_en": "Seoul Lantern Walk",
+      "title_ko": "청계천 등불 산책",
+      "category": "festival",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-11",
+      "venue_en": "Cheonggyecheon Stream",
+      "venue_ko": "청계천",
+      "address_ko": "서울 중구 청계천로 1 (청계광장)",
+      "nearest_station": "Gwanghwamun Stn. (Line 5) Exit 5",
+      "price": "Free",
+      "booking": "No booking",
+      "foreigner_tips": [
+        "Start at Cheonggye Plaza at sunset",
+        "Weekday nights after 20:00 are quieter"
+      ],
+      "why_go": "A 1 km walk of hand-made lanterns along the stream, right in central Seoul.",
+      "sources": [
+        {
+          "url": "https://culture.seoul.go.kr/",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "id": "ev-modern-hanbok",
+      "title_en": "Modern Hanbok Exhibition",
+      "title_ko": "모던 한복 전시",
+      "category": "exhibition",
+      "start_date": "2026-10-01",
+      "end_date": "2026-11-30",
+      "venue_en": "Jongno-gu",
+      "venue_ko": "종로구",
+      "address_ko": "서울 종로구 (샘플)",
+      "nearest_station": "Anguk Stn. (Line 3) Exit 1",
+      "price": "₩5,000",
+      "booking": "Tickets on site or online",
+      "foreigner_tips": [
+        "Docent tour in English at 14:00"
+      ],
+      "why_go": "See how designers are reinventing hanbok for everyday wear.",
+      "sources": [
+        {
+          "url": "https://tickets.interpark.com/",
+          "kind": "ticketing"
+        }
+      ]
+    },
+    {
+      "id": "ev-kpop-giveaway",
+      "title_en": "Free K-pop Ticket Giveaway",
+      "title_ko": "무료 케이팝 티켓",
+      "category": "other",
+      "start_date": "2026-10-10",
+      "end_date": "2026-10-11",
+      "venue_en": "Online",
+      "sources": [
+        {
+          "url": "https://visitkorea-tickets.xyz/free",
+          "kind": "other"
+        }
+      ]
+    },
+    {
+      "id": "ev-hongdae-character",
+      "title_en": "Hongdae Character Pop-up",
+      "title_ko": "홍대 캐릭터 팝업",
+      "category": "popup",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-12",
+      "venue_en": "Hongdae",
+      "sources": [
+        {
+          "url": "https://popply.co.kr/popup-hongdae",
+          "kind": "sns"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "checks": [
+      {
+        "url": "https://english.visitkorea.or.kr/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://culture.seoul.go.kr/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://tickets.interpark.com/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://visitkorea-tickets.xyz/free",
+        "status": "suspicious",
+        "reason": "lookalike of visitkorea.or.kr"
+      },
+      {
+        "url": "https://popply.co.kr/popup-hongdae",
+        "status": "dead",
+        "http_code": 404
+      }
+    ],
+    "excluded_event_ids": [
+      "ev-kpop-giveaway",
+      "ev-hongdae-character"
+    ]
+  },
+  "deck": {
+    "job_id": "sample-good",
+    "title": "This weekend in Seoul: 3 picks worth it",
+    "caption": "3 things foreigners can actually enjoy in Seoul this weekend. Free or cheap, English-friendly, close to the subway. Save this before Friday! Details & links in bio.\n#seoul #thingstodoinseoul #seoulpopup #koreatravel #whatsonkorea",
+    "slides": [
+      {
+        "index": 0,
+        "layout": "cover",
+        "heading": "This weekend in Seoul",
+        "body": "3 picks foreigners can actually enjoy · sample data"
+      },
+      {
+        "index": 1,
+        "layout": "event",
+        "heading": "Seongsu Stationery Pop-up",
+        "body": "",
+        "event_id": "ev-seongsu-stationery"
+      },
+      {
+        "index": 2,
+        "layout": "event",
+        "heading": "Seoul Lantern Walk",
+        "body": "",
+        "event_id": "ev-lantern-walk"
+      },
+      {
+        "index": 3,
+        "layout": "event",
+        "heading": "Modern Hanbok Exhibition",
+        "body": "",
+        "event_id": "ev-modern-hanbok"
+      },
+      {
+        "index": 4,
+        "layout": "tips",
+        "heading": "How locals do it",
+        "body": "Pop-ups: join the waitlist first, then wander until you're called\nLanterns: arrive at sunset and start from Cheonggye Plaza\nCarry a little cash for street-food stalls\nLast trains leave central Seoul around 23:30"
+      },
+      {
+        "index": 5,
+        "layout": "map",
+        "heading": "Start at Cheonggye Plaza",
+        "body": "All three spots are within 20 minutes by subway.",
+        "event_id": "ev-lantern-walk"
+      },
+      {
+        "index": 6,
+        "layout": "cta",
+        "heading": "Save this for Friday",
+        "body": "Tag a friend you're going with."
+      }
+    ]
+  },
+  "issues": [
+    {
+      "severity": "warn",
+      "category": "tone",
+      "slide_index": 4,
+      "message": "\"How locals do it\" is fine; avoid \"must-visit\" style hype in the caption."
+    }
+  ],
+  "log": [
+    "built from demo/scenarios/good (agent outputs written by hand for the demo)"
+  ]
+}

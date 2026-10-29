@@ -1,0 +1,82 @@
+name: Golden set
+# HARDENING AGT-3: when agent prompts, the orchestrator or model settings change, check the golden set.
+# Replay only: it re-checks the recorded outputs in backend/golden/recordings (free, no network, no secrets).
+# A recording made with older prompts or another model is reported STALE (a warning annotation): re-record it
+# locally with `cd backend && uv run python -m app.golden --live --case <id> --record` and commit the JSON.
+# Add `--strict` below to make stale recordings fail the check instead.
+#
+# Live mode in CI (not enabled; the repo has no Anthropic key): add a repository secret ANTHROPIC_API_KEY, then
+# add a job like the one below. It costs tokens on every run, so keep it on workflow_dispatch or a schedule.
+#   live:
+#     if: github.event_name == 'workflow_dispatch'
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 60
+#     defaults: {run: {working-directory: backend}}
+#     env: {ANTHROPIC_API_KEY: '${{ secrets.ANTHROPIC_API_KEY }}', AGENT_TIMEOUT_S: '600'}
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with: {node-version: '22'}
+#       - run: npm install -g @anthropic-ai/claude-code
+#       - uses: astral-sh/setup-uv@v6
+#         with: {python-version: '3.13'}
+#       - run: uv sync --frozen && uv run playwright install --with-deps chromium
+#       - run: uv run python -m app.golden --live --json golden-live.json
+#       - uses: actions/upload-artifact@v4
+#         with: {name: golden-live, path: backend/golden-live.json}
+on:
+  push:
+    branches: [main]
+    paths: ['agent/**',
+            'backend/app/pipeline/**',
+            'backend/app/config.py',
+            'backend/.env.example',
+            'backend/app/schemas.py',
+            'backend/app/golden/**',
+            'backend/golden/**',
+            'backend/app/services/link_checker.py',
+            'backend/app/services/photos.py',
+            'backend/app/services/visual_qa.py',
+            'backend/app/renderer/stock/catalog.json',
+            '.github/workflows/golden-set.yml']
+  pull_request:
+    paths: ['agent/**',
+            'backend/app/pipeline/**',
+            'backend/app/config.py',
+            'backend/.env.example',
+            'backend/app/schemas.py',
+            'backend/app/golden/**',
+            'backend/golden/**',
+            'backend/app/services/link_checker.py',
+            'backend/app/services/photos.py',
+            'backend/app/services/visual_qa.py',
+            'backend/app/renderer/stock/catalog.json',
+            '.github/workflows/golden-set.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DEMO_MODE: fixture
+      PUBLISH_MODE: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
+      - run: uv run python -m app.golden -v --json golden-report.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-report
+          path: backend/golden-report.json
+          if-no-files-found: ignore

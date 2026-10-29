@@ -99,6 +99,15 @@ cd backend && uv run python -m app.renderer.preview  # renders demo deck → bac
 cd apps/web && npx tsc --noEmit && pnpm lint
 ```
 
+**Golden set** (HARDENING AGT-3): fixed requests in `backend/golden/cases.json` (bump `version` when a case changes), checked for schema, slide structure, ≤ 5 hashtags, valid links, no invented facts, relevant photos and the case's expectations. Checks marked `[llm]` read the recorded reviewer verdict; everything else is a deterministic rule (`backend/app/golden/checks.py`).
+
+```bash
+cd backend && uv run python -m app.golden            # replay recordings: free, deterministic, what CI runs
+cd backend && uv run python -m app.golden --live --case seongsu-popups --record   # real agents, costs tokens
+```
+
+Run it after editing `agent/**`, the orchestrator or `AGENT_MODEL`. Replay re-checks recorded outputs, so a prompt or model change marks recordings STALE: re-record the affected cases with `--live --record` (one case ≈ three `claude -p` stages) and commit the JSON. Live runs keep slides and their job DB under `--out` (default `backend/.data/golden`), never publish, and don't appear in the Admin. CI (`.github/workflows/golden-set.yml`) runs replay; live CI needs an `ANTHROPIC_API_KEY` secret (steps in that file).
+
 ## Rules
 
 - Never set `PUBLISH_MODE=graph` or approve a job unless a human explicitly asked. It posts publicly.

@@ -1,0 +1,18 @@
+{
+  "case_id": "nothing-to-find",
+  "set_version": 1,
+  "provenance": "synthetic",
+  "recorded_at": "2026-10-29T00:00:00Z",
+  "today": "2026-10-29",
+  "model": "",
+  "prompts_sha": "",
+  "prompt": "Underwater K-pop concerts on Jeju this weekend",
+  "status": "FAILED",
+  "error": "Research failed: the researcher found no events for this request — try a broader one (another city or date range)",
+  "briefs": [],
+  "issues": [],
+  "log": [
+    "research: 0 EventBrief validated (schema ok)",
+    "synthetic: what the orchestrator records when the researcher returns no events"
+  ]
+}
