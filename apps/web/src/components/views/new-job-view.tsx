@@ -50,7 +50,7 @@ export function NewJobView() {
       .catch(() => {});
   }, [last]);
 
-  const { live, stale } = useLiveJob<Job>(job, setJob, api.jobEventsUrl, api.getJob);
+  const { live, stale } = useLiveJob<Job>(job, setJob, api.openJobEvents, api.getJob);
   const busy = pending || live;
 
   const run = (text = prompt) =>

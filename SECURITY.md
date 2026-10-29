@@ -12,7 +12,7 @@ Include the affected commit, execution mode, OpenShell version/driver, a minimal
 
 - Keep Instagram and image-hosting credentials on the backend.
 - Start with `PUBLISH_MODE=mock`; `graph` can publish publicly after approval.
-- Use a strong `ADMIN_TOKEN` and explicit `CORS_ORIGINS` for an externally reachable backend.
+- Point `SUPABASE_URL` at your Supabase project (every API route except `/health` needs a signed-in session) and set explicit `CORS_ORIGINS` for an externally reachable backend.
 - The shared-code gate is not a multi-user permission system. Do not expose a shared live-publishing account as an unrestricted public demo.
 - `AGENT_RUNNER=local` is not sandboxed. Fixture or UI-mock results do not prove OpenShell enforcement.
 - Editorial warnings are mostly advisory. Review them before approving; credential-like output is a hard stop.

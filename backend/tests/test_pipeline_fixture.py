@@ -96,11 +96,8 @@ async def test_quick_job_fails_when_every_event_loses_its_sources(monkeypatch):
     assert states["Verify links"] == "failed" and states["Outline & copy"] == "pending"
 
 
-def test_unknown_scenario_is_rejected_by_the_api():
-    from fastapi.testclient import TestClient
-
-    from app.main import app
-    r = TestClient(app).post("/jobs", json={"prompt": "hello there", "scenario": "../etc"})
+def test_unknown_scenario_is_rejected_by_the_api(client):
+    r = client.post("/jobs", json={"prompt": "hello there", "scenario": "../etc"})
     assert r.status_code == 422
 
 
@@ -163,18 +160,14 @@ def test_parse_dates(text, expected):
     assert brainstorms.parse_dates(text, date(2026, 10, 7)) == expected
 
 
-def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):
-    from fastapi.testclient import TestClient
-
+def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch, client):
     from app.config import settings
-    from app.main import app
     calls = []
 
     async def fake_publish(job_id, caption, mode):
         calls.append(mode)
     monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
     monkeypatch.setattr(settings, "publish_mode", "mock")
-    client = TestClient(app)
     for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
         job = orchestrator.new_job(secrets.token_hex(3), "approve test")
         job.status = JobStatus.READY_FOR_REVIEW
@@ -184,29 +177,9 @@ def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):
     assert calls == ["mock", "mock"]
 
 
-def test_admin_token_guards_the_api(monkeypatch):
-    from fastapi.testclient import TestClient
-
+def test_live_server_starts_brainstorm_with_an_empty_board(monkeypatch, client):
     from app.config import settings
-    from app.main import app
-    monkeypatch.setattr(settings, "admin_token", "s3cret")
-    c = TestClient(app)
-    assert c.get("/health").status_code == 200
-    assert c.get("/jobs").status_code == 401
-    assert c.get("/jobs", headers={"Authorization": "Bearer wrong"}).status_code == 401
-    assert c.get("/jobs", headers={"Authorization": "Bearer s3cret"}).status_code == 200
-    assert c.post("/reset").status_code == 401
-    assert c.get("/jobs?token=s3cret").status_code == 401  # query token only for SSE
-    r = c.get("/jobs", headers={"Origin": "http://localhost:3000"})
-    assert r.status_code == 401 and r.headers.get("access-control-allow-origin") == "http://localhost:3000"
-
-
-def test_live_server_starts_brainstorm_with_an_empty_board(monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from app.config import settings
-    from app.main import app
-    c = TestClient(app)
+    c = client
     monkeypatch.setattr(settings, "demo_mode", "live")
     live = c.post("/brainstorms", json={"sample": True}).json()
     assert live["messages"] == [] and live["facts"] == [] and live["angles"] == []

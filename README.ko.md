@@ -94,7 +94,7 @@ UI만 먼저 살펴보려면 `apps/web`에서 `pnpm install --frozen-lockfile` �
 | OpenShell에서 실행 | `DEMO_MODE=live`, `AGENT_RUNNER=openshell` | 게시 모드는 별도 설정 |
 | 실제 Instagram 게시 | `PUBLISH_MODE=graph` | 계정 인증 정보와 운영자 승인 필요 |
 
-`dryrun`은 이미지 업로드와 Instagram 컨테이너 생성까지 수행하지만 최종 게시하지는 않습니다. 외부에서 접근할 수 있는 백엔드에는 `ADMIN_TOKEN`과 허용할 `CORS_ORIGINS`를 설정하세요. 현장 접근 코드와 임시 터널 주소는 공개 저장소에 넣지 않습니다.
+`dryrun`은 이미지 업로드와 Instagram 컨테이너 생성까지 수행하지만 최종 게시하지는 않습니다. API는 `/health`를 제외한 모든 경로에 Supabase Auth 로그인 세션을 요구합니다(`SUPABASE_URL`). 외부에서 접근할 수 있는 백엔드에는 허용할 `CORS_ORIGINS`를 설정하세요. 현장 접근 코드와 임시 터널 주소는 공개 저장소에 넣지 않습니다.
 
 ## 개발과 기여
 

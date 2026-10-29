@@ -94,7 +94,7 @@ Use `mock` until local checks pass. `dryrun` creates remote image containers and
 
 The Admin can run on Railway while FastAPI runs on Brev or another suitable host. Set `NEXT_PUBLIC_API_URL` before building the Admin. Configure the backend's `CORS_ORIGINS` as a JSON array of exact allowed origins.
 
-Set a strong `ADMIN_TOKEN` when the backend is externally reachable. Do not publish that value in a README, QR image, screenshot or demo URL. The Admin access gate stores the entered code in the browser. It is a shared access gate, not a multi-user authorization system. In the current implementation, SSE URLs carry a token query parameter; consider URL logging when choosing your deployment setup.
+Sign-in uses Supabase Auth. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (the publishable key, never a secret key) for the Admin build, and `SUPABASE_URL` for the backend; every API route except `/health` then needs a signed-in session, sent as a Bearer header (live updates included, so no token appears in URLs). Add the Admin's `/auth/callback` URL to the Supabase project's redirect URLs so confirmation and password-reset emails work.
 
 The [Railway configuration](../apps/web/railway.json) is in the web app. Temporary tunnel addresses used at the hackathon are intentionally not permanent project links. The stable [demo information page](https://juyoung.site/nemo-k-cards/try/) should explain which experience is available.
 
@@ -103,7 +103,7 @@ The [Railway configuration](../apps/web/railway.json) is in the web app. Tempora
 | Symptom | Check |
 |---|---|
 | Yellow Mock API box | Set `NEXT_PUBLIC_API_URL`; restart the dev server or rebuild the deployment. |
-| Admin cannot reach the API | Backend URL, `/health`, CORS origin and access code. |
+| Admin cannot reach the API | Backend URL, `/health`, CORS origin, and that the Admin and backend point at the same Supabase project. |
 | Chromium executable missing | Run `uv run playwright install chromium` from `backend/`. |
 | Provider or sandbox fails | OpenShell gateway status, image, provider registration and compatible driver. |
 | Instagram cannot fetch images | Public JPEG URLs reachable without credentials. |

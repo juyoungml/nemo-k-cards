@@ -48,12 +48,14 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `IMAGE_HOST` | `local` \| `supabase` | Instagram needs public URLs; supabase uploads slides to the public `slides` bucket |
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
 | `DATABASE_URL` | `postgresql://…` | default is the local Supabase database (`127.0.0.1:54322/postgres`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL`'s server (default: the same local server) |
+| `SUPABASE_URL` | e.g. `http://127.0.0.1:54321` | Supabase project for sign-in (and slide hosting with `IMAGE_HOST=supabase`). Every route except `/health` needs a session from it; empty = every route 401 |
+| `SUPABASE_JWT_SECRET` | secret | only for projects still signing with the legacy HS256 secret. The local CLI and new cloud projects use asymmetric keys from `SUPABASE_URL/auth/v1/.well-known/jwks.json` (cached 10 min) |
 
 Always use `--reload`. Without it, a long-running API keeps old Python while Jinja templates load fresh from disk, and renders fail (`'slide_class' is undefined`).
 
 **Before restarting the API**, check that nothing is in flight. Restarting kills running agents and publishes:
 ```bash
-curl -s localhost:8000/jobs | python3 -c "import json,sys;print([(j['id'],j['status']) for j in json.load(sys.stdin) if j['status'] in ('QUEUED','RESEARCHING','VERIFYING','WRITING','RENDERING','QA','REVIEWING','PUBLISHING')])"
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8000/jobs | python3 -c "import json,sys;print([(j['id'],j['status']) for j in json.load(sys.stdin) if j['status'] in ('QUEUED','RESEARCHING','VERIFYING','WRITING','RENDERING','QA','REVIEWING','PUBLISHING')])"
 ```
 
 ## Run the Admin UI (port 3000)
@@ -63,15 +65,36 @@ cd apps/web && pnpm install
 NEXT_PUBLIC_API_URL=http://localhost:8000 pnpm dev --port 3000
 ```
 
-Without `NEXT_PUBLIC_API_URL` the Admin silently uses its in-memory mock API (a yellow "Mock API" box appears in the sidebar). The value is read at startup, so restart `pnpm dev` after changing it. CORS allows `localhost:3000`.
+Without `NEXT_PUBLIC_API_URL` the Admin silently uses its in-memory mock API (a yellow "Mock API" box appears in the sidebar) and needs no sign-in. The value is read at startup, so restart `pnpm dev` after changing it. CORS allows `localhost:3000`.
+
+## Sign-in (Supabase Auth)
+
+With the real API, the Admin requires sign-in and the API rejects every route except `/health` without a valid Supabase session (401). Signing up creates an Organization and makes you its Admin (`POST /orgs`, called by the Admin; `GET /me` shows user, Organization and Role). Local setup:
+
+```bash
+supabase start -x realtime,storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+supabase status            # API URL (54321), Publishable key, Mailpit URL (54324)
+cd apps/web && NEXT_PUBLIC_API_URL=http://localhost:8000 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 \
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<sb_publishable_…> pnpm dev --port 3000
+```
+
+Backend: `SUPABASE_URL=http://127.0.0.1:54321` in `backend/.env`. Then open http://localhost:3000/sign-up. Local sign-up needs no email confirmation (`enable_confirmations = false` in `supabase/config.toml`); password-reset and confirmation emails land in Mailpit at http://127.0.0.1:54324, and their links must be opened in the browser that asked for them. A token for curl:
+
+```bash
+TOKEN=$(curl -s "http://127.0.0.1:54321/auth/v1/token?grant_type=password" -H "apikey: <publishable key>" \
+  -H 'content-type: application/json' -d '{"email":"you@example.com","password":"…"}' | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/me
+```
+
+`/assets/*` (rendered slides) stays public because Instagram fetches it anonymously. Tests sign their own tokens with a throwaway key (`backend/tests/conftest.py`), so they need no Supabase Auth.
 
 ## Run the agents
 
 The API runs them. You normally start a job, not an agent:
 
 ```bash
-curl -s -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{"prompt":"Seongsu pop-ups this weekend"}'
-curl -N localhost:8000/jobs/<id>/events        # SSE: full Job snapshots
+curl -s -X POST localhost:8000/jobs -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"prompt":"Seongsu pop-ups this weekend"}'
+curl -N -H "Authorization: Bearer $TOKEN" localhost:8000/jobs/<id>/events   # SSE: full Job snapshots ($TOKEN: see Sign-in)
 ```
 
 Pipeline: research → verify (host link check) → copy → render (Jinja2 + Playwright) → visual QA → review → `READY_FOR_REVIEW` → human approves in the Admin → publish. Nothing is auto-rejected; blocking issues are shown and the operator decides.

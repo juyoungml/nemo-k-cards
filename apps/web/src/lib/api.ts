@@ -2,7 +2,10 @@
 // NEXT_PUBLIC_API_URL unset → the in-app mock backend at /api/mock (src/mock/server.ts).
 // Set it to the FastAPI URL (e.g. http://localhost:8000) to run against the real backend.
 
-import type { InstagramAccount, Brainstorm, Job, Metric, PolicyEvent, Scenario } from "./types";
+import { EventSource } from "eventsource";
+
+import { accessToken, isAuthPath, reloadTo } from "./supabase";
+import type { InstagramAccount, Brainstorm, Job, Me, Metric, Org, PolicyEvent, Scenario } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
 export const IS_MOCK = !process.env.NEXT_PUBLIC_API_URL;
@@ -10,25 +13,18 @@ export const IS_MOCK = !process.env.NEXT_PUBLIC_API_URL;
 /** Absolute URL for a backend asset path such as /assets/{job}/slide-00.jpg. */
 export const assetUrl = (path: string) => (path.startsWith("http") ? path : `${API_URL}${path}`);
 
-// Access code for a backend started with ADMIN_TOKEN; kept in this browser only (see AccessGate).
-const TOKEN_KEY = "wok-admin-token";
-export const getAdminToken = () => {
-  try {
-    return typeof window === "undefined" ? "" : (localStorage.getItem(TOKEN_KEY) ?? "");
-  } catch {
-    return "";
-  }
-};
-export const setAdminToken = (token: string) => {
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-  } catch {}
-};
-export const AUTH_REQUIRED_EVENT = "wok-auth-required";
+/** Where the Admin sends someone the API turned away: signed out → /sign-in, no Organization yet → /welcome. */
+function leaveFor(status: number, detail: unknown) {
+  if (typeof window === "undefined" || IS_MOCK) return;
+  const here = window.location.pathname;
+  if (isAuthPath(here) || here === "/welcome") return;
+  if (status === 401) reloadTo(`/sign-in?next=${encodeURIComponent(here + window.location.search)}`);
+  else if (status === 403 && typeof detail === "string" && detail.startsWith("no Organization")) reloadTo("/welcome");
+}
 export const UNREACHABLE = "Can't reach the backend";
 
 async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
-  const token = IS_MOCK ? "" : getAdminToken();
+  const token = IS_MOCK ? "" : await accessToken();
   const headers: Record<string, string> = {};
   if (init?.json !== undefined) headers["content-type"] = "application/json";
   if (token) headers.authorization = `Bearer ${token}`;
@@ -44,9 +40,9 @@ async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Pr
     // fetch only throws on network failure (server down, CORS, offline), never on HTTP errors.
     throw new Error(`${UNREACHABLE} at ${API_URL}. Is the API running?`);
   }
-  if (res.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
   if (!res.ok) {
     const detail = await res.json().then((b) => b.detail).catch(() => res.statusText);
+    leaveFor(res.status, detail);
     throw new Error(`${res.status} ${detail}`);
   }
   return res.json() as Promise<T>;
@@ -59,10 +55,21 @@ export const api = {
   createJob: (prompt: string, scenario?: Scenario) => req<Job>("/jobs", { method: "POST", json: { prompt, scenario } }),
   approveJob: (id: string, caption: string) => req<Job>(`/jobs/${id}/approve`, { method: "POST", json: { caption } }),
   rejectJob: (id: string, reason: string) => req<Job>(`/jobs/${id}/reject`, { method: "POST", json: { reason } }),
-  jobEventsUrl: (id: string) => {
-    const token = IS_MOCK ? "" : getAdminToken();
-    return `${API_URL}/jobs/${id}/events${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-  },
+  /**
+   * Live Job snapshots (SSE). Read with fetch rather than the browser's EventSource so the session token
+   * travels in the Authorization header, never in a URL that proxies and tunnels log. Each (re)connect asks
+   * for a fresh token; the API closes the stream when the token it was opened with expires.
+   */
+  openJobEvents: (id: string) =>
+    new EventSource(new URL(`${API_URL}/jobs/${id}/events`, window.location.href), {
+      fetch: async (input, init) => {
+        const token = IS_MOCK ? "" : await accessToken();
+        return fetch(input, { ...init, headers: { ...init.headers, ...(token ? { authorization: `Bearer ${token}` } : {}) } });
+      },
+    }),
+
+  me: () => req<Me>("/me"),
+  createOrg: (name: string) => req<Org>("/orgs", { method: "POST", json: { name } }),
 
   getMetrics: () => req<Metric[]>("/metrics"),
   getInstagramAccounts: () => req<InstagramAccount[]>("/instagram-accounts"),

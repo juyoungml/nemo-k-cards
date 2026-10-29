@@ -28,18 +28,21 @@ class Settings(BaseSettings):
     theme: Literal["bold", "clean", "pop"] = "clean"
     # Admin origins allowed to call this API from the browser (e.g. a tunnel URL for a shared test).
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
-    # When set, every API call except /health and /assets needs `Authorization: Bearer <ADMIN_TOKEN>`
-    # (SSE: `?token=`). Set it whenever the API is reachable from outside this machine.
-    admin_token: str = ""
 
     # Instagram Graph API — host-only secrets, never forwarded to the sandbox.
     ig_user_id: str = ""
     ig_access_token: str = ""
     public_asset_base_url: str = ""
 
+    # Supabase project: sign-in (every route except /health needs its access token) and, with
+    # IMAGE_HOST=supabase, slide hosting. Local: `supabase start` → http://127.0.0.1:54321. Empty = all 401.
+    supabase_url: str = ""
+    # Only for projects still signing tokens with the legacy shared secret (HS256). New projects and the
+    # local CLI sign with asymmetric keys published as JWKS at SUPABASE_URL/auth/v1/.well-known/jwks.json.
+    supabase_jwt_secret: str = ""
+
     # Public image hosting for Instagram (host-only secrets)
     image_host: Literal["supabase", "local"] = "local"
-    supabase_url: str = ""
     supabase_service_key: str = ""
     supabase_bucket: str = "slides"
 

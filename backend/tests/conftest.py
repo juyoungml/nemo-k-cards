@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import psycopg
+import pytest
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 # Before app.config is imported: keep test jobs/slides out of backend/.data and never call real agents.
@@ -38,9 +39,10 @@ except Exception:
 # Tests must never reach real accounts, even on a machine whose backend/.env holds live credentials:
 # explicit env vars win over .env in pydantic-settings, so blank every outward-facing secret and mode.
 for key, value in {
-    "PUBLISH_MODE": "mock", "IMAGE_HOST": "local", "AGENT_RUNNER": "local", "ADMIN_TOKEN": "",
+    "PUBLISH_MODE": "mock", "IMAGE_HOST": "local", "AGENT_RUNNER": "local",
     "IG_USER_ID": "", "IG_ACCESS_TOKEN": "", "PUBLIC_ASSET_BASE_URL": "",
-    "SUPABASE_URL": "", "SUPABASE_SERVICE_KEY": "",
+    # Sign-in is checked against a fake Supabase whose signing key exists only in this process (see `auth_keys`).
+    "SUPABASE_URL": "http://supabase.test", "SUPABASE_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": "",
     "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_OAUTH_TOKEN": "",
 }.items():
     os.environ[key] = value
@@ -60,3 +62,77 @@ def pytest_sessionfinish(session, exitstatus):
     from app import store
     store.close()
     _drop_test_db()
+
+
+# ---------------------------------------------------------------- sign-in
+
+class AuthKeys:
+    """A local stand-in for Supabase Auth: an ES256 key whose public half is served as the JWKS (no network)."""
+
+    def __init__(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from jwt.algorithms import ECAlgorithm
+
+        self.private = ec.generate_private_key(ec.SECP256R1())
+        self.kid = secrets.token_hex(8)
+        self.jwks = {"keys": [{**ECAlgorithm.to_jwk(self.private.public_key(), as_dict=True),
+                               "kid": self.kid, "alg": "ES256", "use": "sig"}]}
+        self.fetches = 0
+
+    def fetch(self, url: str) -> dict:
+        assert url == "http://supabase.test/auth/v1/.well-known/jwks.json", url
+        self.fetches += 1
+        return self.jwks
+
+    def token(self, user_id=None, *, email="", ttl=3600, key=None, kid=None, alg="ES256", **claims) -> str:
+        import time
+        import uuid
+
+        import jwt
+
+        now = int(time.time())
+        body = {"iss": "http://supabase.test/auth/v1", "aud": "authenticated", "role": "authenticated",
+                "sub": str(user_id or uuid.uuid4()), "email": email, "iat": now, "exp": now + ttl,
+                "is_anonymous": False, **claims}
+        return jwt.encode({k: v for k, v in body.items() if v is not None}, key or self.private, algorithm=alg,
+                          headers={"kid": kid or self.kid})
+
+
+@pytest.fixture(scope="session")
+def auth_keys() -> AuthKeys:
+    return AuthKeys()
+
+
+@pytest.fixture(autouse=True)
+def _fake_supabase(auth_keys, monkeypatch):
+    from app import auth
+    from app.config import settings
+
+    ident = auth.SupabaseIdentity(settings.supabase_url, fetch=auth_keys.fetch)
+    monkeypatch.setattr(auth, "_identity", ((settings.supabase_url, settings.supabase_jwt_secret), ident))
+
+
+@pytest.fixture
+def sign_in(auth_keys):
+    """`sign_in(org="Name")` → a TestClient for a new person who is Admin of a new Organization;
+    `sign_in(org=None)` → signed in, no Organization yet."""
+    import uuid
+
+    from fastapi.testclient import TestClient
+
+    from app import orgs
+    from app.main import app
+
+    def make(org: str | None = "Test Org", user_id=None) -> TestClient:
+        user_id = user_id or uuid.uuid4()
+        if org:
+            orgs.create_org(user_id, org)
+        token = auth_keys.token(user_id, email=f"{user_id.hex[:8]}@example.com")
+        return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    return make
+
+
+@pytest.fixture
+def client(sign_in):
+    """A TestClient signed in as the Admin of a fresh Organization."""
+    return sign_in()

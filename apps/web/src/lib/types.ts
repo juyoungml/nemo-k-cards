@@ -181,3 +181,19 @@ export interface BrainstormUpdate {
   angles?: Angle[] | null;
   outline?: OutlineItem[] | null;
 }
+
+// ---------------------------------------------------------------- sign-in (backend/app/orgs.py)
+
+export type Role = "viewer" | "editor" | "approver" | "admin";
+
+export interface Org {
+  id: string;
+  name: string;
+  role: Role;
+}
+
+export interface Me {
+  user: { id: string; email: string };
+  org: Org | null; // the Organization this session acts for; null until one is created
+  orgs: Org[];
+}

@@ -5,10 +5,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from app import store
-from app.main import app
 from app.schemas import Brainstorm, Job, JobStatus, PolicyEvent
 
 
@@ -89,8 +86,7 @@ def test_bad_row_is_skipped():
     assert bad.id not in [j.id for j in store.list_jobs()]
 
 
-def test_jobs_limit_is_bounded():
-    client = TestClient(app)
+def test_jobs_limit_is_bounded(client):
     assert client.get("/jobs?limit=0").status_code == 422
     assert client.get("/jobs?limit=501").status_code == 422
     assert client.get("/jobs?limit=500").status_code == 200
