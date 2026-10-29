@@ -42,14 +42,14 @@ Fastcampus × NVIDIA Agentic AI Hackathon 2026에서 시작한 초기 프로젝�
 
 ## 바로 실행하기
 
-Python 3.12 이상, uv, Node.js 22, pnpm 10, Docker(로컬 Postgres)가 필요합니다. 카드 이미지는 Playwright Chromium으로 만듭니다.
+Python 3.12 이상, uv, Node.js 22, pnpm 10, 로컬 DB용 Docker와 [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)가 필요합니다. 카드 이미지는 Playwright Chromium으로 만듭니다.
 
 ```bash
 git clone https://github.com/juyoungml/nemo-k-cards.git
 cd nemo-k-cards/backend
 uv sync --frozen
 uv run playwright install chromium
-docker run -d --name wok-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=wok -p 54320:5432 postgres:17-alpine
+supabase db start   # 로컬 Postgres + supabase/migrations 적용 (전체 스택은 supabase start)
 DEMO_MODE=fixture PUBLISH_MODE=mock uv run uvicorn app.main:app --port 8000 --reload --reload-dir app
 ```
 

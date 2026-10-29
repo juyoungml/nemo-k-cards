@@ -61,14 +61,14 @@ For a UI-only preview, run `pnpm install --frozen-lockfile` and `pnpm dev` in `a
 
 ### 1. Run the backend with sample data
 
-Requires **Python 3.12+**, [uv](https://docs.astral.sh/uv/), **Node.js 22**, **pnpm 10** and Docker (for a local Postgres). Playwright Chromium is needed for card rendering.
+Requires **Python 3.12+**, [uv](https://docs.astral.sh/uv/), **Node.js 22**, **pnpm 10**, plus Docker and the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) for the local database. Playwright Chromium is needed for card rendering.
 
 ```bash
 git clone https://github.com/juyoungml/nemo-k-cards.git
 cd nemo-k-cards/backend
 uv sync --frozen
 uv run playwright install chromium
-docker run -d --name wok-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=wok -p 54320:5432 postgres:17-alpine
+supabase db start   # local Postgres with supabase/migrations applied (full stack: supabase start)
 DEMO_MODE=fixture PUBLISH_MODE=mock uv run uvicorn app.main:app --port 8000 --reload --reload-dir app
 ```
 

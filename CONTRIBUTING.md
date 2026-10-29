@@ -26,7 +26,7 @@ Follow [Getting started](docs/GETTING_STARTED.md) using fixture data and mock pu
 cd backend
 uv sync --frozen
 uv run playwright install chromium
-docker run -d --name wok-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=wok -p 54320:5432 postgres:17-alpine
+supabase db start   # local Postgres with supabase/migrations applied
 uv run pytest -q
 ```
 

@@ -205,6 +205,8 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 ### REL-2 Storage: SQLite with one shared connection, no migrations, no backups
 **P1** *(verified: `store.py:13,29`)*
 
+**Update (2026-10-29):** storage moved to Postgres (Supabase) with a connection pool and versioned migrations in `supabase/migrations/` (#8). Backups and retention are still open.
+
 **Robust fix:** Postgres for production (or, while it's one machine, SQLite in WAL mode with one connection per thread). Schema migrations (Alembic), nightly backups with a tested restore, and a retention policy for job data and rendered assets.
 
 ### REL-3 Outbound calls lack consistent timeouts and retries
