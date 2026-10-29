@@ -15,6 +15,8 @@ import type {
   Job,
   JobStatus,
   LogLine,
+  Material,
+  MaterialRef,
   Metric,
   PipelineStep,
   PolicyEvent,
@@ -60,12 +62,14 @@ interface MockJob {
   /** Brainstorm jobs bring their own facts/outline and skip Research. */
   override?: { briefs: EventBrief[]; deck: Omit<CardDeck, "job_id"> };
   titleOverride?: string;
+  material?: MaterialRef[];
   decision?: { kind: "approve" | "reject"; at: number; caption?: string; reason?: string };
 }
 
 interface Store {
   jobs: Map<string, MockJob>;
   brainstorms: Map<string, Brainstorm>;
+  materials: Map<string, Material>;
 }
 
 const g = globalThis as unknown as { __wokMock?: Store };
@@ -80,7 +84,7 @@ function seed(): Store {
     { id: "c3d810", prompt: "3 exhibitions worth visiting this week", scenario: "good", source: "quick", createdAt: now - 46 * H, titleOverride: "3 exhibitions worth visiting this week", decision: { kind: "approve", at: now - 45 * H } },
     { id: "9be7f3", prompt: "Hidden local events beyond the checklist", scenario: "good", source: "quick", createdAt: now - 70 * H, titleOverride: "Hidden local events beyond the checklist", decision: { kind: "approve", at: now - 69 * H } },
   ];
-  return { jobs: new Map(jobs.map((j) => [j.id, j])), brainstorms: new Map() };
+  return { jobs: new Map(jobs.map((j) => [j.id, j])), brainstorms: new Map(), materials: new Map() };
 }
 
 export const store = () => (g.__wokMock ??= seed());
@@ -183,6 +187,7 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     published_url: status === "PUBLISHED" ? `https://www.instagram.com/p/MOCK${job.id.toUpperCase()}/` : null,
     pipeline,
     log,
+    material: job.material ?? [],
   };
 }
 
@@ -194,8 +199,30 @@ export const getJob = (id: string) => {
   return j && snapshot(j);
 };
 
-export function createJob(prompt: string, scenario: Scenario = "good"): Job {
-  const job: MockJob = { id: newId(), prompt, scenario, source: "quick", createdAt: Date.now() };
+// ---------------------------------------------------------------- source material (#20)
+
+const refOf = (m: Material): MaterialRef => ({
+  id: m.id, kind: m.kind, name: m.name, url: m.url, content_type: m.content_type, size: m.size, pages: m.pages,
+  chars: m.chars, truncated: m.truncated, image: m.image,
+});
+
+/** Like the API: extracted text is kept (here the file isn't parsed; the mock records a placeholder). */
+export function addMaterial(m: Omit<Material, "id" | "created_at" | "chars" | "truncated" | "image"> & { image?: boolean }): MaterialRef {
+  const full: Material = { ...m, id: `m-${newId()}${newId()}`.slice(0, 18), created_at: new Date().toISOString(), chars: m.text.length, truncated: false, image: m.image ?? false };
+  store().materials.set(full.id, full);
+  return refOf(full);
+}
+
+export const getMaterial = (id: string) => store().materials.get(id);
+
+/** Refs for ids sent with a Job or message; undefined if any is unknown (the API answers 422). */
+export function materialRefs(ids: string[]): MaterialRef[] | undefined {
+  const found = [...new Set(ids)].map((id) => store().materials.get(id));
+  return found.every(Boolean) ? found.map((m) => refOf(m!)) : undefined;
+}
+
+export function createJob(prompt: string, scenario: Scenario = "good", material: MaterialRef[] = []): Job {
+  const job: MockJob = { id: newId(), prompt, scenario, source: "quick", createdAt: Date.now(), material };
   store().jobs.set(job.id, job);
   return snapshot(job);
 }
@@ -346,13 +373,17 @@ function mockPlanner(d: Brainstorm, text: string, urls: string[]): BrainstormUpd
   return { reply: "메모 반영했어요. 앵글을 바꾸고 싶으면 '다른 앵글', 팁을 넣고 싶으면 '팁 추가'라고 말해 주세요. (mock planner)" };
 }
 
-export function sendMessage(id: string, text: string, urls: string[]) {
+export function sendMessage(id: string, text: string, urls: string[], attached: MaterialRef[] = []) {
   const d = store().brainstorms.get(id);
   if (!d) return undefined;
-  const update = mockPlanner(d, text, urls);
+  const update: BrainstormUpdate = attached.length
+    ? { reply: `자료 ${attached.length}개 받았어요 ✓ 이 자료를 1차 출처로 쓰고, 빠진 정보(가는 길, 외국인 가격 등)만 따로 확인할게요. (mock planner)` }
+    : mockPlanner(d, text, urls);
+  const known = new Set((d.material ?? []).map((m) => m.id));
   const next: Brainstorm = {
     ...d,
-    messages: [...d.messages, { role: "user", text, urls }, { role: "agent", text: update.reply }],
+    material: [...(d.material ?? []), ...attached.filter((m) => !known.has(m.id))],
+    messages: [...d.messages, { role: "user", text, urls, material_ids: attached.map((m) => m.id) }, { role: "agent", text: update.reply }],
     facts: update.facts ?? d.facts,
     angles: update.angles ?? d.angles,
     outline: update.outline ?? d.outline,
@@ -374,6 +405,7 @@ export function generateFromBrainstorm(id: string): { job: Job } | { error: stri
     source: "brainstorm",
     createdAt: Date.now(),
     titleOverride: angle.title,
+    material: d.material ?? [],
     override: {
       briefs: d.facts.some((f) => f.source_url)
         ? [{ id: "evt-d", title_en: d.facts.find((f) => f.key === "event")?.value ?? angle.title, title_ko: "", sources: [{ url: d.facts.find((f) => f.source_url)!.source_url!, kind: "official" }] }]

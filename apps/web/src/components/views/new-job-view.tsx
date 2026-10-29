@@ -5,12 +5,13 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { ArrowRight, Check, Play, RotateCcw, X } from "lucide-react";
 
 import { LoadState } from "@/components/page";
+import { SourceMaterialPicker } from "@/components/source-material";
 import { JobStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { API_URL, IS_MOCK, api } from "@/lib/api";
 import { SCENARIO_LABELS, presets } from "@/lib/constants";
-import type { Job, PipelineStep, Scenario } from "@/lib/types";
+import type { Job, MaterialRef, PipelineStep, Scenario } from "@/lib/types";
 import { TERMINAL_STATUSES as TERMINAL, useApi, useLiveJob } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ export function NewJobView() {
   // Starts empty (the placeholder shows an example); presets fill it on click.
   const [prompt, setPrompt] = useState("");
   const [scenario, setScenario] = useState<Scenario>("good");
+  const [material, setMaterial] = useState<MaterialRef[]>([]);
   const [job, setJob] = useState<Job>();
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
@@ -53,12 +55,12 @@ export function NewJobView() {
   const { live, stale } = useLiveJob<Job>(job, setJob, api.openJobEvents, api.getJob);
   const busy = pending || live;
 
-  const run = (text = prompt) =>
+  const run = (text = prompt, attached = material) =>
     startTransition(async () => {
       started.current = true;
       try {
         setError(undefined);
-        setJob(await api.createJob(text, IS_MOCK ? scenario : undefined));
+        setJob(await api.createJob(text, IS_MOCK ? scenario : undefined, attached.map((m) => m.id)));
       } catch (e) {
         setError((e as Error).message);
       }
@@ -88,6 +90,7 @@ export function NewJobView() {
           className="min-h-24 bg-muted text-[15px]"
           placeholder="예: 이번 주말 서울 팝업 5개 조사해서 카드뉴스 만들어줘"
         />
+        <SourceMaterialPicker value={material} onChange={setMaterial} disabled={busy} />
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">Presets</span>
           {presets.map((p) => (
@@ -168,7 +171,7 @@ export function NewJobView() {
             </ol>
             {job.error && <p className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-destructive">{job.error}</p>}
             {job.status === "FAILED" && (
-              <Button variant="outline" size="lg" className="mt-3 w-full" disabled={busy} onClick={() => run(job.prompt)}>
+              <Button variant="outline" size="lg" className="mt-3 w-full" disabled={busy} onClick={() => run(job.prompt, job.material ?? [])}>
                 <RotateCcw /> Retry this request
               </Button>
             )}

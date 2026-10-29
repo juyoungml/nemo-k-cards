@@ -4,7 +4,7 @@ the table owner's included (supabase/migrations/20261029150000_members_roles_aud
 
 Actions written today:
   org.created · member.invited · invitation.revoked · member.joined · member.role_changed · member.removed ·
-  job.created · deck.edited · deck.approved · deck.overridden · deck.rejected ·
+  job.created · material.added · deck.edited · deck.approved · deck.overridden · deck.rejected ·
   deck.approve_refused (the Safeguard blocked the Deck, or it has no verdict) · safeguard.blocked (written by the
   host for the Member who started the Job, or approved it when the publish-time re-check blocked) ·
   safeguard.edit_blocked (a caption edit refused at Approve or before upload) ·

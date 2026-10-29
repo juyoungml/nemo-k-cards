@@ -22,6 +22,7 @@ const ACTION: Record<string, [Tone, string]> = {
   "safeguard.blocked": ["danger", "Blocked by safeguard"],
   "safeguard.edit_blocked": ["danger", "Caption edit blocked"],
   "job.created": ["neutral", "Deck started"],
+  "material.added": ["neutral", "Source material added"],
   "member.invited": ["neutral", "Invited"],
   "invitation.revoked": ["neutral", "Invitation withdrawn"],
   "member.joined": ["neutral", "Joined"],
@@ -71,6 +72,8 @@ function describe(e: AuditEvent): React.ReactNode {
       return <>{String(d.name)}</>;
     case "instagram.connected":
       return <>{d.account_type === "MEDIA_CREATOR" ? "Creator" : "Business"} account{d.reconnected ? " · reconnected" : ""}</>;
+    case "material.added":
+      return <>{String(d.kind)}: {String(d.name ?? d.url ?? "")}</>;
     default:
       return null;
   }

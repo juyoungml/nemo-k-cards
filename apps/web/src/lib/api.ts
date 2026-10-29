@@ -7,7 +7,8 @@ import { EventSource } from "eventsource";
 import { orgHeader, setActiveOrgId } from "./org";
 import { accessToken, isAuthPath, reloadTo } from "./supabase";
 import type {
-  AuditEvent, Brainstorm, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job, Me, Member, Metric, Org, PolicyEvent, Role, Scenario,
+  AuditEvent, Brainstorm, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job, Material, MaterialRef, Me,
+  Member, Metric, Org, PolicyEvent, Role, Scenario,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
@@ -62,7 +63,8 @@ export const api = {
   listJobs: () => req<Job[]>("/jobs"),
   getJob: (id: string) => req<Job>(`/jobs/${id}`),
   // `scenario` is honored by the mock backend only (QA); FastAPI ignores it.
-  createJob: (prompt: string, scenario?: Scenario) => req<Job>("/jobs", { method: "POST", json: { prompt, scenario } }),
+  createJob: (prompt: string, scenario?: Scenario, materialIds: string[] = []) =>
+    req<Job>("/jobs", { method: "POST", json: { prompt, scenario, material_ids: materialIds } }),
   approveJob: (id: string, caption: string, overrideReason?: string) =>
     req<Job>(`/jobs/${id}/approve`, { method: "POST", json: { caption, override_reason: overrideReason || undefined } }),
   rejectJob: (id: string, reason: string) => req<Job>(`/jobs/${id}/reject`, { method: "POST", json: { reason } }),
@@ -106,9 +108,19 @@ export const api = {
   createBrainstorm: (sample = true) => req<Brainstorm>("/brainstorms", { method: "POST", json: { sample } }),
   getBrainstorm: (id: string) => req<Brainstorm>(`/brainstorms/${id}`),
   patchBrainstorm: (id: string, patch: Partial<Brainstorm>) => req<Brainstorm>(`/brainstorms/${id}`, { method: "PATCH", json: patch }),
-  sendBrainstormMessage: (id: string, text: string, urls: string[]) =>
-    req<Brainstorm>(`/brainstorms/${id}/messages`, { method: "POST", json: { text, urls } }),
+  sendBrainstormMessage: (id: string, text: string, urls: string[], materialIds: string[] = []) =>
+    req<Brainstorm>(`/brainstorms/${id}/messages`, { method: "POST", json: { text, urls, material_ids: materialIds } }),
   generateFromBrainstorm: (id: string) => req<Job>(`/brainstorms/${id}/generate`, { method: "POST" }),
+
+  // Source material (#20): attach first, then pass the ids with the Job or the Brainstorm message.
+  addMaterialLink: (url: string) => req<MaterialRef>("/materials", { method: "POST", json: { kind: "link", url } }),
+  addMaterialNote: (text: string) => req<MaterialRef>("/materials", { method: "POST", json: { kind: "note", text } }),
+  uploadMaterial: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return req<MaterialRef>("/materials/files", { method: "POST", body: form });
+  },
+  getMaterial: (id: string) => req<Material>(`/materials/${id}`),
 
   resetMock: () => req<{ ok: true }>("/reset", { method: "POST" }),
 };

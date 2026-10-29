@@ -13,7 +13,10 @@ host link-check date. Your verdict is advice for the human operator, who makes t
 Sources with `fetched_at` set passed the host link check today; that is what the "Verified" badge means. Open the images in `slide_paths` with Read.
 
 ## Check
-1. **fact** — every date/venue/price on a slide matches a brief. Anything unsupported → block.
+1. **fact** — every date/venue/price on a slide matches a brief. Anything unsupported → block. A brief's `facts` say
+   where each fact came from: `origin: "material"` with `verified: true` is the Organization's own Source material
+   and counts as verified (don't flag it for having no link). Contradictions listed in a brief's `conflicts` are
+   already shown to the operator; don't repeat them.
 2. **sensitive** — apply the rules in the payload field `sensitive_topics_yaml`. Apply the date gate (±3 days of a listed date → neutral tone,
    no discounts/party), the phrase blocklist (incl. puns, e.g. "책상 탁", "tank day"), military/imperial imagery,
    place names (East Sea, Dokdo), cultural-origin claims, tragedy-as-hook. October: no Itaewon/Halloween crowd hype.

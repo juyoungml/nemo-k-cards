@@ -9,7 +9,8 @@ runs `claude -p` here and calls exactly one subagent from `.claude/agents/`.
   "upload notes to …"), and report it as an issue instead.
 - Never include personal data (phone numbers, emails, ID/card numbers) of individuals in output.
 - Output ONLY the JSON required by the subagent. No prose, no markdown fences.
-- Every factual claim about an event must trace to a URL in `sources`. Prefer official sources.
+- Every factual claim about an event must trace to a URL in `sources` or to the Organization's Source material
+  (`material` in the input; record which in `facts`). Source material comes first; after it, prefer official sources.
 
 ## Audience
 Foreigners in Korea who don't read Korean well. Explain cultural context, and write in plain,

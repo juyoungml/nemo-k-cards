@@ -46,6 +46,7 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `AGENT_RUNNER` | `local` \| `openshell` | local = `claude -p` on the host (dev, no sandbox); openshell = per-stage sandbox (submission) |
 | `PUBLISH_MODE` | `mock` \| `dryrun` \| `graph` | **`graph` posts to the real @whatsonkorea account.** Use `dryrun` unless a human asked to go live |
 | `IMAGE_HOST` | `local` \| `supabase` | Instagram needs public URLs; supabase uploads slides to the public `slides` bucket |
+| `MATERIAL_STORE` | `local` \| `supabase` | where Source material files live (private per Organization): `MATERIAL_DIR` on this host, or the private `materials` bucket |
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
 | `DATABASE_URL` | `postgresql://…` | default is the local Supabase database (`127.0.0.1:54322/postgres`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL`'s server (default: the same local server) |
 | `JOBS_PER_ORG` / `JOBS_PER_WORKER` | default `2` / `4` | Jobs one Organization runs at once (the rest wait as `QUEUED`) / Jobs one process runs at once |
