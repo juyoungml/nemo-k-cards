@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.schemas import Brainstorm, Job, JobStatus, PolicyEvent
+from app.schemas import Brainstorm, Job, JobStatus, Material, PolicyEvent
 
 if TYPE_CHECKING:
     from app.audit import Entry
@@ -146,6 +146,30 @@ def save_brainstorm(org_id: UUID, brainstorm: Brainstorm) -> Brainstorm:
 def get_brainstorm(org_id: UUID, brainstorm_id: str) -> Brainstorm | None:
     rows = _rows(org_id, "select doc::text from brainstorms where id = %s", (brainstorm_id,))
     return _load(Brainstorm, rows[0]) if rows else None
+
+
+def save_material(org_id: UUID, material: Material, *, audit: "Entry | None" = None) -> Material:
+    """Insert one piece of Source material (append-only: the API role may not update it)."""
+    with tenant(org_id, user_id=audit.actor if audit else None) as c:
+        c.execute("insert into materials (id, created_at, doc) values (%s, %s, %s)",
+                  (material.id, material.created_at, _json(material)))
+        if audit:
+            from app import audit as audit_log
+            audit_log.write(c, org_id, audit)
+    return material
+
+
+def get_materials(org_id: UUID, ids: list[str]) -> list[Material]:
+    """These ids' Source material in the given order; ids of another Organization (RLS) or unknown are left out."""
+    if not ids:
+        return []
+    rows = dict(r for r in _pairs(org_id, "select id, doc::text from materials where id = any(%s)", (list(ids),)))
+    return [m for i in dict.fromkeys(ids) if i in rows and (m := _load(Material, rows[i]))]
+
+
+def _pairs(org_id: UUID, sql: str, params: tuple) -> list[tuple]:
+    with tenant(org_id) as c:
+        return c.execute(sql, params).fetchall()
 
 
 def add_policy_events(org_id: UUID, events: list[PolicyEvent]) -> None:

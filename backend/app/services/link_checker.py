@@ -97,8 +97,10 @@ async def check_url(url: str, client: httpx.AsyncClient | None = None) -> LinkCh
             await client.aclose()
 
 
-async def verify(briefs: list[EventBrief], known: dict[str, LinkCheck] | None = None) -> VerificationReport:
-    """Check every source; exclude events without at least one healthy source.
+async def verify(briefs: list[EventBrief], known: dict[str, LinkCheck] | None = None,
+                 materials: set[str] | frozenset[str] = frozenset()) -> VerificationReport:
+    """Check every source; exclude events without at least one healthy source, unless the event is taken from
+    Source material: `materials` holds the ids of the request's own material, which counts as verified (ADR 0003).
 
     `known` holds precomputed checks (demo fixtures) — those URLs are not fetched again.
     """
@@ -109,5 +111,6 @@ async def verify(briefs: list[EventBrief], known: dict[str, LinkCheck] | None = 
         fresh = await asyncio.gather(*(check_url(u, client) for u in todo))
     by_url = {**{u: known[u] for u in urls if u in known}, **{c.url: c for c in fresh}}
     checks = [by_url[u] for u in urls]
-    excluded = [b.id for b in briefs if not any(by_url[str(s.url)].status == "ok" for s in b.sources)]
+    excluded = [b.id for b in briefs if not any(by_url[str(s.url)].status == "ok" for s in b.sources)
+                and not any(m in materials for m in b.materials)]
     return VerificationReport(checks=list(checks), excluded_event_ids=excluded)

@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, Field, HttpUrl
+from pydantic import AliasChoices, BaseModel, Field, HttpUrl, model_validator
 
 
 class JobStatus(StrEnum):
@@ -58,6 +58,56 @@ class ImageAsset(BaseModel):
     allow_overlay: bool = True
 
 
+# ---------------------------------------------------------------- source material (#20, ADR 0003)
+
+MaterialKind = Literal["link", "file", "note"]
+
+
+class MaterialRef(BaseModel):
+    """What a Job or Brainstorm carries about one piece of its Source material (GLOSSARY): the Organization's own
+    link, file or note. The extracted text stays in the `materials` table; the Admin shows these refs."""
+    id: str
+    kind: MaterialKind
+    name: str                              # file name (cleaned), the link as given, or "Note"
+    url: str | None = None                 # links only
+    content_type: str | None = None        # files: application/pdf, image/jpeg, text/plain
+    size: int | None = None                # bytes stored
+    pages: int | None = None               # PDFs: pages in the file
+    chars: int = 0                         # length of the extracted text the agents get
+    truncated: bool = False                # the text was cut at the cap (pages or characters)
+    image: bool = False                    # the agents also get the (re-encoded) image
+
+
+class Material(MaterialRef):
+    """One piece of Source material as stored (one row per Organization in `materials`)."""
+    text: str = ""
+    created_at: datetime
+    created_by: str | None = None
+
+
+class FactSource(BaseModel):
+    """Where one fact of an EventBrief came from (ADR 0003): the Organization's Source material (counts as verified)
+    or a link the host checks. `verified` is set by the host at Verify, never by an agent."""
+    field: Literal["title", "dates", "time", "venue", "address", "station", "price", "booking", "access", "tips",
+                   "why_go", "other"]
+    value: str = ""
+    origin: Literal["material", "link"]
+    material_id: str | None = None
+    url: str | None = None
+    quote: str | None = Field(None, max_length=400)  # the words in the material that state it
+    verified: bool | None = None
+    note: str | None = None                # why the host could not count it as verified
+
+
+class Conflict(BaseModel):
+    """Source material and a public page disagree on a fact (ADR 0003): a person decides, so it becomes an Issue."""
+    field: str
+    material_id: str
+    material_says: str
+    url: str
+    public_says: str
+
+
 class EventBrief(BaseModel):
     id: str
     title_en: str
@@ -75,9 +125,19 @@ class EventBrief(BaseModel):
     booking: str | None = None
     foreigner_tips: list[str] = Field(default_factory=list)
     why_go: str = ""
-    sources: list[Source] = Field(min_length=1)
+    # Checked links. May be empty only when the event comes from the Organization's Source material (`materials`).
+    sources: list[Source] = Field(default_factory=list)
     access: Access | None = None
     images: list[ImageAsset] = Field(default_factory=list)
+    materials: list[str] = Field(default_factory=list)       # ids of the Source material this event is taken from
+    facts: list[FactSource] = Field(default_factory=list)    # where each fact came from
+    conflicts: list[Conflict] = Field(default_factory=list)  # material vs a public page
+
+    @model_validator(mode="after")
+    def _has_a_source(self) -> "EventBrief":
+        if not self.sources and not self.materials:
+            raise ValueError("an event needs at least one source link or Source material")
+        return self
 
 
 # ---------------------------------------------------------------- verification
@@ -238,13 +298,18 @@ class Job(BaseModel):
     log: list[LogLine] = Field(default_factory=list)
     # Stored before the glossary rename as "draft_id"; both keys load, new documents are written as brainstorm_id.
     brainstorm_id: str | None = Field(default=None, validation_alias=AliasChoices("brainstorm_id", "draft_id"))
+    material: list[MaterialRef] = Field(default_factory=list)  # Source material (#20); empty on older Jobs
 
 
 Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend
 
 
+MAX_MATERIALS = 10  # pieces of Source material per Job or Brainstorm
+
+
 class CreateJobRequest(BaseModel):
     prompt: str = Field(min_length=3)
+    material_ids: list[str] = Field(default_factory=list, max_length=MAX_MATERIALS)  # from POST /materials
     scenario: Scenario | None = None  # DEMO_MODE=fixture only; ignored in live mode
 
 
@@ -298,6 +363,7 @@ class Fact(BaseModel):
     value: str
     verified: bool
     source_url: str | None = None
+    material_id: str | None = None  # taken from this Source material (counts as verified, ADR 0003)
 
 
 class Angle(BaseModel):
@@ -316,6 +382,7 @@ class ChatMessage(BaseModel):
     role: Literal["user", "agent"]
     text: str
     urls: list[str] = Field(default_factory=list)
+    material_ids: list[str] = Field(default_factory=list)  # Source material attached with this message
 
 
 class Brainstorm(BaseModel):
@@ -328,6 +395,7 @@ class Brainstorm(BaseModel):
     tones: list[str] = Field(default_factory=list)
     outline: list[OutlineItem] = Field(default_factory=list)
     job_id: str | None = None
+    material: list[MaterialRef] = Field(default_factory=list)  # Source material attached in the chat (#20)
 
 
 class BrainstormUpdate(BaseModel):
@@ -345,6 +413,7 @@ class CreateBrainstormRequest(BaseModel):
 class BrainstormMessageRequest(BaseModel):
     text: str = ""
     urls: list[str] = Field(default_factory=list)
+    material_ids: list[str] = Field(default_factory=list, max_length=MAX_MATERIALS)  # attached with this message
 
 
 class BrainstormPatch(BaseModel):

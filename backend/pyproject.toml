@@ -17,6 +17,9 @@ dependencies = [
     "pyjwt[crypto]>=2.10",
     "dbos>=3.4,<4",
     "pyyaml>=6.0.3",
+    "pypdf>=6,<7",
+    "pillow>=11",
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]

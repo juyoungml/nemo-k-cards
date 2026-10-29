@@ -194,7 +194,11 @@ class Ctx:
     @property
     def included(self) -> list[EventBrief]:
         ok = self.ok_urls
-        return [b for b in self.briefs if any(str(s.url) in ok for s in b.sources)]
+        excluded = set(self.report.excluded_event_ids) if self.report else set()
+        # An event taken from Source material (#20, ADR 0003) needs no checked link; the host kept it only if its
+        # material ids were the request's own.
+        return [b for b in self.briefs if any(str(s.url) in ok for s in b.sources)
+                or (b.materials and b.id not in excluded)]
 
     @property
     def by_id(self) -> dict[str, EventBrief]:

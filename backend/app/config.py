@@ -78,5 +78,16 @@ class Settings(BaseSettings):
     # Key for signed /assets links. Empty: derived from SUPABASE_SERVICE_KEY, else random per process.
     asset_signing_key: str = ""
 
+    # Source material files (#20), private to their Organization under `<org_id>/<material_id>/`.
+    # local = MATERIAL_DIR on this host (empty: `materials/` next to OUTPUT_DIR); supabase = the private Storage
+    # bucket MATERIAL_BUCKET via SUPABASE_SERVICE_KEY (needed once workers run on more than one machine).
+    material_store: Literal["local", "supabase"] = "local"
+    material_dir: str = ""
+    material_bucket: str = "materials"
+
+    @property
+    def materials_root(self) -> Path:
+        return Path(self.material_dir) if self.material_dir else self.output_dir.parent / "materials"
+
 
 settings = Settings()

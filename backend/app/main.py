@@ -11,10 +11,11 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app import assets, audit, auth, brainstorms, instagram_accounts, members, orgs, seed, store
+from app import assets, audit, auth, brainstorms, instagram_accounts, materials, members, orgs, seed, store
 from app.config import settings
 from app.pipeline import durable, orchestrator
 from app.schemas import (
+    MAX_MATERIALS,
     TERMINAL,
     ApproveRequest,
     BlockedEdit,
@@ -71,6 +72,7 @@ app.include_router(assets.router)
 app.include_router(orgs.router)
 app.include_router(members.router)
 app.include_router(instagram_accounts.router)
+app.include_router(materials.router)
 
 
 # Every Organization-owned read and write below goes through the store with the caller's Organization
@@ -111,7 +113,9 @@ def health() -> dict:
 @app.post("/jobs", response_model=Job, status_code=201)
 async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
     job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
-    await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "job.created", job.id)))
+    job.material = await asyncio.to_thread(materials.refs, ctx.org_id, req.material_ids)  # 422 if not the caller's
+    await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
+        ctx, "job.created", job.id, **({"material": [m.id for m in job.material]} if job.material else {}))))
     await orchestrator.start_job(ctx.org_id, job, scenario=req.scenario or "good", started_by=_member(ctx))
     return _out(ctx.org_id, job)
 
@@ -265,7 +269,10 @@ def patch_brainstorm(brainstorm_id: str, patch: BrainstormPatch, ctx: auth.Edito
 @app.post("/brainstorms/{brainstorm_id}/messages", response_model=Brainstorm)
 async def brainstorm_message(brainstorm_id: str, req: BrainstormMessageRequest, ctx: auth.Editor) -> Brainstorm:
     d = await asyncio.to_thread(_brainstorm_or_404, ctx.org_id, brainstorm_id)
-    return await brainstorms.send_message(ctx.org_id, d, req.text, req.urls)
+    attached = await asyncio.to_thread(materials.refs, ctx.org_id, req.material_ids)  # 422 if not the caller's
+    if len({m.id for m in d.material} | {m.id for m in attached}) > MAX_MATERIALS:
+        raise HTTPException(422, f"at most {MAX_MATERIALS} pieces of Source material per Brainstorm")
+    return await brainstorms.send_message(ctx.org_id, d, req.text, req.urls, attached)
 
 
 @app.post("/brainstorms/{brainstorm_id}/generate", response_model=Job, status_code=201)
@@ -275,6 +282,7 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
     if not angle:
         raise HTTPException(422, "pick an angle first")
     job = orchestrator.new_job(secrets.token_hex(8), f"Brainstorm: {angle.title}", "brainstorm", d.id)
+    job.material = d.material  # the Brainstorm's Source material carries over to its Job
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
         ctx, "job.created", job.id, brainstorm=d.id)))
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))
