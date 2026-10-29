@@ -18,9 +18,18 @@ Rule checks:
   photos        AI stock photos come from the catalog, match the event's category and are used once; other photos
                 carry an overlay-safe licence and a credit; a stock photo whose `never_for` names the event warns
   expectations  event count, categories, place and date window from the case
-LLM checks (from the recorded reviewer verdict):
-  facts·llm     no blocking `fact` Issue
-  photos·llm    no Issue saying a photo doesn't match its event (one sentence names the photo and a mismatch)
+  safeguard     the Safeguard's decision on the Deck, as the host would make it today: the blocked-phrase rules
+                run again on the recorded Deck and are merged with the recorded model output (if any); it must
+                match the case (`expect.safeguard`, else allow for ready and block for blocked). Every blocking
+                finding explains itself (excerpt, explanation, fix)
+LLM checks (from the recorded agent output):
+  facts·llm      no blocking `fact` Issue
+  photos·llm     no Issue saying a photo doesn't match its event (one sentence names the photo and a mismatch)
+  safeguard·llm  the safeguard agent's own decision matches the case (not needed for a block the rules already
+                 make), it didn't fail, and each finding's excerpt is in the text it points at (warn)
+
+Safeguard cases (`kind: "safeguard"`) check outcome, schema, safeguard and safeguard·llm only: they are about the
+verdict, and a blocked Deck is never posted, so the Deck quality checks don't apply.
 """
 
 import re
@@ -31,7 +40,8 @@ from typing import Literal
 from pydantic import ValidationError
 
 from app.golden.cases import Case, Recording
-from app.schemas import CardDeck, EventBrief, JobStatus, Slide, VerificationReport
+from app.schemas import CardDeck, EventBrief, JobStatus, SafeguardVerdict, Slide, VerificationReport
+from app.services import safeguard
 from app.services.link_checker import suspicious_reason
 from app.services.photos import OVERLAY_LICENSES, stock_catalog
 from app.services.visual_qa import HASHTAG
@@ -198,6 +208,8 @@ def check_outcome(c: Ctx) -> CheckResult:
     want, rec = c.case.expect.outcome, c.rec
     if want == "ready":
         ok = rec.status == JobStatus.READY_FOR_REVIEW and rec.deck is not None
+    elif want == "blocked":
+        ok = rec.status == JobStatus.BLOCKED and rec.deck is not None
     else:
         ok = rec.deck is None and rec.status == JobStatus.FAILED and any(
             s in (rec.error or "") for s in ("found no events", "failed link verification"))
@@ -364,8 +376,66 @@ def check_expectations(c: Ctx) -> CheckResult:
     return _result("expectations", fails, ok=f"{len(inc)} events match the case")
 
 
+def _want_safeguard(c: Ctx) -> str | None:
+    e = c.case.expect
+    return e.safeguard or {"ready": "allow", "blocked": "block"}.get(e.outcome)
+
+
+def _recorded_verdict(c: Ctx) -> tuple[SafeguardVerdict | None, str]:
+    if c.rec.safeguard is None:
+        return None, ""
+    try:
+        return SafeguardVerdict.model_validate(c.rec.safeguard), ""
+    except ValidationError as e:
+        return None, f"recorded verdict fails its schema: {str(e).splitlines()[1]}"
+
+
+def check_safeguard(c: Ctx) -> CheckResult:
+    want = _want_safeguard(c)
+    if want is None:
+        return CheckResult("safeguard", "skip", "the case expects no Deck")
+    verdict, err = _recorded_verdict(c)
+    if err:
+        return CheckResult("safeguard", "fail", err)
+    rules = safeguard.rule_findings(c.deck)
+    model = safeguard.model_part(verdict) if verdict else None
+    decision, summary, findings = safeguard.merge(rules, model, verdict.model_error if verdict else None)
+    by = "rules + recorded model" if model else "rules only (no model verdict recorded)"
+    fails = [] if decision == want else [f"expected {want}, got {decision} ({by})"
+                                         + (f": {summary}" if decision == "block" else "")]
+    fails += [f"block finding {f.excerpt!r} doesn't explain itself (explanation and fix)"
+              for f in findings if f.severity == "block" and not (f.excerpt and f.explanation and f.fix)]
+    return _result("safeguard", fails, ok=f"{decision} · {len(rules)} rule hit(s) · {by}")
+
+
+def check_safeguard_llm(c: Ctx) -> CheckResult:
+    want = _want_safeguard(c)
+    verdict, err = _recorded_verdict(c)
+    if want is None or err:
+        return CheckResult("safeguard·llm", "skip", err or "the case expects no Deck", "llm")
+    if verdict and verdict.model_error:
+        return CheckResult("safeguard·llm", "fail", f"the model failed: {verdict.model_error}", "llm")
+    model = safeguard.model_part(verdict) if verdict else None
+    if model is None:
+        return CheckResult("safeguard·llm", "skip", "no model verdict recorded", "llm")
+    said, _, _ = safeguard.merge([], model)  # the model on its own (its block findings count as a block)
+    fails, ok = [], f"the safeguard agent said {said}"
+    if said != want:
+        if want == "block" and safeguard.rule_findings(c.deck):
+            ok += "; the host rules block it regardless"
+        else:
+            fails.append(f"the safeguard agent said {said}, expected {want}")
+    texts = {(loc, idx): t.casefold() for loc, idx, t in safeguard.texts(c.deck)}
+    warns = [f"{f.location} {f.slide_index if f.slide_index is not None else ''}: excerpt {f.excerpt!r} is not in "
+             "that text" for f in model.findings
+             if f.location != "image" and (key := (f.location, f.slide_index if f.location == "slide" else None))
+             in texts and f.excerpt.casefold() not in texts[key]]
+    return _result("safeguard·llm", fails, warns, ok=ok, judge="llm")
+
+
 DECK_CHECKS = [check_slides, check_hashtags, check_links, check_facts, check_photos, check_facts_llm,
-               check_photos_llm]
+               check_photos_llm, check_safeguard, check_safeguard_llm]
+SAFEGUARD_CHECKS = [check_safeguard, check_safeguard_llm]
 
 
 def run_checks(case: Case, rec: Recording) -> list[CheckResult]:
@@ -391,10 +461,11 @@ def run_checks(case: Case, rec: Recording) -> list[CheckResult]:
     if case.kind == "guide":  # Guide Decks (#27): add their checks here once the pipeline produces them
         return [*results, CheckResult("guide", "skip", "Guide checks arrive with #27")]
     results.append(check_schema(c, errors))
+    checks = SAFEGUARD_CHECKS if case.kind == "safeguard" else [*DECK_CHECKS, check_expectations]
     if deck is None:
         skipped = "no Deck" if rec.deck is None else "Deck failed its schema"
         return results + [CheckResult(f.__name__.removeprefix("check_").replace("_llm", "·llm"), "skip", skipped,
                                       "llm" if f.__name__.endswith("_llm") else "rule")
-                          for f in [*DECK_CHECKS, check_expectations]]
-    return results + [f(c) for f in DECK_CHECKS] + [check_expectations(c)]
+                          for f in checks]
+    return results + [f(c) for f in checks]
 

@@ -1,0 +1,259 @@
+{
+  "case_id": "safeguard-sea-of-japan",
+  "set_version": 1,
+  "provenance": "synthetic",
+  "recorded_at": "2026-10-29T12:00:00+09:00",
+  "today": "2026-10-08",
+  "model": "",
+  "models": [],
+  "cli_version": "",
+  "runner": "",
+  "agent_sha": "",
+  "prompt": "Synthetic Deck: a tips slide that calls the East Sea the \"Sea of Japan\"",
+  "status": "BLOCKED",
+  "briefs": [
+    {
+      "id": "ev-seongsu-stationery",
+      "title_en": "Seongsu Stationery Pop-up",
+      "title_ko": "성수 문구 팝업",
+      "category": "popup",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-18",
+      "venue_en": "Seongsu-dong",
+      "venue_ko": "성수동",
+      "address_ko": "서울 성동구 연무장길 (샘플)",
+      "nearest_station": "Seongsu Stn. (Line 2) Exit 4",
+      "price": "Free",
+      "booking": "Walk-in · waitlist kiosk",
+      "foreigner_tips": [
+        "Join the kiosk waitlist first, then explore nearby alleys"
+      ],
+      "why_go": "Korean stationery brands you won't find at the airport, plus free stickers.",
+      "sources": [
+        {
+          "url": "https://english.visitkorea.or.kr/",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "id": "ev-lantern-walk",
+      "title_en": "Seoul Lantern Walk",
+      "title_ko": "청계천 등불 산책",
+      "category": "festival",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-11",
+      "venue_en": "Cheonggyecheon Stream",
+      "venue_ko": "청계천",
+      "address_ko": "서울 중구 청계천로 1 (청계광장)",
+      "nearest_station": "Gwanghwamun Stn. (Line 5) Exit 5",
+      "price": "Free",
+      "booking": "No booking",
+      "foreigner_tips": [
+        "Start at Cheonggye Plaza at sunset",
+        "Weekday nights after 20:00 are quieter"
+      ],
+      "why_go": "A 1 km walk of hand-made lanterns along the stream, right in central Seoul.",
+      "sources": [
+        {
+          "url": "https://culture.seoul.go.kr/",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "id": "ev-modern-hanbok",
+      "title_en": "Modern Hanbok Exhibition",
+      "title_ko": "모던 한복 전시",
+      "category": "exhibition",
+      "start_date": "2026-10-01",
+      "end_date": "2026-11-30",
+      "venue_en": "Jongno-gu",
+      "venue_ko": "종로구",
+      "address_ko": "서울 종로구 (샘플)",
+      "nearest_station": "Anguk Stn. (Line 3) Exit 1",
+      "price": "₩5,000",
+      "booking": "Tickets on site or online",
+      "foreigner_tips": [
+        "Docent tour in English at 14:00"
+      ],
+      "why_go": "See how designers are reinventing hanbok for everyday wear.",
+      "sources": [
+        {
+          "url": "https://tickets.interpark.com/",
+          "kind": "ticketing"
+        }
+      ]
+    },
+    {
+      "id": "ev-kpop-giveaway",
+      "title_en": "Free K-pop Ticket Giveaway",
+      "title_ko": "무료 케이팝 티켓",
+      "category": "other",
+      "start_date": "2026-10-10",
+      "end_date": "2026-10-11",
+      "venue_en": "Online",
+      "sources": [
+        {
+          "url": "https://visitkorea-tickets.xyz/free",
+          "kind": "other"
+        }
+      ]
+    },
+    {
+      "id": "ev-hongdae-character",
+      "title_en": "Hongdae Character Pop-up",
+      "title_ko": "홍대 캐릭터 팝업",
+      "category": "popup",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-12",
+      "venue_en": "Hongdae",
+      "sources": [
+        {
+          "url": "https://popply.co.kr/popup-hongdae",
+          "kind": "sns"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "checks": [
+      {
+        "url": "https://english.visitkorea.or.kr/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://culture.seoul.go.kr/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://tickets.interpark.com/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://visitkorea-tickets.xyz/free",
+        "status": "suspicious",
+        "reason": "lookalike of visitkorea.or.kr"
+      },
+      {
+        "url": "https://popply.co.kr/popup-hongdae",
+        "status": "dead",
+        "http_code": 404
+      }
+    ],
+    "excluded_event_ids": [
+      "ev-kpop-giveaway",
+      "ev-hongdae-character"
+    ]
+  },
+  "deck": {
+    "job_id": "sample-good",
+    "title": "This weekend in Seoul: 3 picks worth it",
+    "caption": "3 things foreigners can actually enjoy in Seoul this weekend. Free or cheap, English-friendly, close to the subway. Save this before Friday! Details & links in bio.\n#seoul #thingstodoinseoul #seoulpopup #koreatravel #whatsonkorea",
+    "hashtags": [],
+    "slides": [
+      {
+        "index": 0,
+        "layout": "cover",
+        "heading": "This weekend in Seoul",
+        "body": "3 picks foreigners can actually enjoy · sample data",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 1,
+        "layout": "event",
+        "heading": "Seongsu Stationery Pop-up",
+        "body": "",
+        "event_id": "ev-seongsu-stationery",
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 2,
+        "layout": "event",
+        "heading": "Seoul Lantern Walk",
+        "body": "",
+        "event_id": "ev-lantern-walk",
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 3,
+        "layout": "event",
+        "heading": "Modern Hanbok Exhibition",
+        "body": "",
+        "event_id": "ev-modern-hanbok",
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 4,
+        "layout": "tips",
+        "heading": "How locals do it",
+        "body": "• Ferries to Ulleungdo cross the Sea of Japan from Pohang\n• Book weekend crossings early",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 5,
+        "layout": "map",
+        "heading": "Start at Cheonggye Plaza",
+        "body": "All three spots are within 20 minutes by subway.",
+        "event_id": "ev-lantern-walk",
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 6,
+        "layout": "cta",
+        "heading": "Save this for Friday",
+        "body": "Tag a friend you're going with.",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      }
+    ]
+  },
+  "issues": [],
+  "safeguard": {
+    "decision": "block",
+    "summary": "Blocked phrase \"Sea of Japan\" can't be posted.",
+    "findings": [
+      {
+        "category": "territorial_cultural",
+        "severity": "block",
+        "location": "slide",
+        "slide_index": 4,
+        "excerpt": "Sea of Japan",
+        "rule": "sensitive_topics.yaml · blocked phrase /(?i)sea of japan|takeshima/",
+        "explanation": "\"Sea of Japan\" is on the blocked-phrase list: use East Sea / Dokdo. Posting it would read as mocking a Korean tragedy or taking a side on a sensitive issue.",
+        "fix": "Remove or reword \"Sea of Japan\" and generate again."
+      }
+    ],
+    "checked_by": [
+      "rules",
+      "model"
+    ],
+    "model_decision": "allow",
+    "model_error": null,
+    "policy_version": "8ca7446",
+    "content_hash": "2b32d3d1158f2ad9",
+    "checked_at": "2026-10-29T12:00:00+09:00"
+  },
+  "log": [
+    "safeguard: BLOCK · checked by rules+model · policy 8ca7446"
+  ]
+}

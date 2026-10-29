@@ -1,0 +1,205 @@
+{
+  "case_id": "safeguard-tank-day-sale",
+  "set_version": 1,
+  "provenance": "demo-scenario",
+  "recorded_at": "2026-10-29T12:00:00+09:00",
+  "today": "2026-05-15",
+  "model": "",
+  "models": [],
+  "cli_version": "",
+  "runner": "",
+  "agent_sha": "",
+  "prompt": "Demo bad Deck: a \"Tank Day\" sale with 51.8% off on May 18, the anniversary of the 1980 Gwangju Uprising",
+  "status": "BLOCKED",
+  "briefs": [
+    {
+      "id": "evt-b1",
+      "title_en": "Euljiro Military Market",
+      "title_ko": "을지로 밀리터리 마켓",
+      "category": "popup",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-18",
+      "venue_en": "Euljiro",
+      "venue_ko": "을지로",
+      "nearest_station": "Euljiro 3-ga Stn. (Line 2) Exit 4",
+      "price": "Free",
+      "booking": "Walk-in",
+      "why_go": "Vintage surplus stalls in the old print-shop alleys.",
+      "sources": [
+        {
+          "url": "https://culture.seoul.go.kr/",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "id": "evt-b2",
+      "title_en": "Seoul Night Market",
+      "title_ko": "서울 야시장",
+      "category": "festival",
+      "start_date": "2026-10-09",
+      "end_date": "2026-10-11",
+      "venue_en": "Yeouido Hangang Park",
+      "venue_ko": "여의도한강공원",
+      "nearest_station": "Yeouinaru Stn. (Line 5) Exit 2",
+      "price": "Free entry",
+      "booking": "No booking",
+      "why_go": "Food trucks and handmade goods by the river.",
+      "sources": [
+        {
+          "url": "https://culture.seoul.go.kr/event/night-market",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "id": "evt-bx",
+      "title_en": "Free K-pop Ticket Giveaway",
+      "title_ko": "무료 티켓",
+      "category": "other",
+      "start_date": "2026-10-10",
+      "end_date": "2026-10-11",
+      "venue_en": "Online",
+      "why_go": "Too good to be true.",
+      "sources": [
+        {
+          "url": "https://visitkorea-tickets.xyz/free",
+          "kind": "other"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "checks": [
+      {
+        "url": "https://culture.seoul.go.kr/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://culture.seoul.go.kr/event/night-market",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://visitkorea-tickets.xyz/free",
+        "status": "suspicious",
+        "reason": "lookalike of visitkorea.or.kr"
+      }
+    ],
+    "excluded_event_ids": [
+      "evt-bx"
+    ]
+  },
+  "deck": {
+    "job_id": "",
+    "title": "Seoul pop-ups you can't miss",
+    "caption": "Don't miss these! Details & links in bio.\n#seoul #popup #korea",
+    "hashtags": [
+      "seoul",
+      "popup",
+      "korea"
+    ],
+    "slides": [
+      {
+        "index": 0,
+        "layout": "cover",
+        "heading": "Seoul pop-ups you can't miss",
+        "body": "This week only",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 1,
+        "layout": "event",
+        "heading": "Tank Day Sale! (탱크데이)",
+        "body": "📅 May 18 only\nCelebrate with 51.8% off!",
+        "event_id": "evt-b1",
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 2,
+        "layout": "event",
+        "heading": "Seoul Night Market (서울 야시장)",
+        "body": "Ask the organizer directly: 010-1234-5678",
+        "event_id": "evt-b2",
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 3,
+        "layout": "event",
+        "heading": "Limited goods 𓀀𓁐 inside",
+        "body": "Only 100 sets",
+        "event_id": "evt-b2",
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 4,
+        "layout": "tips",
+        "heading": "Tips",
+        "body": "• Bring cash",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 5,
+        "layout": "cta",
+        "heading": "Follow us",
+        "body": "@whatsonkorea",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      }
+    ]
+  },
+  "issues": [],
+  "safeguard": {
+    "decision": "block",
+    "summary": "Blocked phrase \"Tank Day\" can't be posted. Slide 2 turns May 18, the anniversary of the 1980 Gwangju Uprising in which hundreds of civilians were killed by troops, into a \"Tank Day\" sale with a 51.8% discount that echoes the date. Korean readers would see this as mocking the victims, so it can't be posted.",
+    "findings": [
+      {
+        "category": "historical_tragedy",
+        "severity": "block",
+        "location": "slide",
+        "slide_index": 1,
+        "excerpt": "Tank Day",
+        "rule": "sensitive_topics.yaml · blocked phrase /(?i)tank\\s*day|탱크\\s*데이/",
+        "explanation": "\"Tank Day\" is on the blocked-phrase list: 스타벅스 탱크데이 (2026-05-18). Posting it would read as mocking a Korean tragedy or taking a side on a sensitive issue.",
+        "fix": "Remove or reword \"Tank Day\" and generate again."
+      },
+      {
+        "category": "historical_tragedy",
+        "severity": "block",
+        "location": "slide",
+        "slide_index": 1,
+        "excerpt": "Celebrate with 51.8% off!",
+        "rule": "historical_tragedy · 05-18 date gate (no discounts or celebration)",
+        "explanation": "51.8% encodes the date 5·18, and \"celebrate\" frames the anniversary of a massacre as a party. Both are on the date-gate list for May 15–20.",
+        "fix": "Drop the event, or list it neutrally without the discount or the celebration framing."
+      }
+    ],
+    "checked_by": [
+      "rules",
+      "model"
+    ],
+    "model_decision": "block",
+    "model_error": null,
+    "policy_version": "8ca7446",
+    "content_hash": "d597f7746ac9c7b2",
+    "checked_at": "2026-10-29T12:00:00+09:00"
+  },
+  "log": [
+    "safeguard: BLOCK · checked by rules+model · policy 8ca7446"
+  ]
+}

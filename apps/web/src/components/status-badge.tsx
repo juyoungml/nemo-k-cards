@@ -37,6 +37,7 @@ const JOB_STATUS: Record<JobStatus, [Tone, string]> = {
   REVIEWING: ["info", "Reviewing"],
   READY_FOR_REVIEW: ["info", "Ready for review"],
   REJECTED: ["danger", "Rejected"],
+  BLOCKED: ["danger", "Blocked by safeguard"],
   PUBLISHING: ["warning", "Publishing"],
   PUBLISHED: ["success", "Published"],
   FAILED: ["danger", "Failed"],

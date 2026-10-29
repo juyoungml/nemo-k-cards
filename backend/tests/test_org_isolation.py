@@ -11,6 +11,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from factories import allowed
 from psycopg_pool import ConnectionPool
 
 from app import brainstorms, orgs, store
@@ -26,7 +27,7 @@ ORG_TABLES = ("jobs", "brainstorms", "policy_events")
 def _ready_job(org_id, prompt="A's secret plan") -> Job:
     job = orchestrator.new_job(secrets.token_hex(3), prompt)
     job.status = JobStatus.READY_FOR_REVIEW
-    return store.save_job(org_id, job)
+    return store.save_job(org_id, allowed(job))
 
 
 def _event(job_id: str, host: str) -> PolicyEvent:
@@ -59,7 +60,7 @@ def test_b_cannot_approve_reject_or_post_a_job(two, monkeypatch):
     a, b, job, _ = two
     published = []
 
-    async def fake_publish(org_id, job_id, caption, mode):
+    async def fake_publish(org_id, job_id, caption, mode, by=None):
         published.append((org_id, job_id))
     monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
     assert b.post(f"/jobs/{job.id}/approve", json={}).status_code == 404

@@ -18,6 +18,9 @@ const ACTION: Record<string, [Tone, string]> = {
   "deck.approved": ["success", "Approved"],
   "deck.rejected": ["warning", "Rejected"],
   "deck.edited": ["info", "Edited"],
+  "deck.approve_refused": ["danger", "Approval refused"],
+  "safeguard.blocked": ["danger", "Blocked by safeguard"],
+  "safeguard.edit_blocked": ["danger", "Caption edit blocked"],
   "job.created": ["neutral", "Deck started"],
   "member.invited": ["neutral", "Invited"],
   "invitation.revoked": ["neutral", "Invitation withdrawn"],
@@ -39,6 +42,22 @@ function describe(e: AuditEvent): React.ReactNode {
       return <>Reason: “{String(d.reason)}”</>;
     case "deck.edited":
       return <>Caption changed</>;
+    case "deck.approve_refused":
+      return d.why === "no_safeguard_verdict" ? (
+        <>No safeguard verdict: regenerate</>
+      ) : (
+        <>
+          Blocked by safeguard{d.override_reason ? <> · Override reason given: “{String(d.override_reason)}”</> : null}
+        </>
+      );
+    case "safeguard.blocked":
+    case "safeguard.edit_blocked":
+      return (
+        <>
+          {e.action === "safeguard.blocked" ? `${d.stage === "publish" ? "At publish" : "Deck"} (Job started by this Member)` : `At ${String(d.stage)}`} ·{" "}
+          {(d.findings as unknown[] | undefined)?.length ?? 0} finding(s) · {String(d.summary ?? "")}
+        </>
+      );
     case "member.invited":
     case "member.joined":
       return <>as {role(d.role)}</>;
@@ -55,7 +74,7 @@ function describe(e: AuditEvent): React.ReactNode {
 
 function Target({ e }: { e: AuditEvent }) {
   if (!e.target) return null;
-  if (e.action.startsWith("deck.") || e.action === "job.created") {
+  if (e.action.startsWith("deck.") || e.action.startsWith("safeguard.") || e.action === "job.created") {
     return <Link href={`/review/${e.target}`} className="font-mono text-xs hover:underline">{e.target}</Link>;
   }
   return <span className="text-[13px]">{e.target}</span>;

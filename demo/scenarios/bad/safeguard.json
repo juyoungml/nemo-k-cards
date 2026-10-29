@@ -1,0 +1,16 @@
+{
+  "decision": "block",
+  "summary": "Slide 2 turns May 18, the anniversary of the 1980 Gwangju Uprising in which hundreds of civilians were killed by troops, into a \"Tank Day\" sale with a 51.8% discount that echoes the date. Korean readers would see this as mocking the victims, so it can't be posted.",
+  "findings": [
+    {
+      "category": "historical_tragedy",
+      "severity": "block",
+      "location": "slide",
+      "slide_index": 1,
+      "excerpt": "Celebrate with 51.8% off!",
+      "rule": "historical_tragedy · 05-18 date gate (no discounts or celebration)",
+      "explanation": "51.8% encodes the date 5·18, and \"celebrate\" frames the anniversary of a massacre as a party. Both are on the date-gate list for May 15–20.",
+      "fix": "Drop the event, or list it neutrally without the discount or the celebration framing."
+    }
+  ]
+}

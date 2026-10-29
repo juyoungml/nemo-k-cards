@@ -9,6 +9,7 @@ import uuid
 from datetime import date
 
 import pytest
+from factories import allowed_job
 
 from app import brainstorms, orgs, store
 from app.pipeline import orchestrator
@@ -56,14 +57,24 @@ async def run_brainstorm(brainstorm):
 async def test_good_scenario_is_ready(no_network):
     job = await run_quick("good")
     assert job.status == JobStatus.READY_FOR_REVIEW
+    assert job.safeguard.decision == "allow" and job.safeguard.findings == []
+    assert job.safeguard.checked_by == ["rules", "model"]
     assert len(job.slide_urls) == len(job.deck.slides)
     assert set(job.verification.excluded_event_ids) == {"ev-kpop-giveaway", "ev-hongdae-character"}
 
 
-async def test_bad_scenario_waits_for_operator_with_block_issues(no_network):
+async def test_bad_scenario_is_blocked_by_the_safeguard(no_network):
     job = await run_quick("bad")
-    # BACKEND §11 #4 (v1.1): checks never auto-reject; blocking issues wait for the operator in Review.
-    assert job.status == JobStatus.READY_FOR_REVIEW
+    # The Safeguard is the one binding check (ADR 0004): "Tank Day" on 5·18 can't be approved by anyone.
+    assert job.status == JobStatus.BLOCKED
+    sg = job.safeguard
+    assert sg.decision == "block" and sg.checked_by == ["rules", "model"] and sg.model_decision == "block"
+    assert {f.excerpt for f in sg.findings} >= {"Tank Day", "Celebrate with 51.8% off!"}
+    assert sg.summary.startswith('Blocked phrase "Tank Day"')
+    assert all(f.explanation and f.fix and f.rule for f in sg.findings)
+    states = {s.name: s.state for s in job.pipeline}
+    assert states["Safeguard"] == "failed" and states["Human publish"] == "skipped"
+    # The advisory checks still ran and are shown next to the verdict.
     assert any(i.severity == "block" for i in job.issues)
     cats = {(i.category, i.severity) for i in job.issues}
     assert ("sensitive", "block") in cats
@@ -119,6 +130,8 @@ async def test_brainstorm_sample_verifies_its_own_source(no_network):
     assert (brief.start_date.month, brief.start_date.day, brief.end_date.day) == (10, 17, 19)
     assert [c.url for c in job.verification.checks] == [brainstorms.SAMPLE_URL]
     assert job.deck.slides[1].event_id == brief.id
+    assert job.safeguard.decision == "allow"  # Brainstorm Jobs go through the Safeguard too
+    assert [s.name for s in job.pipeline][-2:] == ["Safeguard", "Human publish"]
 
 
 async def test_brainstorm_dead_source_blocks_and_demotes_facts(no_network):
@@ -172,14 +185,12 @@ def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch, client):
     from app.config import settings
     calls = []
 
-    async def fake_publish(org_id, job_id, caption, mode):
+    async def fake_publish(org_id, job_id, caption, mode, by=None):
         calls.append(mode)
     monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
     monkeypatch.setattr(settings, "publish_mode", "mock")
     for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
-        job = orchestrator.new_job(secrets.token_hex(3), "approve test")
-        job.status = JobStatus.READY_FOR_REVIEW
-        store.save_job(client.org_id, job)
+        job = store.save_job(client.org_id, allowed_job())
         r = client.post(f"/jobs/{job.id}/approve", json={"mode": mode} if mode else {})
         assert r.status_code == code, (mode, r.text)
     assert calls == ["mock", "mock"]

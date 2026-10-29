@@ -29,6 +29,7 @@ TOOLS = {
     "planner": ["Read"],
     "copywriter": ["Read"],
     "reviewer": ["Read"],
+    "safeguard": ["Read"],
 }
 
 

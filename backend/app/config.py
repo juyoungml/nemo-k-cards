@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     jobs_per_worker: int = 4      # Jobs one API/worker process runs at once (Chromium, agent CLIs)
     # Bump when the pipeline's stage list or order changes: a Job started under another version is not resumed
     # (its checkpoints no longer line up with the code) and is marked failed at the next start instead.
-    workflow_version: str = "1"
+    # 2: the Safeguard stage runs after review (#43).
+    workflow_version: str = "2"
 
     # Agent runtime
     agent_model: str = ""                 # e.g. "sonnet" to cut cost; empty = CLI default

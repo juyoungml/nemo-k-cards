@@ -1,8 +1,9 @@
-"""Runs one job through SPEC §4: research -> verify -> copy -> render -> QA -> review (BACKEND §5), as a durable
-DBOS workflow (#17, ADR 0002): each stage is a checkpointed step, so a restart resumes a Job where it stopped.
+"""Runs one job through SPEC §4: research -> verify -> copy -> render -> QA -> review -> safeguard (BACKEND §5), as a
+durable DBOS workflow (#17, ADR 0002): each stage is a checkpointed step, so a restart resumes a Job where it stopped.
 
 DEMO_MODE=fixture replays demo/scenarios/<name>/ for the agent stages (no API cost) while render/QA run for real.
-Scenarios match the Admin mock backend: good (READY_FOR_REVIEW), bad (REJECTED), fail (FAILED); Brainstorm jobs
+Scenarios match the Admin mock backend: good (READY_FOR_REVIEW), bad (BLOCKED by the Safeguard), fail (FAILED);
+Brainstorm jobs
 replay demo/scenarios/brainstorm/. Files a scenario doesn't provide fall back to good/.
 DEMO_MODE=live calls the Claude Code subagents through the configured runner.
 """
@@ -13,18 +14,20 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from dbos import DBOS, SetEnqueueOptions, SetWorkflowID, WorkflowSerializationFormat
 
-from app import brainstorms, store
+from app import audit, brainstorms, store
 from app.config import settings
 from app.pipeline import durable
 from app.pipeline.agent_runner import run_stage
 from app.renderer.base import RenderedSlide
 from app.renderer.html import HtmlRenderer, weekend_label
 from app.schemas import (
+    BlockedEdit,
     Brainstorm,
     CardDeck,
     EventBrief,
@@ -37,9 +40,11 @@ from app.schemas import (
     PolicyEvent,
     PublishProgress,
     ReviewVerdict,
+    SafeguardModelOutput,
+    SafeguardVerdict,
     VerificationReport,
 )
-from app.services import image_host, link_checker, photos, publisher, visual_qa
+from app.services import image_host, link_checker, photos, publisher, safeguard, visual_qa
 
 log = logging.getLogger("orchestrator")
 KST = ZoneInfo("Asia/Seoul")
@@ -52,10 +57,12 @@ STEPS = {
     "render": ("Render", "host · Playwright"),
     "qa": ("Visual QA", "host"),
     "review": ("Final review", "reviewer · sandbox"),
+    "safeguard": ("Safeguard", "safeguard · sandbox"),
     "publish": ("Human publish", "you"),
 }
 STATUS = {"research": JobStatus.RESEARCHING, "verify": JobStatus.VERIFYING, "copy": JobStatus.WRITING,
-          "render": JobStatus.RENDERING, "qa": JobStatus.QA, "review": JobStatus.REVIEWING}
+          "render": JobStatus.RENDERING, "qa": JobStatus.QA, "review": JobStatus.REVIEWING,
+          "safeguard": JobStatus.REVIEWING}
 
 _tasks: set[asyncio.Task] = set()
 
@@ -151,6 +158,7 @@ STAGES: list[tuple[str, str]] = [  # (stage = DBOS step name, the Admin pipeline
     ("render", "render"),
     ("qa", "qa"),
     ("review", "review"),
+    ("safeguard", "safeguard"),  # the one binding check (ADR 0004); added in WORKFLOW_VERSION 2
 ]
 UI_STEP = dict(STAGES)
 RUNNING = {JobStatus.QUEUED, JobStatus.RESEARCHING, JobStatus.VERIFYING, JobStatus.WRITING, JobStatus.RENDERING,
@@ -169,13 +177,15 @@ def workflow_id(org_id: UUID | str, job_id: str) -> str:
 @dataclass
 class Stage:
     """What a stage function gets: the Run (the Job, its log and saves), the Brainstorm snapshot (with unverified
-    facts demoted once Verify has run), the fixture scenario, the hand-off from earlier stages (`carry`) and
-    `out`, where it puts its own hand-off."""
+    facts demoted once Verify has run), the fixture scenario, the hand-off from earlier stages (`carry`),
+    `out`, where it puts its own hand-off, and who started the Job (`started_by`: {"id", "email"} of the Member, for
+    audit events the pipeline writes on their behalf; None for runs without a caller, e.g. tests and golden runs)."""
     r: Run
     brainstorm: Brainstorm | None
     scenario: str
     carry: dict
     out: dict = field(default_factory=dict)
+    started_by: dict | None = None
 
     @property
     def job(self) -> Job:
@@ -372,7 +382,7 @@ async def _qa(s: Stage) -> None:
 
 
 async def _review(s: Stage) -> None:
-    """6. Final review (sandbox), then hand the Deck to the operator."""
+    """6. Final review (sandbox). Its Issues advise the operator; the Safeguard (next) decides what can't be posted."""
     job, r, brainstorm = s.job, s.r, s.brainstorm
     deck, included, rendered = job.deck, _included(job), _rendered(s)
     qa_issues = [Issue.model_validate(i) for i in s.carry.get("qa_issues", [])]
@@ -402,7 +412,26 @@ async def _review(s: Stage) -> None:
 
     host_issues = [Issue.model_validate(i) for i in s.carry.get("host_issues", [])]
     job.issues = host_issues + qa_issues + verdict.issues
-    # Automated checks advise; the human decides. Never auto-reject — blocking issues are shown in Review.
+
+
+async def _safeguard(s: Stage) -> None:
+    """7. Safeguard (host rules + sandbox), then hand the Deck to the operator. The one check that can stop a Deck:
+    a block ends the Job BLOCKED, which nobody can approve (ADR 0004). It reads the rendered slides from this
+    host's disk, the same files that will be posted, never a public link."""
+    job, r = s.job, s.r
+    r.step("safeguard", "running")
+    s.fixture_fail("safeguard")
+    verdict = await run_safeguard(r.org_id, job.id, job.deck, [x.path for x in _rendered(s)],
+                                  None if s.live else s.fx)
+    job.safeguard = verdict
+    _log_safeguard(r, verdict)
+    if verdict.decision == "block":
+        job.status = JobStatus.BLOCKED
+        r.step("publish", "skipped", "Blocked by safeguard: regenerate or reject")
+        await _audit(r.org_id, s.started_by, "safeguard.blocked", job.id, stage="pipeline",
+                     **verdict_detail(verdict))
+        return
+    # Every other check advises; the human decides. Blocking Issues are shown in Review (an Override approves them).
     n_block = sum(i.severity == "block" for i in job.issues)
     if n_block:
         r.log("review", f"{n_block} blocking issue(s) flagged for the operator — decide in Review", "warn")
@@ -411,15 +440,75 @@ async def _review(s: Stage) -> None:
            else "Approve in Review")
 
 
+async def run_safeguard(org_id: UUID, job_id: str, deck: CardDeck, slide_paths: list[Path], fx=None,
+                        *, use_model: bool = True) -> SafeguardVerdict:
+    """Binding allow/block verdict for exactly this Deck. `fx` = the fixture loader (DEMO_MODE=fixture), whose
+    `safeguard.json` stands in for the model (missing = allow; the host rules always run). `use_model=False`: rules
+    only. The model runs through the same agent runner as every other stage, under the Job's Organization, and
+    gets the slides as local files (uploaded into the sandbox with OpenShell)."""
+    today = datetime.now(KST).date()
+    if not use_model:
+        model = None
+    elif fx is not None:
+        async def model(payload, files):
+            await asyncio.sleep(FIXTURE_DELAY)
+            return SafeguardModelOutput.model_validate(
+                fx("safeguard.json") or {"decision": "allow", "summary": "No harmful content found."})
+    else:
+        async def model(payload, files):
+            return await run_stage(
+                "safeguard",
+                "Use the safeguard subagent. Decide whether this card deck is safe to publish on a public "
+                "Instagram account for foreign visitors to Korea. Apply `policy_md` and `sensitive_topics_yaml`, "
+                "look at every image in `slide_paths`, and explain every block for the operator.",
+                payload, SafeguardModelOutput, files=files, job_id=job_id, org_id=org_id)
+    return await safeguard.check(deck, slide_paths=slide_paths, today=today, model=model)
+
+
+def _log_safeguard(r: Run, sg: SafeguardVerdict) -> None:
+    nb = sum(f.severity == "block" for f in sg.findings)
+    nw = len(sg.findings) - nb
+    if sg.model_error:
+        r.log("safeguard", f"model failed ({sg.model_error[:120]}) → blocked (fail closed)", "warn")
+    r.log("safeguard", f"{sg.decision.upper()} · {nb} block · {nw} warn · checked by {'+'.join(sg.checked_by)} · "
+          f"policy {sg.policy_version}", "warn" if sg.decision == "block" else "info")
+    r.step("safeguard", "done" if sg.decision == "allow" else "failed",
+           f"allow · {nw} warn" if sg.decision == "allow" else f"BLOCKED · {nb} finding(s)")
+
+
+def verdict_detail(v: SafeguardVerdict) -> dict:
+    """What the audit log keeps of a verdict: enough to see why, without the whole Deck."""
+    keep = {"category", "severity", "location", "slide_index", "excerpt", "rule"}
+    return {"summary": v.summary, "checked_by": v.checked_by, "model_error": v.model_error,
+            "policy_version": v.policy_version, "findings": [f.model_dump(include=keep) for f in v.findings]}
+
+
+async def _audit(org_id: UUID, by: dict | None, action: str, target: str, **detail) -> None:
+    """An audit event the host writes on a Member's behalf (the one who started the Job, or approved it): best
+    effort, in its own transaction, under the Job's Organization. Skipped without a Member (tests, golden runs);
+    never fails the stage (e.g. the Member was removed meanwhile, which RLS refuses)."""
+    if not by:
+        return
+
+    def write() -> None:
+        actor = UUID(by["id"])
+        with store.tenant(org_id, user_id=actor) as c:
+            audit.insert(c, org_id, actor, by.get("email", ""), action, target, detail)
+    try:
+        await asyncio.to_thread(write)
+    except Exception:
+        log.warning("could not write audit event %s for job %s", action, target, exc_info=True)
+
+
 STAGE_FUNCS: dict[str, Callable[[Stage], Awaitable[None]]] = {
     "research": _research, "verify": _verify, "photos": _photos, "copy": _copy, "stock": _stock,
-    "render": _render, "qa": _qa, "review": _review,
+    "render": _render, "qa": _qa, "review": _review, "safeguard": _safeguard,
 }
 _FIRST = {ui: next(s for s, u in STAGES if u == ui) for ui in UI_STEP.values()}
 
 
 async def _run_stage_step(org: str, job_id: str, stage: str, brainstorm: dict | None, scenario: str,
-                          carry: dict) -> dict:
+                          carry: dict, started_by: dict | None = None) -> dict:
     """The body of one DBOS step: load the Job under its Organization, run `stage`, save the Job. A stage error
     fails the Job (as before) and is a normal result here, so the workflow stops without retrying. Returns
     {"ok": continue?, "carry": this stage's hand-off}. Only an error saving the Job escapes (the step fails)."""
@@ -428,7 +517,7 @@ async def _run_stage_step(org: str, job_id: str, stage: str, brainstorm: dict | 
         return {"ok": False, "carry": {}}  # not this Organization's Job (RLS), or gone
     r = Run(org_id, job)
     board = carry.get("brainstorm") or brainstorm
-    s = Stage(r, Brainstorm.model_validate(board) if board else None, scenario, carry)
+    s = Stage(r, Brainstorm.model_validate(board) if board else None, scenario, carry, started_by=started_by)
     ui = UI_STEP[stage]
     if _FIRST[ui] == stage and any(p.name == STEPS[ui][0] and p.state == "running" for p in job.pipeline):
         r.log(ui, f"{STEPS[ui][0]} was cut off by a server restart; running it again "
@@ -450,29 +539,32 @@ async def _run_stage_step(org: str, job_id: str, stage: str, brainstorm: dict | 
 
 @DBOS.workflow(name="wok.job", max_recovery_attempts=5, serialization_type=WorkflowSerializationFormat.PORTABLE)
 async def job_workflow(org: str, job_id: str, source: str, brainstorm: dict | None = None,
-                       scenario: str = "good") -> str:
+                       scenario: str = "good", started_by: dict | None = None) -> str:
     """The pipeline for one Job. Arguments are plain JSON (stored by DBOS): the Organization, the Job, its source,
-    the Brainstorm board as it was when the Job started, and the fixture scenario."""
+    the Brainstorm board as it was when the Job started, the fixture scenario and who started it."""
     carry: dict = {}
     for stage in stages_for(source):
         out = await DBOS.run_step_async({"name": stage}, _run_stage_step, org, job_id, stage, brainstorm, scenario,
-                                        carry)
+                                        carry, started_by)
         if not out["ok"]:
             return "stopped"
         carry = {**carry, **out["carry"]}
     return "done"
 
 
-async def start_job(org_id: UUID, job: Job, *, brainstorm: Brainstorm | None = None, scenario: str = "good") -> None:
+async def start_job(org_id: UUID, job: Job, *, brainstorm: Brainstorm | None = None, scenario: str = "good",
+                    started_by: dict | None = None) -> None:
     """Queue a saved Job under its Organization's slot (`JOBS_PER_ORG`). Once this returns the Job survives a
-    restart: a worker picks it up when a slot is free and runs it to the end."""
+    restart: a worker picks it up when a slot is free and runs it to the end. `started_by`: {"id", "email"} of the
+    Member who started it, for the audit events the pipeline writes (a Safeguard block)."""
     queue = await DBOS.retrieve_queue_async(durable.JOB_QUEUE)
     with SetWorkflowID(workflow_id(org_id, job.id)), SetEnqueueOptions(queue_partition_key=str(org_id)):
         await queue.enqueue_async(job_workflow, str(org_id), job.id, job.source,
-                                  brainstorm.model_dump(mode="json") if brainstorm else None, scenario)
+                                  brainstorm.model_dump(mode="json") if brainstorm else None, scenario, started_by)
 
 
-async def run_job(org_id: UUID, job_id: str, brainstorm: Brainstorm | None = None, scenario: str = "good") -> None:
+async def run_job(org_id: UUID, job_id: str, brainstorm: Brainstorm | None = None, scenario: str = "good",
+                  started_by: dict | None = None) -> None:
     """Run `job_id` of Organization `org_id` now, in this task, as the same durable workflow (tests, golden runs;
     the API queues with `start_job`). The job (and `brainstorm`, loaded by the caller under the same
     Organization) is all the agent stages receive; a job id from another Organization is simply not found."""
@@ -482,7 +574,7 @@ async def run_job(org_id: UUID, job_id: str, brainstorm: Brainstorm | None = Non
         await asyncio.to_thread(durable.launch)
     with SetWorkflowID(workflow_id(org_id, job_id)):
         await job_workflow(str(org_id), job_id, job.source,
-                           brainstorm.model_dump(mode="json") if brainstorm else None, scenario)
+                           brainstorm.model_dump(mode="json") if brainstorm else None, scenario, started_by)
 
 
 def reconcile_after_restart() -> None:
@@ -544,25 +636,89 @@ LABELS = {"upload": "Uploading slides to public storage", "containers": "Sending
           "processing": "Instagram is processing the images", "publish": "Publishing to @whatsonkorea"}
 
 
-async def publish_job(org_id: UUID, job_id: str, caption: str | None, mode: str) -> None:
+async def publish_job(org_id: UUID, job_id: str, caption: str | None, mode: str, by: dict | None = None) -> None:
+    """Publish an approved Deck. `by`: {"id", "email"} of the Approver, for the audit events written here."""
     job = await asyncio.to_thread(store.get_job, org_id, job_id)
     if not job or not job.deck:
         return
     r = Run(org_id, job)
     try:
-        await _publish_job(r, caption, mode)
+        await _publish_job(r, caption, mode, by)
     finally:
         await r.flush()
 
 
-async def _publish_job(r: Run, caption: str | None, mode: str) -> None:
+def _stop_publish(r: Run, status: JobStatus, label: str, error: str, note: str) -> bool:
+    pp = r.job.publish_progress
+    pp.step, pp.label, pp.error, pp.finished_at = "failed", label, error[:300], datetime.now(UTC)
+    r.job.status = status
+    r.step("publish", "skipped" if status == JobStatus.BLOCKED else "pending", note)
+    return False
+
+
+async def _safeguard_before_publish(r: Run, caption: str | None, mode: str, paths: list[Path],
+                                    by: dict | None) -> bool:
+    """Nothing leaves the host unless the Safeguard allowed exactly what will be posted. Returns True to publish.
+
+    The candidate Deck (with the edited caption, if any) is checked on a copy. A refused edit is recorded on the
+    Job and the Deck keeps its last allowed caption (still approvable); a refused or unverifiable Deck ends BLOCKED.
+    """
     job = r.job
-    if caption:
-        job.deck.caption = caption
+    edited = bool(caption) and caption != job.deck.caption
+    candidate = job.deck.model_copy(update={"caption": caption}) if edited else job.deck
+    checked = job.safeguard and job.safeguard.decision == "allow" and \
+        job.safeguard.content_hash == safeguard.content_hash(candidate, paths)
+    # A real post also needs the model to have checked it (a dry run of an edit may have run the rules only).
+    if checked and (mode != "graph" or "model" in job.safeguard.checked_by):
+        job.deck = candidate
+        return True
+    live = settings.demo_mode == "live"
+    if mode == "graph" and not live:
+        # A real post needs the model's check; a fixture server can only run the phrase rules.
+        r.log("safeguard", "content not checked by the model and the model can't run here → not posted", "warn")
+        return _stop_publish(r, JobStatus.READY_FOR_REVIEW, "Not posted: the safeguard model can't check this edit",
+                             "This server runs DEMO_MODE=fixture, so an edit can't be checked by the safeguard model "
+                             "before a real post. Approve without editing, or use a live server.",
+                             "Edit needs the safeguard model (live server)")
+    job.publish_progress.label = ("Safeguard is checking the edited caption" if edited
+                                  else "Safeguard is checking the Deck again")
+    r.log("safeguard", ("caption edited" if edited else "Deck changed since the last check")
+          + " → checking again before publishing")
+    r.save()
+    try:
+        verdict = await run_safeguard(r.org_id, job.id, candidate, paths, use_model=live)
+    except Exception as e:  # noqa: BLE001 — fail closed (check() already catches model errors; this is the rest)
+        verdict = SafeguardVerdict(decision="block", summary="Blocked because the safety check could not run.",
+                                   model_error=str(e)[:300], content_hash=safeguard.content_hash(candidate, paths))
+    if verdict.decision == "allow":
+        job.deck, job.safeguard, job.blocked_edit = candidate, verdict, None
+        r.log("safeguard", f"ALLOW · checked by {'+'.join(verdict.checked_by)} · policy {verdict.policy_version}")
+        return True
+    if edited and job.safeguard and job.safeguard.decision == "allow" and \
+            job.safeguard.content_hash == safeguard.content_hash(job.deck, paths):
+        job.blocked_edit = BlockedEdit(caption=caption, verdict=verdict)
+        r.log("safeguard", "edited caption BLOCKED · the Deck keeps its original caption", "warn")
+        await _audit(r.org_id, by, "safeguard.edit_blocked", job.id, stage="publish", caption=caption,
+                     **verdict_detail(verdict))
+        return _stop_publish(r, JobStatus.READY_FOR_REVIEW,
+                             "Edited caption blocked by safeguard: nothing was posted", verdict.summary,
+                             "Edited caption blocked: approve the original or edit again")
+    job.safeguard = verdict
+    _log_safeguard(r, verdict)
+    await _audit(r.org_id, by, "safeguard.blocked", job.id, stage="publish", **verdict_detail(verdict))
+    return _stop_publish(r, JobStatus.BLOCKED, "Blocked by safeguard: nothing was posted", verdict.summary,
+                         "Blocked by safeguard: regenerate or reject")
+
+
+async def _publish_job(r: Run, caption: str | None, mode: str, by: dict | None = None) -> None:
+    job = r.job
     job.status = JobStatus.PUBLISHING
     job.error = None
     job.publish_progress = PublishProgress(mode=mode, step="upload", label=LABELS["upload"],
                                            started_at=datetime.now(UTC))
+    paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
+    if not await _safeguard_before_publish(r, caption, mode, paths, by):
+        return
     n_block = sum(i.severity == "block" for i in job.issues)
     r.step("publish", "running", f"publishing ({mode})")
     r.log("publish", f"approved by operator → publisher on host (mode: {mode})"
@@ -577,7 +733,6 @@ async def _publish_job(r: Run, caption: str | None, mode: str) -> None:
         r.save()
 
     try:
-        paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
         if mode in ("graph", "dryrun"):
             # Private slides (#18): links expire in minutes and uploads are deleted when the block ends.
             async with image_host.exposed(r.org_id, job.id, paths, lambda d, t: progress("upload", d, t)) as urls:

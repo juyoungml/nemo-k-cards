@@ -1,7 +1,8 @@
-"""Live mode: run one case through the real orchestrator (research → … → review) with the configured runner.
+"""Live mode: run one case through the real orchestrator (research → … → review → safeguard) with the configured
+runner.
 
-Costs tokens: three `claude -p` stages per case. Never publishes; the job stops at READY_FOR_REVIEW like any
-other. `__main__` isolates the run before this is imported (scratch OUTPUT_DIR, and a scratch database once the
+Costs tokens: four `claude -p` stages per case. Never publishes; the job stops at READY_FOR_REVIEW (or BLOCKED) like
+any other. `__main__` isolates the run before this is imported (scratch OUTPUT_DIR, and a scratch database once the
 store is Postgres); `isolation_problem` refuses to start if that didn't happen.
 """
 
@@ -59,6 +60,8 @@ async def run_case(case: Case, set_version: int) -> Recording:
     from app.config import settings
     from app.pipeline import agent_runner, orchestrator
 
+    if case.kind == "safeguard":
+        raise ValueError(f"{case.id}: Safeguard cases replay a fixed Deck; there is no request to run live")
     if case.kind != "event":
         raise ValueError(f"{case.id}: the pipeline only makes Event Decks so far (#27)")
     if problem := isolation_problem(settings):
