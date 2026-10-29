@@ -106,7 +106,9 @@ cd backend && uv run python -m app.golden            # replay recordings: free, 
 cd backend && uv run python -m app.golden --live --case seongsu-popups --record   # real agents, costs tokens
 ```
 
-Run it after editing `agent/**`, the orchestrator or `AGENT_MODEL`. Replay re-checks recorded outputs, so a prompt or model change marks recordings STALE: re-record the affected cases with `--live --record` (one case ≈ three `claude -p` stages) and commit the JSON. Live runs keep slides and their job DB under `--out` (default `backend/.data/golden`), never publish, and don't appear in the Admin. CI (`.github/workflows/golden-set.yml`) runs replay; live CI needs an `ANTHROPIC_API_KEY` secret (steps in that file).
+Run it after editing `agent/**`, the orchestrator's stage tasks, stage output schemas or `AGENT_MODEL`. Replay re-checks recorded outputs, so it marks a recording STALE when any of those changed (a hash of all of them) or when it was made on another model than the `model` pinned in `cases.json` (override with `--model`). Re-record stale cases with `--live --record` (one case ≈ three `claude -p` stages) and commit the JSON; a recording stores the model id and `claude` CLI version the run actually used. Recordings built from demo data (`demo-scenario`, `synthetic`) report as FIXTURE and never count as a pass.
+
+Live runs never publish (`PUBLISH_MODE=mock`, publishing credentials blanked) and never write the Admin's data: slides go under `--out` (default `backend/.data/golden`). With the SQLite store its database sits there too; with the Postgres store live mode uses `GOLDEN_DATABASE_URL` (its database name must contain `golden` or `test`) or creates a scratch database on `TEST_DATABASE_URL`'s server, applies `supabase/migrations` and drops it at exit, and refuses to start otherwise. CI (`.github/workflows/golden-set.yml`) runs replay; live CI needs an `ANTHROPIC_API_KEY` secret (steps in that file).
 
 ## Rules
 

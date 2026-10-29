@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "model": "claude-opus-5-5",
   "cases": [
     {
       "id": "seongsu-popups",

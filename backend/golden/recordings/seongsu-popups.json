@@ -4,8 +4,7 @@
   "provenance": "live",
   "recorded_at": "2026-10-29T14:37:39.166972+09:00",
   "today": "2026-10-29",
-  "model": "",
-  "prompts_sha": "21803c178130454a",
+  "model": "claude-opus-5-5",
   "prompt": "Seongsu pop-ups this weekend",
   "status": "READY_FOR_REVIEW",
   "briefs": [
@@ -465,6 +464,13 @@
     "copy: CardDeck 8 slides · caption 5 hashtags",
     "render: slide-00.jpg … slide-07.jpg",
     "qa: overflow/font/PII/secret/hashtag checks → 0 block · 0 warn",
-    "review: verdict pass · 5 issue(s)"
-  ]
+    "review: verdict pass · 5 issue(s)",
+    "golden: model / cli_version / agent_sha backfilled from the run's CLI session logs"
+  ],
+  "agent_sha": "b26f77d20a426a92",
+  "models": [
+    "claude-opus-5-5"
+  ],
+  "cli_version": "2.1.296",
+  "runner": "local"
 }

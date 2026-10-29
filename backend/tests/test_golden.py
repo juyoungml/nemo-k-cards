@@ -58,7 +58,53 @@ def test_free_claim_needs_a_free_price():
     b = EventBrief.model_validate(json.loads((settings.scenarios_dir / "good/briefs.json").read_text())[2])
     assert b.price == "₩5,000"
     fails, _ = unsupported_facts("Free entry all week", [b])
-    assert fails == ["says 'free' but no brief does"]
+    assert fails == ["says 'free' but no brief's price or offer does"]
+
+
+def test_the_prompt_is_not_evidence():
+    """hongdae-free asks for free things; that doesn't make a ₩5,000 show free."""
+    rec = good()
+    rec.case_id, rec.prompt = "hongdae-free", CASES["hongdae-free"].prompt
+    rec.deck["slides"][3]["body"] = "Free entry"                  # modern hanbok: ₩5,000, no brief says free
+    s = {r.name: r for r in run_checks(CASES["hongdae-free"], rec)}
+    assert s["facts"].status == "fail" and "says 'free'" in s["facts"].detail
+
+
+def brief(**kw) -> EventBrief:
+    return EventBrief.model_validate({"id": "b", "title_en": "Night Market", "title_ko": "야시장",
+                                      "start_date": "2026-12-20", "end_date": "2026-12-27", "venue_en": "Mapo",
+                                      "sources": [{"url": "https://example.go.kr/", "kind": "official"}], **kw})
+
+
+@pytest.mark.parametrize(("text", "evidence", "ok"), [
+    ("Opens 9:00", {"foreigner_tips": ["Open 19:00 to late"]}, False),
+    ("5% off", {"why_go": "15% off for students"}, False),
+    ("Open 10:00–18:00", {"foreigner_tips": ["Open 10am-6pm"]}, True),
+    ("Last entry 8:30 pm", {"foreigner_tips": ["Last entry 20:30"]}, True),
+    ("Tickets KRW 99,000", {"price": "KRW 99,000"}, True),
+    ("Tickets KRW 99,000", {"price": "KRW 9,900"}, False),
+    ("₩12,000 at the door", {"price": "Free", "address_ko": "서울 마포구 12000"}, False),  # address is not a price
+])
+def test_times_percents_and_prices_compare_as_values(text, evidence, ok):
+    fails, _ = unsupported_facts(text, [brief(**evidence)])
+    assert (not fails) is ok, fails
+
+
+@pytest.mark.parametrize(("text", "ok"), [
+    ("Dec 24–26", True), ("24 December", True), ("2026-12-25", True), ("12/25", True), ("12월 25일", True),
+    ("Dec 28", False), ("1 January", False), ("2026-11-30", False), ("1/2", False), ("1월 3일", False),
+    ("Market 2 and Novotel 3 are next door", True), ("Open 24/7", True),   # not dates
+])
+def test_dates_in_every_format_must_fall_in_the_event(text, ok):
+    fails, _ = unsupported_facts(text, [brief()])
+    assert (not fails) is ok, fails
+
+
+def test_heading_matches_the_title_not_the_venue():
+    rec = good()
+    rec.briefs[2].update(venue_en="Seoul Lantern Plaza Hall")
+    rec.deck["slides"][2]["heading"] = "Plaza Hall Special"       # names the venue, not "Seoul Lantern Walk"
+    assert statuses("ambiguous-weekend", rec)["facts"] == "fail"
 
 
 def test_heading_must_name_its_event():
@@ -109,6 +155,29 @@ def test_a_deck_where_none_was_expected_fails_the_outcome():
     rec = good()
     rec.case_id = "nothing-to-find"
     assert statuses("nothing-to-find", rec)["outcome"] == "fail"
+
+
+def test_live_isolation_refuses_shared_data():
+    from types import SimpleNamespace
+
+    from app.golden.live import DEFAULT_OUTPUT_DIR, isolation_problem
+    base = {"demo_mode": "live", "publish_mode": "mock", "ig_access_token": "", "supabase_service_key": ""}
+    sqlite = SimpleNamespace(**base, output_dir=DEFAULT_OUTPUT_DIR)
+    assert "Admin's data" in isolation_problem(sqlite)
+    assert isolation_problem(SimpleNamespace(**base, output_dir="/tmp/golden/out")) is None
+    pg = SimpleNamespace(**base, output_dir="/tmp/golden/out", database_url="postgresql://u@h:5432/postgres")
+    assert "not a golden/test database" in isolation_problem(pg)
+    pg.database_url = "postgresql://u@h:5432/wok_golden_1a2b?sslmode=disable"
+    assert isolation_problem(pg) is None
+    assert "PUBLISH_MODE" in isolation_problem(SimpleNamespace(**{**base, "publish_mode": "dryrun"},
+                                                               output_dir="/tmp/x"))
+
+
+def test_agent_sha_covers_skills_and_stage_tasks():
+    files = [f.name for f in golden.AGENT_DIR.rglob("*") if f.is_file()]
+    assert "SKILL.md" in files
+    calls = golden._stage_calls()
+    assert sorted(c.args[0].value for c in calls) == ["copywriter", "researcher", "reviewer"]
 
 
 def test_demo_bad_scenario_is_caught():

@@ -38,6 +38,8 @@ on:
             'backend/app/services/photos.py',
             'backend/app/services/visual_qa.py',
             'backend/app/renderer/stock/catalog.json',
+            'backend/pyproject.toml',
+            'backend/uv.lock',
             '.github/workflows/golden-set.yml']
   pull_request:
     paths: ['agent/**',
@@ -51,6 +53,8 @@ on:
             'backend/app/services/photos.py',
             'backend/app/services/visual_qa.py',
             'backend/app/renderer/stock/catalog.json',
+            'backend/pyproject.toml',
+            'backend/uv.lock',
             '.github/workflows/golden-set.yml']
   workflow_dispatch:
 permissions:

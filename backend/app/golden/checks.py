@@ -11,9 +11,10 @@ Rule checks:
   hashtags      at most 5 hashtags in the caption (the same regex host QA uses)
   links         every shown event kept a source that passed the link check; no excluded event, unchecked or
                 suspicious URL appears on a slide (link_checker.suspicious_reason, offline)
-  facts         prices, percentages, times, dates and "free" claims on slides and caption appear in the briefs;
-                event headings name their event. Warn only: Hangul names missing from the briefs, and claims on
-                the tips slide (general know-how such as last-train times is not in any brief)
+  facts         prices, percentages, times, dates and "free" claims on slides and caption appear in the briefs,
+                compared as values (see "fact extraction"); event headings name their event (title_en /
+                title_ko). The Prompt is never evidence. Warn only: Hangul names missing from the briefs, and
+                claims on the tips slide (general know-how such as last-train times is not in any brief)
   photos        AI stock photos come from the catalog, match the event's category and are used once; other photos
                 carry an overlay-safe licence and a credit; a stock photo whose `never_for` names the event warns
   expectations  event count, categories, place and date window from the case
@@ -55,15 +56,24 @@ def _result(name: str, fails: list[str], warns: list[str] = (), ok: str = "", ju
 
 
 # ---------------------------------------------------------------- fact extraction
+# Claims are pulled out of slide text and out of the briefs with the same patterns, normalised, and compared as
+# sets: (month, day) for dates, (hour, minute) for times, numbers for prices and percentages. No substring matching,
+# and the Prompt is never evidence (a request for "free things" doesn't make anything free).
 
-MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
-_MON = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
-DATE = re.compile(rf"\b{_MON}\s+(\d{{1,2}})(?:\s*[–—-]\s*(?:{_MON}\s+)?(\d{{1,2}}))?\b", re.IGNORECASE)
-MONEY = re.compile(r"₩\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:won\b|KRW\b|원)", re.IGNORECASE)
+_MONTHS = ["jan(?:uary)?", "feb(?:ruary)?", "mar(?:ch)?", "apr(?:il)?", "may", "june?", "july?", "aug(?:ust)?",
+           "sep(?:t(?:ember)?)?", "oct(?:ober)?", "nov(?:ember)?", "dec(?:ember)?"]
+_MON = r"(" + "|".join(_MONTHS) + r")\.?(?![a-z])"
+_DASH = r"\s*[–—~-]\s*"
+DATE_MD = re.compile(rf"\b{_MON}\s+(\d{{1,2}})(?!\d)(?:{_DASH}(?:{_MON}\s+)?(\d{{1,2}})(?!\d))?", re.IGNORECASE)
+DATE_DM = re.compile(rf"\b(\d{{1,2}})(?:{_DASH}(\d{{1,2}}))?\s+{_MON}", re.IGNORECASE)
+DATE_ISO = re.compile(r"(?<!\d)(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?!\d)")
+DATE_SLASH = re.compile(r"(?<![\d/.])(\d{1,2})/(\d{1,2})(?![\d/])")
+DATE_KO = re.compile(r"(\d{1,2})월\s*(\d{1,2})일")
+MONEY = re.compile(r"₩\s?(\d[\d,]*)|(?:KRW|won)\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:won\b|KRW\b|원)", re.IGNORECASE)
 PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s?%")
-CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\b")
-AMPM = re.compile(r"\b(\d{1,2})\s?([ap])\.?m\.?\b", re.IGNORECASE)
-FREE = re.compile(r"\bfree\b", re.IGNORECASE)
+AMPM = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s?([ap])\.?m\b\.?", re.IGNORECASE)
+CLOCK = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])")
+FREE = re.compile(r"\bfree\b|무료", re.IGNORECASE)
 HANGUL = re.compile(r"[가-힣]{2,}")
 URL = re.compile(r"https?://[^\s)>\]]+")
 WORD = re.compile(r"[a-z0-9]{3,}")
@@ -72,8 +82,45 @@ GENERIC = {"the", "and", "for", "with", "seoul", "korea", "korean", "festival", 
            "store", "market", "show", "week", "weekend", "night", "day", "2026", "2027", "edition", "special"}
 
 
-def _month_day(mon: str, day: str) -> tuple[int, int]:
-    return MONTH_NAMES.index(mon[:3].lower()) + 1, int(day)
+def _month(word: str) -> int:
+    return next(i for i, m in enumerate(_MONTHS, 1) if re.fullmatch(m, word.lower().rstrip(".")))
+
+
+def dates_in(text: str) -> list[tuple[str, list[tuple[int, int]]]]:
+    """Every date written in `text` → [(as written, [(month, day), …])]; impossible dates are not dates."""
+    found: list[tuple[str, list[tuple[int, int]]]] = []
+    for m in DATE_MD.finditer(text):
+        mon1, d1, mon2, d2 = m.groups()
+        found.append((m.group(0), [(_month(mon1), int(d1))] + ([(_month(mon2 or mon1), int(d2))] if d2 else [])))
+    for m in DATE_DM.finditer(text):
+        d1, d2, mon = m.groups()
+        found.append((m.group(0), [(_month(mon), int(d1))] + ([(_month(mon), int(d2))] if d2 else [])))
+    for m in DATE_ISO.finditer(text):
+        found.append((m.group(0), [(int(m.group(2)), int(m.group(3)))]))
+    for m in DATE_SLASH.finditer(text):
+        found.append((m.group(0), [(int(m.group(1)), int(m.group(2)))]))
+    for m in DATE_KO.finditer(text):
+        found.append((m.group(0), [(int(m.group(1)), int(m.group(2)))]))
+    return [(s, mds) for s, mds in found if all(1 <= mo <= 12 and 1 <= d <= 31 for mo, d in mds)]
+
+
+def times_in(text: str) -> list[tuple[str, tuple[int, int]]]:
+    """Clock times → [(as written, (hour, minute) on a 24-hour clock)]."""
+    out = []
+    for m in AMPM.finditer(text):
+        h = int(m.group(1)) % 12 + (12 if m.group(3).lower() == "p" else 0)
+        out.append((m.group(0), (h, int(m.group(2) or 0))))
+    rest = AMPM.sub(" ", text)
+    out += [(m.group(0), (int(m.group(1)), int(m.group(2)))) for m in CLOCK.finditer(rest)]
+    return out
+
+
+def money_in(text: str) -> list[tuple[str, int]]:
+    return [(m.group(0).strip(), int(next(g for g in m.groups() if g).replace(",", ""))) for m in MONEY.finditer(text)]
+
+
+def percents_in(text: str) -> list[tuple[str, float]]:
+    return [(m.group(0), float(m.group(1))) for m in PERCENT.finditer(text)]
 
 
 def _days(briefs: list[EventBrief]) -> set[tuple[int, int]]:
@@ -86,41 +133,29 @@ def _days(briefs: list[EventBrief]) -> set[tuple[int, int]]:
     return out
 
 
-def _corpus(briefs: list[EventBrief], extra: str = "") -> str:
-    return "\n".join([b.model_dump_json() for b in briefs] + [extra])
+def _claims_text(b: EventBrief) -> str:
+    """The brief fields that state prices and offers (not ids, addresses or station exits)."""
+    return "\n".join([b.price or "", b.why_go, *b.foreigner_tips])
 
 
-def unsupported_facts(text: str, briefs: list[EventBrief], extra: str = "") -> tuple[list[str], list[str]]:
-    """Claims in `text` that the briefs don't support → (fails, warns). Pure string rules, no model."""
-    corpus = _corpus(briefs, extra)
-    flat = corpus.replace(",", "").replace(" ", "").lower()
-    numbers = set(re.findall(r"\d+", corpus.replace(",", "")))
-    days = _days(briefs)
+def unsupported_facts(text: str, briefs: list[EventBrief]) -> tuple[list[str], list[str]]:
+    """Claims in `text` that the briefs don't support → (fails, warns). Pure rules, no model."""
+    full = "\n".join(b.model_dump_json() for b in briefs)
+    claims = "\n".join(_claims_text(b) for b in briefs)
+    days = _days(briefs) | {md for _, mds in dates_in(full) for md in mds}
+    times = {t for _, t in times_in(full)}
+    amounts = {n for _, n in money_in(claims)} | {int(x.replace(",", "")) for x in re.findall(r"\d[\d,]*", claims)}
+    percents = {p for _, p in percents_in(full)}
     fails: list[str] = []
-    for m in DATE.finditer(text):
-        mon1, d1, mon2, d2 = m.groups()
-        claimed = [_month_day(mon1, d1)] + ([_month_day(mon2 or mon1, d2)] if d2 else [])
-        if any(c not in days for c in claimed):
-            fails.append(f"date '{m.group(0)}' is outside every event's dates")
-    for m in MONEY.finditer(text):
-        amount = (m.group(1) or m.group(2)).replace(",", "")
-        if amount not in numbers:
-            fails.append(f"price '{m.group(0).strip()}' is not in the briefs")
-    for m in PERCENT.finditer(text):
-        if f"{m.group(1)}%" not in flat:
-            fails.append(f"'{m.group(0)}' is not in the briefs")
-    for m in CLOCK.finditer(text):
-        h, mi = int(m.group(1)), m.group(2)
-        if f"{h}:{mi}" not in flat and f"{h:02d}:{mi}" not in flat:
-            fails.append(f"time '{m.group(0)}' is not in the briefs")
-    for m in AMPM.finditer(text):
-        h = int(m.group(1)) % 12 + (12 if m.group(2).lower() == "p" else 0)
-        if not any(s in flat for s in (f"{m.group(1)}{m.group(2).lower()}m", f"{h}:", f"{h:02d}:")):
-            fails.append(f"time '{m.group(0)}' is not in the briefs")
-    if FREE.search(text) and "free" not in flat and "무료" not in flat:
-        fails.append("says 'free' but no brief does")
+    fails += [f"date '{s}' is outside every event's dates" for s, mds in dates_in(text)
+              if any(md not in days for md in mds)]
+    fails += [f"price '{s}' is not in the briefs" for s, n in money_in(text) if n not in amounts]
+    fails += [f"'{s}' is not in the briefs" for s, p in percents_in(text) if p not in percents]
+    fails += [f"time '{s}' is not in the briefs" for s, t in times_in(text) if t not in times]
+    if FREE.search(text) and not FREE.search(claims):
+        fails.append("says 'free' but no brief's price or offer does")
     warns = [f"Korean name '{w}' is not in the briefs" for w in dict.fromkeys(HANGUL.findall(text))
-             if w not in corpus]
+             if w not in full]
     return fails, warns
 
 
@@ -128,7 +163,7 @@ def _names_event(heading: str, b: EventBrief) -> bool:
     if b.title_ko and b.title_ko in heading:
         return True
     words = lambda s: set(WORD.findall(s.lower())) - GENERIC
-    return bool(words(heading) & words(f"{b.title_en} {b.venue_en}"))
+    return bool(words(heading) & words(b.title_en))
 
 
 # ---------------------------------------------------------------- context
@@ -234,14 +269,14 @@ def _slide_corpus(c: Ctx, sl: Slide) -> list[EventBrief]:
 def check_facts(c: Ctx) -> CheckResult:
     fails, warns = [], []
     for sl in c.deck.slides:
-        f, w = unsupported_facts(f"{sl.heading}\n{sl.body}", _slide_corpus(c, sl), c.rec.prompt)
+        f, w = unsupported_facts(f"{sl.heading}\n{sl.body}", _slide_corpus(c, sl))
         if sl.layout == "tips":  # general know-how (last trains, T-money), not event claims: flag, don't fail
             f, w = [], [*f, *w]
         fails += [f"slide {sl.index}: {x}" for x in f]
         warns += [f"slide {sl.index}: {x}" for x in w]
         if sl.layout == "event" and (b := c.by_id.get(sl.event_id or "")) and not _names_event(sl.heading, b):
             fails.append(f"slide {sl.index}: heading {sl.heading!r} doesn't name {b.title_en!r}")
-    f, w = unsupported_facts(f"{c.deck.title}\n{c.deck.caption}", c.included, c.rec.prompt)
+    f, w = unsupported_facts(f"{c.deck.title}\n{c.deck.caption}", c.included)
     fails += [f"caption: {x}" for x in f]
     warns += [f"caption: {x}" for x in w]
     return _result("facts", fails, warns, ok="every price, date, time and 'free' traces to a brief")
