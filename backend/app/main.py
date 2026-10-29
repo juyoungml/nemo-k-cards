@@ -95,7 +95,7 @@ def health() -> dict:
 
 @app.post("/jobs", response_model=Job, status_code=201)
 async def create_job(req: CreateJobRequest, ctx: auth.Member) -> Job:
-    job = orchestrator.new_job(secrets.token_hex(3), req.prompt.strip())
+    job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
     await asyncio.to_thread(store.save_job, ctx.org_id, job)
     orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, scenario=req.scenario or "good"))
     return job
@@ -202,7 +202,7 @@ async def generate(brainstorm_id: str, ctx: auth.Member) -> Job:
     angle = next((a for a in d.angles if a.id == d.selected_angle_id), None)
     if not angle:
         raise HTTPException(422, "pick an angle first")
-    job = orchestrator.new_job(secrets.token_hex(3), f"Brainstorm: {angle.title}", "brainstorm", d.id)
+    job = orchestrator.new_job(secrets.token_hex(8), f"Brainstorm: {angle.title}", "brainstorm", d.id)
     await asyncio.to_thread(store.save_job, ctx.org_id, job)
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))
     orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, brainstorm=d))
