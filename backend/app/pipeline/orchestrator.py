@@ -38,13 +38,12 @@ from app.schemas import (
     LogLine,
     PipelineStep,
     PolicyEvent,
-    PublishProgress,
     ReviewVerdict,
     SafeguardModelOutput,
     SafeguardVerdict,
     VerificationReport,
 )
-from app.services import image_host, link_checker, photos, publisher, safeguard, visual_qa
+from app.services import link_checker, photos, safeguard, visual_qa
 
 log = logging.getLogger("orchestrator")
 KST = ZoneInfo("Asia/Seoul")
@@ -392,7 +391,8 @@ async def _qa(s: Stage) -> None:
     job, r = s.job, s.r
     r.step("qa", "running")
     s.fixture_fail("qa")
-    secrets = tuple(x for x in (settings.ig_access_token, settings.supabase_service_key) if x)
+    # Instagram tokens live in Vault and only the publisher reads them; approve and the publisher scan for them.
+    secrets = tuple(x for x in (settings.supabase_service_key,) if x)
     qa = visual_qa.run_qa(_rendered(s), job.deck, secrets)
     nb = sum(i.severity == "block" for i in qa.issues)
     nw = len(qa.issues) - nb
@@ -650,35 +650,17 @@ def _deck_from_brainstorm(brainstorm: Brainstorm, event_id: str | None = None) -
                     "#thingstodoinseoul #whatsonkorea", slides=slides)
 
 
-# Progress bands per publish step (percent of the bar), so the UI shows steady, honest progress.
-BANDS = {"upload": (0, 30), "containers": (30, 60), "processing": (60, 85), "publish": (85, 99)}
-LABELS = {"upload": "Uploading slides to public storage", "containers": "Sending slides to Instagram",
-          "processing": "Instagram is processing the images", "publish": "Publishing to @whatsonkorea"}
-
-
-async def publish_job(org_id: UUID, job_id: str, caption: str | None, mode: str, by: dict | None = None) -> None:
-    """Publish an approved Deck. `by`: {"id", "email"} of the Approver, for the audit events written here."""
-    job = await asyncio.to_thread(store.get_job, org_id, job_id)
-    if not job or not job.deck:
-        return
-    r = Run(org_id, job)
-    try:
-        await _publish_job(r, caption, mode, by)
-    finally:
-        await r.flush()
-
-
-def _stop_publish(r: Run, status: JobStatus, label: str, error: str, note: str) -> bool:
-    pp = r.job.publish_progress
-    pp.step, pp.label, pp.error, pp.finished_at = "failed", label, error[:300], datetime.now(UTC)
+def _stop_publish(r: Run, status: JobStatus, error: str, note: str) -> tuple[bool, str]:
     r.job.status = status
     r.step("publish", "skipped" if status == JobStatus.BLOCKED else "pending", note)
-    return False
+    return False, error
 
 
-async def _safeguard_before_publish(r: Run, caption: str | None, mode: str, paths: list[Path],
-                                    by: dict | None) -> bool:
-    """Nothing leaves the host unless the Safeguard allowed exactly what will be posted. Returns True to publish.
+async def safeguard_before_publish(r: Run, caption: str | None, mode: str, paths: list[Path],
+                                   by: dict | None) -> tuple[bool, str | None]:
+    """Nothing leaves the host unless the Safeguard allowed exactly what will be posted. Returns (True, None) to
+    publish (the Job's Deck then holds exactly what was allowed), else (False, why); the publisher (#21,
+    app/pipeline/publishing.py) runs it before any upload and fails the Post with `why` (nothing was posted).
 
     The candidate Deck (with the edited caption, if any) is checked on a copy. A refused edit is recorded on the
     Job and the Deck keeps its last allowed caption (still approvable); a refused or unverifiable Deck ends BLOCKED.
@@ -691,17 +673,16 @@ async def _safeguard_before_publish(r: Run, caption: str | None, mode: str, path
     # A real post also needs the model to have checked it (a dry run of an edit may have run the rules only).
     if checked and (mode != "graph" or "model" in job.safeguard.checked_by):
         job.deck = candidate
-        return True
+        return True, None
     live = settings.demo_mode == "live"
     if mode == "graph" and not live:
         # A real post needs the model's check; a fixture server can only run the phrase rules.
         r.log("safeguard", "content not checked by the model and the model can't run here → not posted", "warn")
-        return _stop_publish(r, JobStatus.READY_FOR_REVIEW, "Not posted: the safeguard model can't check this edit",
-                             "This server runs DEMO_MODE=fixture, so an edit can't be checked by the safeguard model "
-                             "before a real post. Approve without editing, or use a live server.",
+        return _stop_publish(r, JobStatus.READY_FOR_REVIEW,
+                             "Not posted: the safeguard model can't check this edit. This server runs "
+                             "DEMO_MODE=fixture, so an edit can't be checked by the safeguard model before a real "
+                             "post. Approve without editing, or use a live server.",
                              "Edit needs the safeguard model (live server)")
-    job.publish_progress.label = ("Safeguard is checking the edited caption" if edited
-                                  else "Safeguard is checking the Deck again")
     r.log("safeguard", ("caption edited" if edited else "Deck changed since the last check")
           + " → checking again before publishing")
     r.save()
@@ -713,7 +694,7 @@ async def _safeguard_before_publish(r: Run, caption: str | None, mode: str, path
     if verdict.decision == "allow":
         job.deck, job.safeguard, job.blocked_edit = candidate, verdict, None
         r.log("safeguard", f"ALLOW · checked by {'+'.join(verdict.checked_by)} · policy {verdict.policy_version}")
-        return True
+        return True, None
     if edited and job.safeguard and job.safeguard.decision == "allow" and \
             job.safeguard.content_hash == safeguard.content_hash(job.deck, paths):
         job.blocked_edit = BlockedEdit(caption=caption, verdict=verdict)
@@ -721,73 +702,10 @@ async def _safeguard_before_publish(r: Run, caption: str | None, mode: str, path
         await _audit(r.org_id, by, "safeguard.edit_blocked", job.id, stage="publish", caption=caption,
                      **verdict_detail(verdict))
         return _stop_publish(r, JobStatus.READY_FOR_REVIEW,
-                             "Edited caption blocked by safeguard: nothing was posted", verdict.summary,
+                             "Edited caption blocked by safeguard: " + verdict.summary,
                              "Edited caption blocked: approve the original or edit again")
     job.safeguard = verdict
     _log_safeguard(r, verdict)
     await _audit(r.org_id, by, "safeguard.blocked", job.id, stage="publish", **verdict_detail(verdict))
-    return _stop_publish(r, JobStatus.BLOCKED, "Blocked by safeguard: nothing was posted", verdict.summary,
+    return _stop_publish(r, JobStatus.BLOCKED, "Blocked by safeguard: " + verdict.summary,
                          "Blocked by safeguard: regenerate or reject")
-
-
-async def _publish_job(r: Run, caption: str | None, mode: str, by: dict | None = None) -> None:
-    job = r.job
-    job.status = JobStatus.PUBLISHING
-    job.error = None
-    job.publish_progress = PublishProgress(mode=mode, step="upload", label=LABELS["upload"],
-                                           started_at=datetime.now(UTC))
-    paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
-    if not await _safeguard_before_publish(r, caption, mode, paths, by):
-        return
-    n_block = sum(i.severity == "block" for i in job.issues)
-    r.step("publish", "running", f"publishing ({mode})")
-    r.log("publish", f"approved by operator → publisher on host (mode: {mode})"
-          + (f" · operator overrode {n_block} blocking issue(s)" if n_block else ""))
-
-    def progress(step: str, done: int, total: int) -> None:
-        lo, hi = BANDS[step]
-        pp = job.publish_progress
-        pp.step, pp.done, pp.total = step, done, total
-        pp.label = f"{LABELS[step]} ({done}/{total})" if total > 1 else LABELS[step]
-        pp.percent = int(lo + (hi - lo) * (done / total if total else 0))
-        r.save()
-
-    try:
-        if mode in ("graph", "dryrun"):
-            # Private slides (#18): links expire in minutes and uploads are deleted when the block ends.
-            async with image_host.exposed(r.org_id, job.id, paths, lambda d, t: progress("upload", d, t)) as urls:
-                r.log("publish", f"{len(urls)} slides via {settings.image_host} on links that expire in "
-                      f"{settings.publish_link_ttl_s // 60} min")
-                result = await publisher.publish_carousel(urls, job.deck.caption, publish=(mode == "graph"),
-                                                          on_progress=progress)
-            if mode == "dryrun":
-                cid = result.split(":", 1)[1]
-                r.log("publish", f"dry run: Instagram carousel container {cid} FINISHED · media_publish skipped "
-                      "(nothing posted)")
-                job.status = JobStatus.READY_FOR_REVIEW
-                job.publish_progress.step, job.publish_progress.percent = "done", 100
-                job.publish_progress.label = "Dry run complete: carousel ready on Instagram, nothing posted"
-                job.publish_progress.finished_at = datetime.now(UTC)
-                r.step("publish", "pending", "dry run OK · approve again with graph mode to post")
-                return
-            job.published_url = result
-        else:
-            for step in ("upload", "containers", "processing", "publish"):  # mock: simulate the same steps
-                for i in range(1, len(paths) + 1 if step in ("upload", "containers") else 2):
-                    progress(step, i, len(paths) if step in ("upload", "containers") else 1)
-                    await asyncio.sleep(0.15)
-            job.published_url = f"https://www.instagram.com/p/MOCK{job.id.upper()}/"
-            r.log("publish", "mock publish: no network call (set PUBLISH_MODE=dryrun or graph)")
-        job.status = JobStatus.PUBLISHED
-        pp = job.publish_progress
-        pp.step, pp.percent, pp.finished_at = "done", 100, datetime.now(UTC)
-        pp.label = "Published to @whatsonkorea" if mode == "graph" else "Mock publish complete (nothing posted)"
-        r.step("publish", "done", "posted to @whatsonkorea" if mode == "graph" else "mock post created")
-    except Exception as e:  # noqa: BLE001
-        job.status = JobStatus.READY_FOR_REVIEW
-        job.error = f"Publish failed: {e}"
-        pp = job.publish_progress
-        pp.label = f"Failed: {LABELS.get(pp.step, 'publishing').lower()}"
-        pp.step, pp.error, pp.finished_at = "failed", str(e)[:300], datetime.now(UTC)
-        r.log("publish", f"publish failed: {e}", "warn")
-        r.step("publish", "failed", str(e)[:120])

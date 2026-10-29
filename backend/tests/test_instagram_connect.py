@@ -30,7 +30,8 @@ class FakeMeta:
 
     def __init__(self):
         self.account_type = "BUSINESS"
-        self.user_id, self.username = "17841400000000001", "seoulbrand"
+        # A fresh Instagram id per test: one Instagram account belongs to one Organization at a time (#21).
+        self.user_id, self.username = "1784" + str(secrets.randbelow(10**13)).zfill(13), "seoulbrand"
         self.short = "IGshort" + secrets.token_hex(12)
         self.long = "IGlong" + secrets.token_hex(12)
         self.fail_exchange = False
@@ -310,7 +311,7 @@ def test_account_limit(admin, meta):
     assert s["reason"] == ig.limit_reached(1)
     assert admin.post("/instagram-accounts/connect").status_code == 409
 
-    meta.user_id, meta.username = "17841400000000002", "secondbrand"
+    meta.user_id, meta.username = "1784" + str(secrets.randbelow(10**13)).zfill(13), "secondbrand"
     assert finish(early) == {"error": "limit"}  # checked again when the account comes back
     assert len(rows(admin.org_id)) == 1 and vault_count(f"instagram/{admin.org_id}/") == 1
 
@@ -377,9 +378,29 @@ def test_other_organizations_see_and_touch_nothing(admin, meta, sign_in):
     assert b.get("/instagram-accounts/connection").json()["connected"] == 0
     assert b.delete(f"/instagram-accounts/{acct['id']}").status_code == 404
     assert rows(admin.org_id)[0][1] == "connected"
-    # B connecting the same Instagram account gets its own row and its own secret.
+    # B can't connect the Instagram account A has (#21): refused, nothing stored for B, A's untouched.
+    assert finish(start(b)) == {"error": "taken"}
+    assert rows(b.org_id) == [] and vault_count(f"instagram/{b.org_id}/") == 0
+    assert rows(admin.org_id)[0][1] == "connected"
+    # Once A disconnects it, B may connect it.
+    assert admin.delete(f"/instagram-accounts/{acct['id']}").status_code == 204
     assert finish(start(b)) == {"connected": "seoulbrand"}
-    assert len(rows(admin.org_id)) == len(rows(b.org_id)) == 1
+    assert len(rows(b.org_id)) == 1
+
+
+def test_two_organizations_racing_for_one_account_leave_it_with_one(admin, meta, sign_in):
+    """The connect check and the unique index: even a save that skipped the check can't give the account a second
+    Organization."""
+    b = sign_in(org="B")
+    set_pilot(b.org_id)
+    finish(start(admin))
+    profile = instagram_api.Profile(meta.user_id, "seoulbrand", "BUSINESS")
+    with pytest.raises(ig.Refused):
+        ig.save(b.org_id, b.user_id, profile, instagram_api.Token("IGlong" + secrets.token_hex(8), 3600))
+    with pytest.raises(psycopg.errors.UniqueViolation), store.system() as c:
+        c.execute("insert into instagram_accounts (org_id, ig_user_id, username, account_type, token_ref, "
+                  "connected_by) values (%s, %s, 'x', 'BUSINESS', gen_random_uuid(), %s)",
+                  (b.org_id, meta.user_id, b.user_id))
 
 
 def _as_api(org_id, user_id):

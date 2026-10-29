@@ -18,8 +18,12 @@ An Admin connects the Organization's Instagram Business or Creator account throu
 
 Disconnecting is an ordinary Admin write under RLS; a trigger drops the token from Vault in the same transaction.
 
-The token never appears in an API response, a log line or the agent sandbox. Publishing still uses the server's
-env token until #21 (Posts) switches it to `access_token(org, account)` below."""
+One Instagram account belongs to at most one Organization (#21): two Organizations approving posts for the same
+account would mean two approval trails and duplicate posts, so connecting an account another Organization already
+has is refused (`taken`; a unique index backs it up for two connects racing).
+
+The token never appears in an API response, a log line or the agent sandbox. The publisher (#21) and the dashboard
+read it with `access_token(org, account)` below, on the privileged path."""
 
 import base64
 import hashlib
@@ -35,7 +39,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
-from psycopg import Connection
+from psycopg import Connection, errors
 from pydantic import BaseModel
 
 from app import audit, instagram_api, store
@@ -199,6 +203,10 @@ def save(org_id: UUID, user_id: UUID, profile: instagram_api.Profile, token: ins
                            "and status <> 'disconnected'", (org_id, profile.user_id)).fetchone()[0]
         if others >= _limit(org[1]):
             raise Refused("limit")
+        # Privileged lookup across Organizations, answering only yes or no: the Admin never learns which one.
+        if c.execute("select 1 from instagram_accounts where ig_user_id = %s and org_id <> %s "
+                     "and status <> 'disconnected'", (profile.user_id, org_id)).fetchone():
+            raise Refused("taken")
         before = c.execute("select status from instagram_accounts where org_id = %s and ig_user_id = %s",
                            (org_id, profile.user_id)).fetchone()
         ref = secret_store.put(c, f"instagram/{org_id}/{profile.user_id}", token.access_token,
@@ -243,6 +251,8 @@ def callback(code: str | None, state: str | None, error: str | None) -> Redirect
         return _to_admin(error="personal_account")
     try:
         save(org_id, user_id, profile, long)
+    except errors.UniqueViolation:  # another Organization connected the same account at the same moment
+        return _to_admin(error="taken")
     except Refused as r:
         return _to_admin(error=r.code)
     except SecretStoreUnavailable:

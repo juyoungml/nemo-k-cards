@@ -306,17 +306,52 @@ class LogLine(BaseModel):
     level: Literal["info", "warn"] = "info"
 
 
-class PublishProgress(BaseModel):
-    """Live sub-steps of an approved publish, for the Review progress card."""
-    mode: Literal["mock", "dryrun", "graph"]
+class PostProgress(BaseModel):
+    """Live sub-steps of a Post while it is prepared and published, for the Review progress card."""
     step: Literal["upload", "containers", "processing", "publish", "done", "failed"]
     label: str
     done: int = 0
     total: int = 0
     percent: int = 0
-    started_at: datetime
+
+
+PostState = Literal["queued", "container_ready", "publishing", "published", "failed", "unknown"]
+PublishMode = Literal["mock", "dryrun", "graph"]
+
+
+class Post(BaseModel):
+    """One publication of an approved Deck to one Instagram account (GLOSSARY "Post"), with an honest state
+    (docs/spec/v1.md "Publish state machine"). Only `published` and `failed` are final for a real post; a dry run
+    ends at `container_ready` (finished_at set): Instagram prepared the carousel and nothing was posted."""
+    id: UUID
+    job_id: str
+    deck_version: int | None = None
+    instagram_account_id: UUID | None = None
+    handle: str | None = None                   # "@username" when approved; None for a mock Post without account
+    mode: PublishMode
+    state: PostState
+    caption: str | None = None                  # the approved caption edit, if any
+    creation_id: str | None = None
+    media_id: str | None = None
+    permalink: str | None = None
+    attempts: int = 0
+    last_error: str | None = None
+    progress: PostProgress | None = None
+    approved_by_email: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    publishing_started_at: datetime | None = None
+    unknown_since: datetime | None = None
+    next_check_at: datetime | None = None       # unknown: the reconciler's next look; None = a person decides
+    alerted_at: datetime | None = None          # unknown for 30 minutes: a person was alerted
+    published_at: datetime | None = None
     finished_at: datetime | None = None
-    error: str | None = None
+    resolved_by: UUID | None = None
+    legacy: bool = False                        # published before Posts existed (#21)
+
+    @property
+    def open(self) -> bool:
+        return self.finished_at is None
 
 
 class Job(BaseModel):
@@ -332,9 +367,9 @@ class Job(BaseModel):
     safeguard: SafeguardVerdict | None = None            # binding: "block" means nobody can approve it
     blocked_edit: BlockedEdit | None = None              # last caption edit the Safeguard refused, if any
     slide_urls: list[str] = Field(default_factory=list)  # /assets/{job_id}/slide-NN.jpg
-    published_url: str | None = None
     error: str | None = None
-    publish_progress: PublishProgress | None = None
+    # Publishing is a Post's (#21): `published_url` and `publish_progress` of older documents are ignored on load
+    # (and removed by supabase/migrations/*_posts.sql).
     pipeline: list[PipelineStep] = Field(default_factory=list)
     log: list[LogLine] = Field(default_factory=list)
     # Stored before the glossary rename as "draft_id"; both keys load, new documents are written as brainstorm_id.
@@ -359,8 +394,17 @@ class CreateJobRequest(BaseModel):
 class ApproveRequest(BaseModel):
     caption: str | None = None
     mode: Literal["mock", "dryrun", "graph"] | None = None
+    # The Instagram account to post to (one of the Organization's connected accounts). May be left out when the
+    # Organization has exactly one, or none for a mock post.
+    account_id: UUID | None = None
     # Required when the Deck has blocking Issues (an Override, GLOSSARY); recorded in the audit log.
     override_reason: str | None = Field(None, max_length=2000)
+
+
+class ResolvePostRequest(BaseModel):
+    """A person checked Instagram for an unknown Post."""
+    posted: bool
+    permalink: str | None = Field(None, max_length=300, pattern=r"^https://(www\.)?instagram\.com/\S+$")
 
 
 class RejectRequest(BaseModel):

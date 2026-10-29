@@ -287,11 +287,11 @@ def test_invited_person_can_still_create_their_own_organization(client, person, 
 def test_audit_log_records_decisions_edits_and_member_changes(sign_in, monkeypatch):
     from test_roles import _ready_job
 
-    from app.pipeline import orchestrator
+    from app.pipeline import orchestrator, publishing
 
     async def fake(*a, **k):
         pass
-    monkeypatch.setattr(orchestrator, "publish_job", fake)
+    monkeypatch.setattr(publishing, "start", fake)
     monkeypatch.setattr(orchestrator, "run_job", fake)
     admin = sign_in(org="Audited")
     j1, j2 = _ready_job(admin.org_id), _ready_job(admin.org_id)
@@ -301,7 +301,10 @@ def test_audit_log_records_decisions_edits_and_member_changes(sign_in, monkeypat
     jid = admin.post("/jobs", json={"prompt": "Hongdae buskers"}).json()["id"]
     events = admin.get("/audit").json()
     by_action = {e["action"]: e for e in events}
-    assert by_action["deck.edited"]["detail"] == {"field": "caption", "before": before, "after": "New caption #seoul"}
+    edited = by_action["deck.edited"]["detail"]
+    assert {k: edited[k] for k in ("field", "before", "after")} == {"field": "caption", "before": before,
+                                                                   "after": "New caption #seoul"}
+    assert edited["post"] == by_action["deck.approved"]["detail"]["post"]  # the approval names its Post (#21)
     assert by_action["deck.approved"]["target"] == j1.id
     assert by_action["deck.rejected"]["detail"] == {"reason": "Off-brand"}
     assert by_action["job.created"]["target"] == jid

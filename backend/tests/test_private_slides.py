@@ -11,12 +11,13 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
+from factories import connect_account
 from fastapi.testclient import TestClient
 
 from app import assets, store
 from app.config import settings
 from app.main import app
-from app.pipeline import orchestrator
+from app.pipeline import orchestrator, publishing
 from app.schemas import CardDeck, JobStatus
 from app.services import image_host, publisher
 
@@ -131,19 +132,20 @@ async def test_dryrun_publish_gives_instagram_links_that_expire_and_die_after(si
     seen: dict = {}
     asgi = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api")
 
-    async def instagram(urls, caption, publish=True, on_progress=lambda *a: None):
-        seen["urls"], seen["publish"] = urls, publish
+    async def instagram(ig, urls, caption, on_progress=lambda *a: None):
+        seen["urls"] = urls
         for _ in range(50):  # the publish step has saved PUBLISHING before Instagram is ever called
             if store.get_job(a.org_id, job.id).status == JobStatus.PUBLISHING:
                 break
             await asyncio.sleep(0.02)
         seen["during"] = [(await asgi.get(_path(u))).status_code for u in urls]
-        return "dryrun:123"
-    monkeypatch.setattr(publisher, "publish_carousel", instagram)
+        return "17890000000000123"
+    monkeypatch.setattr(publisher, "build_carousel", instagram)
 
-    await orchestrator.publish_job(a.org_id, job.id, None, "dryrun")
+    post = await publishing.publish_now(a.org_id, job.id, None, "dryrun", account=connect_account(a.org_id))
 
-    assert seen["publish"] is False and seen["during"] == [200, 200, 200]
+    assert seen["during"] == [200, 200, 200]
+    assert (post.state, post.creation_id, post.attempts) == ("container_ready", "17890000000000123", 0)
     for u in seen["urls"]:
         q = parse_qs(urlsplit(u).query)
         assert u.startswith(f"https://tunnel.example/assets/{a.org_id}/{job.id}/slide-") and q["use"] == ["ig"]
@@ -153,11 +155,11 @@ async def test_dryrun_publish_gives_instagram_links_that_expire_and_die_after(si
     await asgi.aclose()
 
 
-def test_mock_publish_exposes_nothing(client, monkeypatch):
+async def test_mock_publish_exposes_nothing(client, monkeypatch):
     job = _job_with_slides(client.org_id)
     called = []
     monkeypatch.setattr(image_host, "exposed", lambda *a, **k: called.append(a))
-    asyncio.run(orchestrator.publish_job(client.org_id, job.id, None, "mock"))
+    await publishing.publish_now(client.org_id, job.id, None, "mock")
     assert called == [] and store.get_job(client.org_id, job.id).status == JobStatus.PUBLISHED
 
 

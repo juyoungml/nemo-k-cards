@@ -14,9 +14,9 @@ import pytest
 from factories import allowed
 from psycopg_pool import ConnectionPool
 
-from app import brainstorms, orgs, store
+from app import brainstorms, orgs, posts, store
 from app.config import settings
-from app.pipeline import agent_runner, orchestrator
+from app.pipeline import agent_runner, orchestrator, publishing
 from app.schemas import Brainstorm, BrainstormUpdate, Job, JobStatus, PolicyEvent
 
 MIGRATIONS = sorted((Path(__file__).resolve().parents[2] / "supabase/migrations").glob("*.sql"))
@@ -60,9 +60,9 @@ def test_b_cannot_approve_reject_or_post_a_job(two, monkeypatch):
     a, b, job, _ = two
     published = []
 
-    async def fake_publish(org_id, job_id, caption, mode, by=None):
-        published.append((org_id, job_id))
-    monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
+    async def fake_start(org_id, post_id, runs=1):
+        published.append((org_id, posts.get(org_id, post_id).job_id))
+    monkeypatch.setattr(publishing, "start", fake_start)
     assert b.post(f"/jobs/{job.id}/approve", json={}).status_code == 404
     assert b.post(f"/jobs/{job.id}/reject", json={"reason": "B says no"}).status_code == 404
     assert published == []
@@ -73,10 +73,11 @@ def test_b_cannot_approve_reject_or_post_a_job(two, monkeypatch):
 
 async def test_publishing_with_the_wrong_organization_does_nothing(two):
     a, b, job, _ = two
-    await orchestrator.publish_job(b.org_id, job.id, None, "mock")
+    assert await publishing.publish_now(b.org_id, job.id, None, "mock") is None
     await orchestrator.run_job(b.org_id, job.id)
     after = store.get_job(a.org_id, job.id)
-    assert after.status == JobStatus.READY_FOR_REVIEW and after.publish_progress is None and after.log == []
+    assert after.status == JobStatus.READY_FOR_REVIEW and after.log == []
+    assert posts.list_posts(a.org_id, job.id) == [] and posts.list_posts(b.org_id, job.id) == []
 
 
 def test_b_cannot_read_edit_message_or_generate_from_a_brainstorm(two):
@@ -310,7 +311,8 @@ def test_restart_recovery_keeps_each_job_in_its_organization(sign_in):
     store.save_job(b.org_id, jb)
     recover_interrupted()
     assert store.get_job(a.org_id, ja.id).status == JobStatus.FAILED
-    assert store.get_job(b.org_id, jb.id).status == JobStatus.READY_FOR_REVIEW
+    # A publish is never failed by a restart (#21): it may have gone live. Its Post decides, not recovery.
+    assert store.get_job(b.org_id, jb.id).status == JobStatus.PUBLISHING
     assert store.get_job(a.org_id, jb.id) is None and store.get_job(b.org_id, ja.id) is None
 
 

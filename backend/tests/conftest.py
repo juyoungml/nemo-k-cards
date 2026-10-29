@@ -61,7 +61,7 @@ for key, value in {
 def pytest_sessionstart(session):
     """Fail fast if isolation is broken: a test run must never see live credentials or publish for real."""
     from app.config import settings
-    assert settings.publish_mode == "mock" and not settings.ig_access_token and not settings.supabase_service_key \
+    assert settings.publish_mode == "mock" and not settings.supabase_service_key \
         and not settings.instagram_app_secret, \
         "tests are not isolated from live credentials"
     assert "wok-test-" in str(settings.output_dir), "tests would write into the real data dir"
@@ -127,6 +127,21 @@ def _fake_supabase(auth_keys, monkeypatch):
 
     ident = auth.SupabaseIdentity(settings.supabase_url, fetch=auth_keys.fetch)
     monkeypatch.setattr(auth, "_identity", ((settings.supabase_url, settings.supabase_jwt_secret), ident))
+
+
+@pytest.fixture(autouse=True)
+def _no_instagram(monkeypatch):
+    """The publisher and the dashboard never reach Meta in tests: any call they make that a test did not fake
+    fails like a dropped connection. Tests that exercise them install their own httpx.MockTransport."""
+    import httpx
+
+    from app import seed
+    from app.services import publisher
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"test isolation: {request.url.host} is not reachable from tests")
+    monkeypatch.setattr(publisher, "transport", httpx.MockTransport(refuse))
+    monkeypatch.setattr(seed, "transport", httpx.MockTransport(refuse))
 
 
 @pytest.fixture

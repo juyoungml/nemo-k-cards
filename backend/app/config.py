@@ -42,9 +42,11 @@ class Settings(BaseSettings):
     # Auth redirect allow list (supabase/config.toml locally, the dashboard on Cloud).
     admin_url: str = "http://localhost:3000"
 
-    # Instagram Graph API — host-only secrets, never forwarded to the sandbox.
-    ig_user_id: str = ""
-    ig_access_token: str = ""
+    # Publishing (#21) posts to the Organization's own connected Instagram account with its token from Vault; the
+    # old env account (IG_USER_ID / IG_ACCESS_TOKEN) is gone and those variables are ignored.
+    # Post workflows one process drives at once (a Post waiting for the reconciler holds one while it sleeps).
+    posts_per_worker: int = 16
+    # IMAGE_HOST=local: this API's public URL, where Instagram fetches the signed slide links (e.g. a tunnel).
     public_asset_base_url: str = ""
 
     # Connecting an Organization's own Instagram account (#15): "Instagram API with Instagram Login" on our Meta
