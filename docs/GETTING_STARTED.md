@@ -107,7 +107,7 @@ The [Railway configuration](../apps/web/railway.json) is in the web app. Tempora
 | Chromium executable missing | Run `uv run playwright install chromium` from `backend/`. |
 | Provider or sandbox fails | OpenShell gateway status, image, provider registration and compatible driver. |
 | Instagram cannot fetch images | Public JPEG URLs reachable without credentials. |
-| Old template/schema errors | Start Uvicorn with `--reload`; avoid restarting while a job is running. |
+| Old template/schema errors | Start Uvicorn with `--reload`. Restarting mid-Job is fine: the Job resumes at its current stage. Avoid restarting mid-publish. |
 
 ## Validation
 

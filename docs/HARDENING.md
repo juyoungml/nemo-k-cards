@@ -24,7 +24,7 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 | [AGT-2](#agt-2-sandbox-allowlist-vs-real-event-sites) | P1 | Sandbox allowlist vs real event sites |
 | [AGT-3](#agt-3-no-quality-regression-checks-for-prompts-and-models) | P1 | No quality-regression checks for prompts and models |
 | [AGT-4](#agt-4-prompt-injection-is-tested-by-one-demo-not-a-suite) | P1 | Prompt injection is tested by one demo, not a suite |
-| [REL-1](#rel-1-jobs-run-inside-the-api-process) | P1 | Jobs run inside the API process |
+| [REL-1](#rel-1-jobs-run-inside-the-api-process) | P1 | Jobs run inside the API process (pipeline durable since #17; publish open) |
 | [REL-2](#rel-2-storage-no-backups-or-retention) | P1 | Storage: no backups or retention |
 | [REL-3](#rel-3-outbound-calls-lack-consistent-timeouts-and-retries) | P2 | Outbound calls lack consistent timeouts and retries |
 | [TEN-1](#ten-1-no-per-user-or-per-org-rate-limits-and-quotas) | P1 | No per-user or per-org rate limits and quotas |
@@ -222,13 +222,16 @@ on its next publish, so deploy the new backend first.
 ## Reliability and data
 
 ### REL-1 Jobs run inside the API process
-**P1** *(verified: `orchestrator.spawn()` at `main.py:101,158,206`; `recover_interrupted` at `main.py:32` marks them failed after a restart)*
+**P1** *(pipeline done in #17; publishing still open, #21)*
 
-**Why it matters:** any deploy, crash or `--reload` kills running agent jobs and publishes.
+**Why it matters:** any deploy, crash or `--reload` killed running agent jobs and publishes.
 
-**Robust fix:** a persisted queue and a separate worker process: the API only enqueues, and the worker claims jobs with a lease. Each stage's output is already stored on the job, so a restarted worker **resumes from the last completed stage** instead of failing. Publishing follows PUB-1's state machine.
+**Done for the pipeline (#17, ADR 0002):** a Job is a DBOS workflow, with one checkpointed step per stage (`backend/app/pipeline/orchestrator.py` `STAGES`). The checkpoints sit in the `dbos` schema of the same Postgres. The API enqueues each Job on a queue partitioned by Organization (`JOBS_PER_ORG`, `JOBS_PER_WORKER`). On restart, DBOS resumes each Job at its first unfinished stage, so finished stages don't run again. A Job that can't resume is marked failed at startup instead of being left stuck. DBOS still runs inside the API process (lifespan), but on its own event loop thread.
 
-**Done when:** killing the worker mid-job and restarting it completes the job without re-running the finished stages.
+**Still open:**
+- Publishing still runs as a background task, and a restart sends it back to Review. It becomes a workflow with PUB-1's state machine in #21.
+- A separate worker process (#28) is the same code with `durable.launch()` in a worker, while the API uses `launch(listen=False)` and only enqueues. Each process needs a stable `DBOS__VMID`.
+- Stage files (vetted photos, rendered slides) live on the local disk. A worker on another machine needs shared storage (#18) first.
 
 ### REL-2 Storage: no backups or retention
 **P1**
