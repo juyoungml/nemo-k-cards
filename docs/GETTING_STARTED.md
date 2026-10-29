@@ -2,7 +2,7 @@
 
 ## Local sample workflow
 
-Use Python 3.12 or newer, uv, Node.js 22 and pnpm 10.10.0. The backend lockfile is committed. A Chromium installation is required for rendering.
+Use Python 3.12 or newer, uv, Node.js 22, pnpm 10.10.0, plus Docker and the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) for the local database. The backend lockfile is committed. A Chromium installation is required for rendering.
 
 From the repository root:
 
@@ -10,6 +10,7 @@ From the repository root:
 cd backend
 uv sync --frozen
 uv run playwright install chromium
+supabase db start   # local Postgres with supabase/migrations applied (full stack: supabase start)
 DEMO_MODE=fixture PUBLISH_MODE=mock uv run uvicorn app.main:app --port 8000 --reload --reload-dir app
 ```
 

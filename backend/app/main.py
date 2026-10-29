@@ -5,7 +5,7 @@ import hashlib
 import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -48,8 +48,9 @@ def recover_interrupted() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    recover_interrupted()
+    await asyncio.to_thread(recover_interrupted)
     yield
+    store.close()
 
 
 app = FastAPI(title="What's On Korea API", lifespan=lifespan)
@@ -97,13 +98,14 @@ def health() -> dict:
 
 @app.post("/jobs", response_model=Job, status_code=201)
 async def create_job(req: CreateJobRequest) -> Job:
-    job = store.save_job(orchestrator.new_job(secrets.token_hex(3), req.prompt.strip()))
+    job = orchestrator.new_job(secrets.token_hex(3), req.prompt.strip())
+    await asyncio.to_thread(store.save_job, job)
     orchestrator.spawn(orchestrator.run_job(job.id, scenario=req.scenario or "good"))
     return job
 
 
 @app.get("/jobs", response_model=list[Job])
-def list_jobs(limit: int = 50) -> list[Job]:
+def list_jobs(limit: int = Query(50, ge=1, le=500)) -> list[Job]:
     return store.list_jobs(limit)
 
 
@@ -115,12 +117,12 @@ def get_job(job_id: str) -> Job:
 @app.get("/jobs/{job_id}/events")
 async def job_events(job_id: str, request: Request) -> StreamingResponse:
     """SSE: a full Job snapshot whenever it changes, until a terminal state (same as the mock backend)."""
-    _job_or_404(job_id)
+    await asyncio.to_thread(_job_or_404, job_id)
 
     async def stream():
         last = ""
         while not await request.is_disconnected():
-            job = store.get_job(job_id)
+            job = await asyncio.to_thread(store.get_job, job_id)
             if not job:
                 break
             data = job.model_dump_json()
@@ -137,7 +139,7 @@ async def job_events(job_id: str, request: Request) -> StreamingResponse:
 @app.post("/jobs/{job_id}/approve", response_model=Job)
 async def approve(job_id: str, req: ApproveRequest) -> Job:
     """The ONLY publish path: human approves in Admin -> host publishes (sandbox has no token)."""
-    job = _job_or_404(job_id)
+    job = await asyncio.to_thread(_job_or_404, job_id)
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
     # Blocking issues are advisory: the operator saw them in Review and chose to approve.
@@ -191,18 +193,18 @@ def patch_draft(draft_id: str, patch: DraftPatch) -> Draft:
 
 @app.post("/drafts/{draft_id}/messages", response_model=Draft)
 async def draft_message(draft_id: str, req: DraftMessageRequest) -> Draft:
-    return await drafts.send_message(_draft_or_404(draft_id), req.text, req.urls)
+    return await drafts.send_message(await asyncio.to_thread(_draft_or_404, draft_id), req.text, req.urls)
 
 
 @app.post("/drafts/{draft_id}/generate", response_model=Job, status_code=201)
 async def generate(draft_id: str) -> Job:
-    d = _draft_or_404(draft_id)
+    d = await asyncio.to_thread(_draft_or_404, draft_id)
     angle = next((a for a in d.angles if a.id == d.selected_angle_id), None)
     if not angle:
         raise HTTPException(422, "pick an angle first")
     job = orchestrator.new_job(secrets.token_hex(3), f"Brainstorm: {angle.title}", "brainstorm", d.id)
-    store.save_job(job)
-    store.save_draft(d.model_copy(update={"job_id": job.id}))
+    await asyncio.to_thread(store.save_job, job)
+    await asyncio.to_thread(store.save_draft, d.model_copy(update={"job_id": job.id}))
     orchestrator.spawn(orchestrator.run_job(job.id, draft=d))
     return job
 

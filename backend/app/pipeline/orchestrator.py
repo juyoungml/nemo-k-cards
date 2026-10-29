@@ -70,9 +70,26 @@ class Run:
 
     def __init__(self, job: Job) -> None:
         self.job = job
+        self._dirty = False
+        self._writer: asyncio.Task | None = None
 
     def save(self) -> None:
-        store.save_job(self.job)
+        """Write off the event loop; saves made while a write is in flight coalesce into one."""
+        self._dirty = True
+        if not self._writer or self._writer.done():
+            self._writer = asyncio.create_task(self._write())
+
+    async def _write(self) -> None:
+        while self._dirty:
+            self._dirty = False
+            try:
+                await asyncio.to_thread(store.save_job, self.job.model_copy(deep=True))
+            except Exception:
+                log.exception("could not save job %s", self.job.id)
+
+    async def flush(self) -> None:
+        while self._writer and not self._writer.done():
+            await self._writer
 
     def step(self, key: str, state: str, note: str | None = None) -> None:
         name = STEPS[key][0]
@@ -103,10 +120,17 @@ def _scenario(name: str = "good"):
 
 
 async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good") -> None:
-    job = store.get_job(job_id)
-    if not job:
+    if not (job := await asyncio.to_thread(store.get_job, job_id)):
         return
     r = Run(job)
+    try:
+        await _run_job(r, draft, scenario)
+    finally:
+        await r.flush()
+
+
+async def _run_job(r: Run, draft: Draft | None, scenario: str) -> None:
+    job, job_id = r.job, r.job.id
     fx = _scenario("brainstorm" if draft else scenario)
     live = settings.demo_mode == "live"
     fail = None if live else fx("fail.json")
@@ -136,7 +160,7 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
                 await asyncio.sleep(FIXTURE_DELAY)
                 fixture_fail("research")
                 briefs = [EventBrief.model_validate(b) for b in fx("briefs.json")]
-                _replay_policy_events(r, fx("policy_events.json") or [])
+                await _replay_policy_events(r, fx("policy_events.json") or [])
             job.briefs = briefs
             n_src = sum(len(b.sources) for b in briefs)
             r.log("research", f"{len(briefs)} EventBrief validated (schema ok)")
@@ -291,14 +315,14 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
         r.step(current, "failed", str(e)[:120])
 
 
-def _replay_policy_events(r: Run, events: list[dict]) -> None:
+async def _replay_policy_events(r: Run, events: list[dict]) -> None:
     """Fixture stand-in for `openshell logs`: what the sandbox tried and the policy denied, tied to this job."""
     if not events:
         return
     now = datetime.now(KST).strftime("%H:%M:%S")
     rows = [PolicyEvent.model_validate({"time": now, **e, "sandbox": f"agent-{r.job.id}", "job_id": r.job.id})
             for e in events]
-    store.add_policy_events(rows)
+    await asyncio.to_thread(store.add_policy_events, rows)
     for e in rows:
         r.log("research", f"{e.request.split()[0]} {e.host} → {e.result} (OpenShell)",
               "warn" if e.result.endswith("denied") else "info")
@@ -329,10 +353,18 @@ LABELS = {"upload": "Uploading slides to public storage", "containers": "Sending
 
 
 async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
-    job = store.get_job(job_id)
+    job = await asyncio.to_thread(store.get_job, job_id)
     if not job or not job.deck:
         return
     r = Run(job)
+    try:
+        await _publish_job(r, caption, mode)
+    finally:
+        await r.flush()
+
+
+async def _publish_job(r: Run, caption: str | None, mode: str) -> None:
+    job = r.job
     if caption:
         job.deck.caption = caption
     job.status = JobStatus.PUBLISHING

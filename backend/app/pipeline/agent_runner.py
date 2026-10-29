@@ -191,7 +191,7 @@ class OpenShellRunner:
                     break
                 await asyncio.sleep(1)
             if rc == 0 and (events := policy_log.parse(out.decode(errors="replace"), name, job_id)):
-                store.add_policy_events(events)
+                await asyncio.to_thread(store.add_policy_events, events)
         except Exception:  # a missing log must not fail the stage
             log.exception("could not collect policy log for %s", name)
 

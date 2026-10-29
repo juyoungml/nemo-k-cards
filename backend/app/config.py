@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     agent_dir: Path = REPO_ROOT / "agent"
     scenarios_dir: Path = REPO_ROOT / "demo/scenarios"
     output_dir: Path = REPO_ROOT / "backend/.data/out"
+    # Postgres for Jobs, Brainstorms and policy events. Default: the local `supabase start` database.
+    # Staging and production are Supabase Cloud connection strings (host-only secrets).
+    database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
     # Agent runtime
     agent_model: str = ""                 # e.g. "sonnet" to cut cost; empty = CLI default

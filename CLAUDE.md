@@ -15,6 +15,17 @@ A publishing agent finds what's on in Korea, then researches, verifies, writes a
 cd backend && uv sync && uv run playwright install chromium
 ```
 
+Postgres holds Jobs, Brainstorms and policy events. Locally it comes from the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) (Docker), so dev matches staging and production (both Supabase Cloud). The schema is plain SQL in `supabase/migrations/` (timestamped); the same files go to local, staging and production. Tests create and drop their own `wok_test_*` database on the local server and apply those files themselves.
+
+```bash
+supabase db start          # Postgres only, migrations applied (lighter); `supabase start` adds Auth, Storage, Vault
+supabase migration new <name>   # new migration in supabase/migrations/
+supabase migration up      # apply pending migrations locally
+supabase stop              # data is kept in a Docker volume, outside the repo
+```
+
+Staging is one shared Supabase Cloud project, updated only from `main` (CI will apply migrations); nobody edits it by hand. Production is a separate project. The old SQLite file `backend/.data/app.db` is not imported.
+
 `backend/.env` is gitignored. Copy `backend/.env.example` and ask the team for real values. Never commit or print secrets.
 
 ## Run the API (port 8000)
@@ -36,6 +47,7 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `PUBLISH_MODE` | `mock` \| `dryrun` \| `graph` | **`graph` posts to the real @whatsonkorea account.** Use `dryrun` unless a human asked to go live |
 | `IMAGE_HOST` | `local` \| `supabase` | Instagram needs public URLs; supabase uploads slides to the public `slides` bucket |
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
+| `DATABASE_URL` | `postgresql://…` | default is the local Supabase database (`127.0.0.1:54322/postgres`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL`'s server (default: the same local server) |
 
 Always use `--reload`. Without it, a long-running API keeps old Python while Jinja templates load fresh from disk, and renders fail (`'slide_class' is undefined`).
 
@@ -79,7 +91,7 @@ Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `review
 
 ## Checks
 
-Safe to run next to a live server: tests use a temp data dir, fixture mode and blanked credentials (`backend/tests/conftest.py` refuses to start otherwise), run in-process with no ports, and don't trigger `--reload`. Don't run `pnpm build` in `apps/web` while `pnpm dev` is running (they share `.next/`); CI builds it.
+Safe to run next to a live server: tests use a temp data dir, a throwaway Postgres database, fixture mode and blanked credentials (`backend/tests/conftest.py` refuses to start otherwise), run in-process with no ports, and don't trigger `--reload`. Don't run `pnpm build` in `apps/web` while `pnpm dev` is running (they share `.next/`); CI builds it.
 
 ```bash
 cd backend && uv run pytest -q                       # unit + API tests

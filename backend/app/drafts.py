@@ -1,5 +1,6 @@
 """Brainstorm drafts (SPEC §4-1): host Fetch → planner (sandbox) → merge into the Draft."""
 
+import asyncio
 import re
 import secrets
 from datetime import date
@@ -125,7 +126,7 @@ async def send_message(d: Draft, text: str, urls: list[str]) -> Draft:
         d.angles = update.angles
     if update.outline is not None:
         d.outline = update.outline
-    return store.save_draft(d)
+    return await asyncio.to_thread(store.save_draft, d)
 
 
 # ---------------------------------------------------------------- Generate (B4): Draft -> EventBrief
