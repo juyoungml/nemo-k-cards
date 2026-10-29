@@ -19,7 +19,7 @@ Rule checks:
   expectations  event count, categories, place and date window from the case
 LLM checks (from the recorded reviewer verdict):
   facts·llm     no blocking `fact` Issue
-  photos·llm    no Issue saying a photo doesn't match its event
+  photos·llm    no Issue saying a photo doesn't match its event (one sentence names the photo and a mismatch)
 """
 
 import re
@@ -286,6 +286,16 @@ def check_photos(c: Ctx) -> CheckResult:
 
 
 PHOTO_WORDS = re.compile(r"photo|image|picture|사진", re.IGNORECASE)
+# The reviewer writes prose, so a photo Issue counts as "doesn't match its event" only when one sentence names the
+# photo and says it doesn't fit; contrast or layout notes about a photo slide don't count.
+MISMATCH = re.compile(r"\b(?:doesn't|does not|don't|do not|isn't|is not|not)\s+(?:\w+\s+)?(?:match|show|fit|depict|"
+                      r"relevant|related)|mismatch|unrelated|irrelevant|wrong (?:place|event|venue|season|festival)|"
+                      r"(?:a |another )?different (?:event|place|venue|festival|season)|misleading", re.IGNORECASE)
+SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+
+
+def photo_mismatch(message: str) -> bool:
+    return any(PHOTO_WORDS.search(s) and MISMATCH.search(s) for s in SENTENCE.split(message))
 
 
 def check_facts_llm(c: Ctx) -> CheckResult:
@@ -296,8 +306,8 @@ def check_facts_llm(c: Ctx) -> CheckResult:
 
 def check_photos_llm(c: Ctx) -> CheckResult:
     found = [f"slide {i.slide_index}: {i.message}" for i in c.rec.issues
-             if i.category == "visual" and PHOTO_WORDS.search(i.message)]
-    return _result("photos·llm", found, ok="reviewer flagged no photo", judge="llm")
+             if i.category == "visual" and photo_mismatch(i.message)]
+    return _result("photos·llm", found, ok="reviewer flagged no photo as not matching its event", judge="llm")
 
 
 def check_expectations(c: Ctx) -> CheckResult:

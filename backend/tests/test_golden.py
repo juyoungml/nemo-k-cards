@@ -7,7 +7,7 @@ import pytest
 
 from app.config import settings
 from app.golden import cases as golden
-from app.golden.checks import run_checks, unsupported_facts
+from app.golden.checks import photo_mismatch, run_checks, unsupported_facts
 from app.schemas import EventBrief, Issue
 
 GS = golden.load_set()
@@ -94,7 +94,7 @@ def test_stock_photo_of_another_category_fails():
 def test_reviewer_photo_mismatch_fails_the_llm_check():
     rec = good()
     rec.issues.append(Issue(severity="warn", category="visual", slide_index=2,
-                            message="Photo shows fireworks, but this is a lantern walk."))
+                            message="Photo shows fireworks, a different festival from this lantern walk."))
     s = statuses("ambiguous-weekend", rec)
     assert s["photos·llm"] == "fail" and s["photos"] == "pass"
 
@@ -123,3 +123,15 @@ def test_demo_bad_scenario_is_caught():
     facts = results["facts"].detail
     assert results["facts"].status == "fail"
     assert "May 18" in facts and "51.8%" in facts and "doesn't name" in facts
+
+
+@pytest.mark.parametrize(("message", "mismatch"), [
+    ("Photo shows fireworks, but this is a lantern walk. Replace it.", False),
+    ("The photo doesn't match its event: it shows a different festival.", True),
+    ("Stock image is unrelated to a gugak concert.", True),
+    # Seen live (seongsu-popups): a contrast note on a photo slide, with the photo explicitly fine.
+    (("The light serif kicker sits over the pale poster, so contrast is weak. This slide's typography also doesn't "
+      "match the other event slides. Fix: add a darker scrim. The photo itself matches the event, so keep it."), False),
+])
+def test_photo_mismatch_reads_the_reviewer_sentence_by_sentence(message, mismatch):
+    assert photo_mismatch(message) is mismatch
