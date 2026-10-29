@@ -99,6 +99,17 @@ cd backend && uv run python -m app.renderer.preview  # renders demo deck → bac
 cd apps/web && npx tsc --noEmit && pnpm lint
 ```
 
+**Golden set** (HARDENING AGT-3): fixed requests in `backend/golden/cases.json` (bump `version` when a case changes), checked for schema, slide structure, ≤ 5 hashtags, valid links, no invented facts, relevant photos and the case's expectations. Checks marked `[llm]` read the recorded reviewer verdict; everything else is a deterministic rule (`backend/app/golden/checks.py`).
+
+```bash
+cd backend && uv run python -m app.golden            # replay recordings: free, deterministic, what CI runs
+cd backend && uv run python -m app.golden --live --case seongsu-popups --record   # real agents, costs tokens
+```
+
+Run it after editing `agent/**`, the orchestrator's stage tasks, stage output schemas or `AGENT_MODEL`. Replay re-checks recorded outputs, so it marks a recording STALE when any of those changed (a hash of all of them) or when it was made on another model than the `model` pinned in `cases.json` (override with `--model`). Re-record stale cases with `--live --record` (one case ≈ three `claude -p` stages) and commit the JSON; a recording stores the model id and `claude` CLI version the run actually used. Recordings built from demo data (`demo-scenario`, `synthetic`) report as FIXTURE and never count as a pass.
+
+Live runs never publish (`PUBLISH_MODE=mock`, publishing credentials blanked) and never write the Admin's data: slides go under `--out` (default `backend/.data/golden`). With the SQLite store its database sits there too; with the Postgres store live mode uses `GOLDEN_DATABASE_URL` (its database name must contain `golden` or `test`) or creates a scratch database on `TEST_DATABASE_URL`'s server, applies `supabase/migrations` and drops it at exit, and refuses to start otherwise. CI (`.github/workflows/golden-set.yml`) runs replay; live CI needs an `ANTHROPIC_API_KEY` secret (steps in that file).
+
 ## Rules
 
 - Never set `PUBLISH_MODE=graph` or approve a job unless a human explicitly asked. It posts publicly.

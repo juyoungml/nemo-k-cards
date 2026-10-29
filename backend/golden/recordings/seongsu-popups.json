@@ -1,0 +1,476 @@
+{
+  "case_id": "seongsu-popups",
+  "set_version": 1,
+  "provenance": "live",
+  "recorded_at": "2026-10-29T14:37:39.166972+09:00",
+  "today": "2026-10-29",
+  "model": "claude-opus-5-5",
+  "prompt": "Seongsu pop-ups this weekend",
+  "status": "READY_FOR_REVIEW",
+  "briefs": [
+    {
+      "id": "shin-ramyun-bunsik-seongsu",
+      "title_en": "Shin Ramyun Bunsik Seongsu (Nongshim ramen experience shop)",
+      "title_ko": "농심 신라면 분식 성수",
+      "category": "popup",
+      "start_date": "2026-06-16",
+      "end_date": "2026-11-30",
+      "venue_en": "Stage X Seongsu 52",
+      "venue_ko": "스테이지 엑스 성수 52",
+      "address_ko": "",
+      "lat": null,
+      "lng": null,
+      "nearest_station": "Seongsu Stn. (Line 2) Exit 3, ~100 m",
+      "price": null,
+      "booking": "Walk-in",
+      "foreigner_tips": [
+        "Open 11:00–20:00. Food on the 2nd floor is ordered at a kiosk, so you can point and tap without speaking Korean.",
+        "On the 2nd floor you can build your own ramen from 17 noodle, soup and topping options and put your photo on the package. It makes a fun souvenir.",
+        "SHIN World has instant cookers with export-only Nongshim flavors (kimchi, tom yum, cheese) that are hard to find in Korean shops."
+      ],
+      "why_go": "Korea's first Shin Ramyun shop, opened for the brand's 40th birthday: make your own ramen, eat Seongsu-only dishes and stock up on merch.",
+      "sources": [
+        {
+          "url": "https://mobile.newsis.com/view/NISX20260612_0003667317",
+          "kind": "news",
+          "fetched_at": "2026-10-29T05:36:45.218552Z"
+        },
+        {
+          "url": "https://www.mt.co.kr/living/2026/06/14/2026061322171841926",
+          "kind": "news",
+          "fetched_at": "2026-10-29T05:36:45.218599Z"
+        }
+      ],
+      "access": {
+        "korean_phone": null,
+        "foreign_card": null,
+        "cash_only": null,
+        "english": null,
+        "entry": "walk_in",
+        "booking_url": null
+      },
+      "images": []
+    },
+    {
+      "id": "tfactory-emotion-lab-seongsu",
+      "title_en": "SK Telecom × Random Diversity: Emotion Lab",
+      "title_ko": "SK텔레콤 X 랜덤 다이버시티 전시: Emotion Lab",
+      "category": "exhibition",
+      "start_date": "2026-09-19",
+      "end_date": "2026-11-15",
+      "venue_en": "T Factory Seongsu",
+      "venue_ko": "T 팩토리 성수",
+      "address_ko": "서울 성동구 연무장1길 7-1",
+      "lat": null,
+      "lng": null,
+      "nearest_station": null,
+      "price": "Free (1F) / ₩20,000 (B1)",
+      "booking": "Walk-in; may close early",
+      "foreigner_tips": [
+        "Open daily 11:00–20:00 and last entry is 19:30. On busy weekends it can close early, so go in the afternoon.",
+        "The 1F 'Scent of Emotion' room is free for everyone, once a day. The paid B1 lab costs ₩20,000 (20% off for SKT phone users only).",
+        "In the B1 lab you put on a VR headset, and the AI turns your reaction to colors into a small vial of your own 'emotion color' to take home."
+      ],
+      "why_go": "A techy, free-to-try lab where AI reads your brainwaves and gives you your feelings as a bottled color.",
+      "sources": [
+        {
+          "url": "https://news.sktelecom.com/231325",
+          "kind": "official",
+          "fetched_at": "2026-10-29T05:36:45.218605Z"
+        },
+        {
+          "url": "https://letter.wepick.kr/post/26428",
+          "kind": "other",
+          "fetched_at": "2026-10-29T05:36:45.218608Z"
+        }
+      ],
+      "access": {
+        "korean_phone": null,
+        "foreign_card": null,
+        "cash_only": null,
+        "english": null,
+        "entry": "walk_in",
+        "booking_url": null
+      },
+      "images": [
+        {
+          "url": "https://news-static.sktelecom.com/wp-content/uploads/2026/09/SKT-%EB%89%B4%EC%8A%A4%EB%A3%B8_T-%ED%8C%A9%ED%86%A0%EB%A6%AC-%EC%8B%A0%EA%B7%9C-%EC%A0%84%EC%8B%9C-%EB%8D%B0%EC%9D%B4%ED%84%B0%EC%84%BC%ED%84%B0%EC%8B%9C%EB%A6%AC%EC%A6%882-1.jpg",
+          "license": "official_permission",
+          "credit": "© SK텔레콤 뉴스룸",
+          "source_url": "https://news.sktelecom.com/231325",
+          "allow_overlay": true
+        },
+        {
+          "url": "https://news-static.sktelecom.com/wp-content/uploads/2026/09/SKT-%EB%89%B4%EC%8A%A4%EB%A3%B8_T-%ED%8C%A9%ED%86%A0%EB%A6%AC-%EC%8B%A0%EA%B7%9C-%EC%A0%84%EC%8B%9C-%EB%8D%B0%EC%9D%B4%ED%84%B0%EC%84%BC%ED%84%B0%EC%8B%9C%EB%A6%AC%EC%A6%882-19.jpg",
+          "license": "official_permission",
+          "credit": "© SK텔레콤 뉴스룸",
+          "source_url": "https://news.sktelecom.com/231325",
+          "allow_overlay": true
+        }
+      ]
+    },
+    {
+      "id": "dragon-ball-heroes-rise-seoul",
+      "title_en": "Dragon Ball: Heroes Rise Asia Tour – Seoul",
+      "title_ko": "드래곤볼 히어로즈 라이즈 아시아 투어 서울",
+      "category": "exhibition",
+      "start_date": "2026-08-22",
+      "end_date": "2026-11-15",
+      "venue_en": "Stage X Seongsu 403",
+      "venue_ko": "스테이지 엑스 성수 403",
+      "address_ko": "서울 성동구 뚝섬로 403",
+      "lat": null,
+      "lng": null,
+      "nearest_station": null,
+      "price": null,
+      "booking": "Tickets on Dotmill's 'bemill' platform",
+      "foreigner_tips": [
+        "You can fire your own Kamehameha (에네르기파, 'Energy Wave') and try the Fusion pose with a friend in the interactive zone.",
+        "More than 40 life-size figures of Goku, Vegeta, Frieza and Cell make great photo spots.",
+        "It closes on Nov 15, so this is one of the last weekends to go. There's no parking, so take the subway or a taxi."
+      ],
+      "why_go": "Step into Goku and Vegeta's biggest battles with immersive media and 40+ life-size figures before the show closes in mid-November.",
+      "sources": [
+        {
+          "url": "https://news.mtn.co.kr/news-detail/2026080314555651086",
+          "kind": "news",
+          "fetched_at": "2026-10-29T05:36:45.218612Z"
+        },
+        {
+          "url": "https://popga.co.kr/popup/8264",
+          "kind": "other",
+          "fetched_at": "2026-10-29T05:36:45.218615Z"
+        }
+      ],
+      "access": {
+        "korean_phone": null,
+        "foreign_card": null,
+        "cash_only": null,
+        "english": null,
+        "entry": "ticket",
+        "booking_url": null
+      },
+      "images": []
+    },
+    {
+      "id": "shinchan-space-time-adventure-seongsu",
+      "title_en": "Crayon Shin-chan: Let's Play! Space-Time Adventure",
+      "title_ko": "짱구는 못말려! 놀자! 시공간 대모험",
+      "category": "exhibition",
+      "start_date": "2026-10-17",
+      "end_date": "2027-01-24",
+      "venue_en": "Seongsu-dong exhibition hall",
+      "venue_ko": "성수동 전시장",
+      "address_ko": "서울 성동구 연무장5길 9-29",
+      "lat": null,
+      "lng": null,
+      "nearest_station": null,
+      "price": "₩23,000 (13+) / ₩20,000 (kids)",
+      "booking": "Tickets on Dotmill's 'bemill' platform",
+      "foreigner_tips": [
+        "It's a game, not just a gallery: scan hidden QR codes with the exhibition app to rescue Shin-chan's family around the village.",
+        "An AI zone shows you the 'future' Shin-chan character who looks most like you.",
+        "Fans can also see original manga, old movie posters, themed food and drinks, and exclusive goods."
+      ],
+      "why_go": "A playful, officially licensed Shin-chan world with missions, dance parties and life-size scenes. Fun for kids and nostalgic adults.",
+      "sources": [
+        {
+          "url": "https://news.mtn.co.kr/article/2026101616170878985",
+          "kind": "news",
+          "fetched_at": "2026-10-29T05:36:45.218619Z"
+        },
+        {
+          "url": "https://www.wikitree.co.kr/articles/1166763",
+          "kind": "news",
+          "fetched_at": "2026-10-29T05:36:45.218622Z"
+        },
+        {
+          "url": "https://popga.co.kr/popup/8902",
+          "kind": "other",
+          "fetched_at": "2026-10-29T05:36:45.218625Z"
+        }
+      ],
+      "access": {
+        "korean_phone": null,
+        "foreign_card": null,
+        "cash_only": null,
+        "english": null,
+        "entry": "ticket",
+        "booking_url": null
+      },
+      "images": []
+    },
+    {
+      "id": "romand-10th-birthday-popup",
+      "title_en": "rom&nd 10th Birthday Party Pop-up",
+      "title_ko": "롬앤 팝업: 10주년 생일파티",
+      "category": "popup",
+      "start_date": "2026-10-10",
+      "end_date": "2026-11-10",
+      "venue_en": "rom&nd Pink Office",
+      "venue_ko": "롬앤 핑크오피스",
+      "address_ko": "서울 성동구 연무장길 88",
+      "lat": null,
+      "lng": null,
+      "nearest_station": null,
+      "price": null,
+      "booking": null,
+      "foreigner_tips": [
+        "Open daily 10:00–22:00, so you can come late after other Seongsu pop-ups close.",
+        "rom&nd is a popular K-beauty lip and makeup brand, and the all-pink office is a well-known photo spot."
+      ],
+      "why_go": "Celebrate a decade of the cult K-beauty lip brand in its all-pink Seongsu office, open late every night.",
+      "sources": [
+        {
+          "url": "https://letter.wepick.kr/post/26428",
+          "kind": "other",
+          "fetched_at": "2026-10-29T05:36:45.218628Z"
+        }
+      ],
+      "access": null,
+      "images": []
+    }
+  ],
+  "verification": {
+    "checks": [
+      {
+        "url": "https://mobile.newsis.com/view/NISX20260612_0003667317",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://mobile.newsis.com/view/NISX20260612_0003667317",
+        "reason": null
+      },
+      {
+        "url": "https://www.mt.co.kr/living/2026/06/14/2026061322171841926",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://www.mt.co.kr/living/2026/06/14/2026061322171841926",
+        "reason": null
+      },
+      {
+        "url": "https://news.sktelecom.com/231325",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://news.sktelecom.com/231325",
+        "reason": null
+      },
+      {
+        "url": "https://letter.wepick.kr/post/26428",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://letter.wepick.kr/post/26428",
+        "reason": null
+      },
+      {
+        "url": "https://news.mtn.co.kr/news-detail/2026080314555651086",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://news.mtn.co.kr/news-detail/2026080314555651086",
+        "reason": null
+      },
+      {
+        "url": "https://popga.co.kr/popup/8264",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://popga.co.kr/popup/8264",
+        "reason": null
+      },
+      {
+        "url": "https://news.mtn.co.kr/article/2026101616170878985",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://news.mtn.co.kr/article/2026101616170878985",
+        "reason": null
+      },
+      {
+        "url": "https://www.wikitree.co.kr/articles/1166763",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://www.wikitree.co.kr/articles/1166763",
+        "reason": null
+      },
+      {
+        "url": "https://popga.co.kr/popup/8902",
+        "status": "ok",
+        "http_code": 200,
+        "final_url": "https://popga.co.kr/popup/8902",
+        "reason": null
+      }
+    ],
+    "excluded_event_ids": []
+  },
+  "deck": {
+    "job_id": "golden-a20377",
+    "title": "Seongsu (성수) Pop-ups This Weekend",
+    "caption": "Ramen, AI, anime and K-beauty: 5 things to try in Seongsu (성수) this weekend.\nBuild your own Shin Ramyun, bottle your feelings, fire a Kamehameha.\nSave this and bring a friend.\nDetails & links in bio.\n#Seongsu #SeoulPopup #KoreaTravel #SeoulWeekend #WhatsOnKorea",
+    "hashtags": [
+      "#Seongsu",
+      "#SeoulPopup",
+      "#KoreaTravel",
+      "#SeoulWeekend",
+      "#WhatsOnKorea"
+    ],
+    "slides": [
+      {
+        "index": 0,
+        "layout": "cover",
+        "heading": "Seongsu (성수) this weekend: 5 picks",
+        "body": "Ramen, AI, anime and K-beauty: five pop-ups and shows in Seoul's Seongsu (성수) neighborhood.",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      },
+      {
+        "index": 1,
+        "layout": "event",
+        "heading": "Shin Ramyun Bunsik Seongsu (신라면 분식 성수)",
+        "body": "Korea's first Shin Ramyun shop lets you build your own ramen and put your photo on the package.",
+        "event_id": "shin-ramyun-bunsik-seongsu",
+        "image": null,
+        "stock_id": null,
+        "source_urls": [
+          "https://mobile.newsis.com/view/NISX20260612_0003667317",
+          "https://www.mt.co.kr/living/2026/06/14/2026061322171841926"
+        ]
+      },
+      {
+        "index": 2,
+        "layout": "event",
+        "heading": "Emotion Lab at T Factory Seongsu (T 팩토리 성수)",
+        "body": "AI reads your reaction to colors and turns your feelings into a small vial of color to take home.",
+        "event_id": "tfactory-emotion-lab-seongsu",
+        "image": {
+          "url": "local:tfactory-emotion-lab-seongsu-0.jpg",
+          "license": "official_permission",
+          "credit": "© SK텔레콤 뉴스룸",
+          "source_url": "https://news.sktelecom.com/231325",
+          "allow_overlay": true
+        },
+        "stock_id": null,
+        "source_urls": [
+          "https://news.sktelecom.com/231325",
+          "https://letter.wepick.kr/post/26428"
+        ]
+      },
+      {
+        "index": 3,
+        "layout": "event",
+        "heading": "Dragon Ball: Heroes Rise Seoul (드래곤볼)",
+        "body": "Fire your own Kamehameha and pose with 40+ life-size figures of Goku, Vegeta, Frieza and Cell.",
+        "event_id": "dragon-ball-heroes-rise-seoul",
+        "image": null,
+        "stock_id": null,
+        "source_urls": [
+          "https://news.mtn.co.kr/news-detail/2026080314555651086",
+          "https://popga.co.kr/popup/8264"
+        ]
+      },
+      {
+        "index": 4,
+        "layout": "event",
+        "heading": "Crayon Shin-chan Space-Time Adventure (짱구는 못말려)",
+        "body": "It's a game, not just a gallery: scan hidden QR codes to rescue Shin-chan's family around the village.",
+        "event_id": "shinchan-space-time-adventure-seongsu",
+        "image": null,
+        "stock_id": null,
+        "source_urls": [
+          "https://news.mtn.co.kr/article/2026101616170878985",
+          "https://www.wikitree.co.kr/articles/1166763",
+          "https://popga.co.kr/popup/8902"
+        ]
+      },
+      {
+        "index": 5,
+        "layout": "event",
+        "heading": "rom&nd 10th Birthday Pop-up (롬앤 팝업)",
+        "body": "Celebrate 10 years of the popular K-beauty lip brand in its all-pink office, a well-known photo spot.",
+        "event_id": "romand-10th-birthday-popup",
+        "image": null,
+        "stock_id": null,
+        "source_urls": [
+          "https://letter.wepick.kr/post/26428"
+        ]
+      },
+      {
+        "index": 6,
+        "layout": "tips",
+        "heading": "Tips before you go",
+        "body": "Shin Ramyun shop: order food at a kiosk, just point and tap\nDragon Ball & Shin-chan tickets are on bemill: check the official page\nEmotion Lab can close early on busy weekends, so go in the afternoon\nrom&nd is open until 22:00, a good last stop after other pop-ups",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": [
+          "https://mobile.newsis.com/view/NISX20260612_0003667317",
+          "https://news.sktelecom.com/231325",
+          "https://popga.co.kr/popup/8264",
+          "https://popga.co.kr/popup/8902",
+          "https://letter.wepick.kr/post/26428"
+        ]
+      },
+      {
+        "index": 7,
+        "layout": "cta",
+        "heading": "Save this for the weekend",
+        "body": "Tag a friend who loves ramen, anime or K-beauty and plan your Seongsu (성수) day together.",
+        "event_id": null,
+        "image": null,
+        "stock_id": null,
+        "source_urls": []
+      }
+    ]
+  },
+  "issues": [
+    {
+      "severity": "warn",
+      "category": "sensitive",
+      "slide_index": 5,
+      "message": "Date gate: today (Oct 29) is the 10·29 Itaewon tragedy anniversary, and the posting weekend (Oct 31 – Nov 1) is within ±3 days. The rules ask for a neutral tone and no party framing. This slide's Korean subtitle reads '10주년 생일파티' (birthday party) and the body opens with 'Celebrate 10 years'. It's a brand anniversary in Seongsu, not Itaewon or Halloween content, so it isn't blocking. Fix: change the subtitle to '롬앤 팝업: 10주년' and the body to something like 'Marking 10 years of the popular K-beauty lip brand in its all-pink office, a well-known photo spot.'"
+    },
+    {
+      "severity": "warn",
+      "category": "tone",
+      "slide_index": 7,
+      "message": "Date gate (10·29 anniversary window): the CTA 'Tag a friend…plan your Seongsu day together' and the caption line 'Save this and bring a friend' push group outings on the weekend right after the crowd-crush anniversary. This is mild, not crowd hype. Optional fix: use something neutral like 'Save this for your weekend plans' and drop 'bring a friend' from the caption."
+    },
+    {
+      "severity": "warn",
+      "category": "visual",
+      "slide_index": 2,
+      "message": "The light serif kicker 'EXHIBITION · T FACTORY SEONGSU' and the second line of the heading sit over the pale Emotion Lab poster and louvers, so contrast is weak and the text is hard to read at feed size. This slide's typography (serif, 'No. 02') also doesn't match the other event slides. Fix: add a darker gradient or scrim behind the text block, or crop the photo so the text sits on the dark sky. The photo itself matches the event (Emotion Lab poster, 2026.09), so keep it."
+    },
+    {
+      "severity": "warn",
+      "category": "fact",
+      "slide_index": 5,
+      "message": "The rom&nd pop-up (dates Oct 10 – Nov 10, venue rom&nd Pink Office, 22:00 closing on slide 7) rests on one non-official source (letter.wepick.kr). These facts match the brief, but the operator should check the dates and hours on rom&nd's official channel before approving."
+    },
+    {
+      "severity": "warn",
+      "category": "tone",
+      "slide_index": 6,
+      "message": "The kicker 'HOW LOCALS DO IT' doesn't fit the content: the tips are practical visitor notes (kiosk, ticket platform, hours), not local customs. Fix: change the kicker to 'GOOD TO KNOW'."
+    }
+  ],
+  "log": [
+    "research: sandbox started (local, policy: agent-policy.yaml)",
+    "research: 5 EventBrief validated (schema ok)",
+    "verify: tfactory-emotion-lab-seongsu: photo ok (official_permission, © SK텔레콤 뉴스룸)",
+    "verify: photos: 1/5 events have a usable photo · 4 poster",
+    "copy: slide 2: no relevant stock photo → poster",
+    "copy: slide 4: no relevant stock photo → poster",
+    "copy: slide 5: no relevant stock photo → poster",
+    "copy: slide 6: no relevant stock photo → poster",
+    "copy: CardDeck 8 slides · caption 5 hashtags",
+    "render: slide-00.jpg … slide-07.jpg",
+    "qa: overflow/font/PII/secret/hashtag checks → 0 block · 0 warn",
+    "review: verdict pass · 5 issue(s)",
+    "golden: model / cli_version / agent_sha backfilled from the run's CLI session logs"
+  ],
+  "agent_sha": "b26f77d20a426a92",
+  "models": [
+    "claude-opus-5-5"
+  ],
+  "cli_version": "2.1.296",
+  "runner": "local"
+}
