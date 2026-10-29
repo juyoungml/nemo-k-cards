@@ -20,9 +20,11 @@ from app.schemas import (
     OutlineItem,
     Source,
 )
-from app.services.link_checker import OFFICIAL, UA, _registrable, check_url
+from app.services import safe_fetch
+from app.services.link_checker import OFFICIAL, _registrable, check_url
 
 SAMPLE_URL = "https://culture.seoul.go.kr/event/mangwon-night-market"
+PAGE_MAX_BYTES = 2_000_000  # page text for the planner; larger pages are refused
 
 
 def new_id() -> str:
@@ -68,13 +70,17 @@ def create(sample: bool) -> Draft:
 async def fetch_pages(urls: list[str]) -> tuple[list[str], list[str]]:
     """Host-side Fetch (B1): verify each URL, then pass only page *text* to the sandbox (data, not instructions)."""
     texts, blocked = [], []
-    async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=UA) as client:
+    async with safe_fetch.client(timeout=8) as client:
         for u in urls[:3]:
             chk = await check_url(u, client)
             if chk.status != "ok":
                 blocked.append(f"{u} ({chk.status}: {chk.reason or chk.http_code})")
                 continue
-            html = (await client.get(u)).text
+            try:
+                html = (await safe_fetch.fetch(client, "GET", u, max_bytes=PAGE_MAX_BYTES)).text
+            except httpx.HTTPError as e:
+                blocked.append(f"{u} (fetch failed: {getattr(e, 'reason', type(e).__name__)})")
+                continue
             text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.DOTALL | re.IGNORECASE)
             text = re.sub(r"<[^>]+>", " ", text)
             texts.append(f"SOURCE {u}\n" + re.sub(r"\s+", " ", text)[:6000])

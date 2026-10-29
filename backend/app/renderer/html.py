@@ -154,7 +154,8 @@ class HtmlRenderer:
         cat = event.category if event and event.category in CATEGORY else "other"
         label, line, color, poster_fg, poster_title = CATEGORY[cat]
         ends_soon = event and (event.end_date - self.today).days <= 14
-        photo = img if img and img.get("url") and img.get("allow_overlay") else None
+        # Local files only (the host's vetted copies and stock): never let Chromium fetch a remote URL.
+        photo = img if img and str(img.get("url") or "").startswith("file:") and img.get("allow_overlay") else None
         # Cover Hangul: the place the headline names, else a neighborhood every event shares, else 서울.
         def place(text: str) -> str | None:
             return next((ko for en, ko in HANGUL.items() if en in text.lower()), None)

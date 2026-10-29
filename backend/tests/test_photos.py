@@ -67,8 +67,12 @@ async def test_collect_downloads_first_good_photo(tmp_path: Path, monkeypatch):
         ctype, body = files[str(req.url)]
         return httpx.Response(200, headers={"content-type": ctype}, content=body)
 
-    real = httpx.AsyncClient
-    monkeypatch.setattr(photos.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    async def public(host: str, port: int) -> list[str]:
+        return ["93.184.215.14"]
+
+    monkeypatch.setattr(photos.safe_fetch, "resolve", public)
+    monkeypatch.setattr(photos.safe_fetch, "client",
+                        lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw))
     brief = BRIEF.model_copy(update={"images": [img(u) for u in files]})
     found, log = await photos.collect([brief], OK, tmp_path)
     v = found["ev-jinju"]

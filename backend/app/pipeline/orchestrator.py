@@ -220,9 +220,8 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
             deck = (_deck_from_draft(draft, included[0].id if included else None) if draft
                     else CardDeck.model_validate(fx("deck.json")))
         deck.job_id = job.id
-        for sl in deck.slides:
-            if sl.layout == "event" and sl.event_id in vetted and not sl.image:
-                sl.image = vetted[sl.event_id].asset
+        for line in photos.attach_vetted(deck, vetted):
+            r.log("copy", line, "warn")
         for line in photos.attach_stock(deck):
             r.log("copy", line)
         job.deck = deck
