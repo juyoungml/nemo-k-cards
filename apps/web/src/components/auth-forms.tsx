@@ -5,12 +5,15 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 
 import { Brand } from "@/components/sidebar";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { setActiveOrgId } from "@/lib/org";
+import { ROLE_LABEL } from "@/lib/roles";
 import { AUTH_CONFIGURED, reloadTo, safeNext, signOut, supabase } from "@/lib/supabase";
+import type { Org } from "@/lib/types";
 
 const nextParam = () => safeNext(new URLSearchParams(window.location.search).get("next"));
 const callback = (next: string) => `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
@@ -99,6 +102,19 @@ function LinkError() {
     : null;
 }
 
+const noSubscribe = () => () => {};
+/** The /invite page this sign-in or sign-up should return to, if any (read from `?next=`; none while prerendering). */
+function useInviteNext(): string | undefined {
+  const next = useSyncExternalStore(noSubscribe, nextParam, () => "/");
+  return next.startsWith("/invite") ? next : undefined;
+}
+
+/** Keeps an invitation's `next` when someone switches from sign-in to sign-up. */
+function SignUpLink() {
+  const invite = useInviteNext();
+  return <Linked href={invite ? `/sign-up?next=${encodeURIComponent(invite)}` : "/sign-up"}>Create an account</Linked>;
+}
+
 export function SignInForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -116,7 +132,7 @@ export function SignInForm() {
     <AuthScreen
       title="Sign in"
       description="Research, check and publish card news for your Organization."
-      footer={<>New here? <Linked href="/sign-up">Create an account</Linked></>}
+      footer={<>New here? <SignUpLink /></>}
     >
       <form onSubmit={submit} className="space-y-4">
         <Suspense fallback={null}>
@@ -137,6 +153,8 @@ export function SignUpForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const f = useForm();
+  // Signing up to accept an invitation (/invite sends people here): join that Organization, don't make one.
+  const invite = useInviteNext();
 
   const submit = f.run(async () => {
     const name = org.trim();
@@ -144,13 +162,16 @@ export function SignUpForm() {
       email: email.trim(),
       password,
       // Kept on the account so /welcome can finish setup if email confirmation comes in between.
-      options: { data: { org_name: name }, emailRedirectTo: callback("/welcome") },
+      options: invite
+        ? { emailRedirectTo: callback(invite) }
+        : { data: { org_name: name }, emailRedirectTo: callback("/welcome") },
     });
     if (error) throw new Error(error.message);
     if (!data.session) {
       f.setInfo(`Check ${email.trim()} for a confirmation link. It brings you back here to finish setting up.`);
       return;
     }
+    if (invite) return reloadTo(invite);
     await api.createOrg(name); // the API makes you the new Organization's Admin
     reloadTo("/");
   });
@@ -165,15 +186,19 @@ export function SignUpForm() {
   return (
     <AuthScreen
       title="Create an account"
-      description="You become the Admin of a new Organization and can invite your team later."
-      footer={<>Already have an account? <Linked href="/sign-in">Sign in</Linked></>}
+      description={invite
+        ? "Use the email address your invitation was sent to. You join your team right after."
+        : "You become the Admin of a new Organization and can invite your team later."}
+      footer={<>Already have an account? <Linked href={invite ? `/sign-in?next=${encodeURIComponent(invite)}` : "/sign-in"}>Sign in</Linked></>}
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Organization name" required maxLength={100} autoFocus placeholder="e.g. Seoul Weekend Guide" value={org} onChange={(e) => setOrg(e.target.value)} />
+        {!invite && (
+          <Field label="Organization name" required maxLength={100} autoFocus placeholder="e.g. Seoul Weekend Guide" value={org} onChange={(e) => setOrg(e.target.value)} />
+        )}
         <Field label="Work email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         <Field label="Password" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
         {f.error && <Notice tone="error">{f.error}</Notice>}
-        <Button type="submit" size="lg" className="w-full" disabled={f.busy || !org.trim()}>
+        <Button type="submit" size="lg" className="w-full" disabled={f.busy || (!invite && !org.trim())}>
           {f.busy ? "Creating…" : "Create account"}
         </Button>
       </form>
@@ -265,6 +290,117 @@ export function WelcomeForm() {
           {f.busy ? "Creating…" : "Create Organization"}
         </Button>
       </form>
+    </AuthScreen>
+  );
+}
+
+/**
+ * /invite?token=…: joins the Organization an Admin invited this email address to (backend/app/members.py).
+ * People arrive three ways: from Supabase's invite email (a new account, signed in by the tokens in the URL
+ * fragment, still without a password), from a sign-in link (an existing account), or from a link the Admin sent
+ * by hand (signed out: sign in or sign up first, then come back here).
+ */
+export function InviteForm() {
+  const [step, setStep] = useState<"checking" | "signed-out" | "error" | "password" | "joined">("checking");
+  const [org, setOrg] = useState<Org>();
+  const [error, setError] = useState<string>();
+  const [password, setPassword] = useState("");
+  const f = useForm();
+  const here = () => `/invite${window.location.search}`;
+
+  useEffect(() => {
+    void (async () => {
+      const token = new URLSearchParams(window.location.search).get("token") ?? "";
+      const hash = new URLSearchParams(window.location.hash.slice(1));
+      let newAccount = false;
+      if (window.location.hash) window.history.replaceState(null, "", `/invite${window.location.search}`); // no tokens left in the address bar
+      if (hash.get("error_description")) {
+        setError(`${hash.get("error_description")}. Ask your Admin for a new invitation.`);
+        return setStep("error");
+      }
+      const access_token = hash.get("access_token");
+      const refresh_token = hash.get("refresh_token");
+      if (access_token && refresh_token) {
+        const { error } = await supabase().auth.setSession({ access_token, refresh_token });
+        if (error) {
+          setError("That link has expired or was already used. Ask your Admin for a new invitation.");
+          return setStep("error");
+        }
+        newAccount = hash.get("type") === "invite";
+      }
+      const { data } = await supabase().auth.getSession();
+      if (!data.session) return setStep("signed-out");
+      if (!token) {
+        setError("This link is missing its invitation. Open the link from the email again.");
+        return setStep("error");
+      }
+      try {
+        const joined = await api.acceptInvitation(token);
+        setActiveOrgId(joined.id); // land in the Organization they just joined
+        setOrg(joined);
+        setStep(newAccount ? "password" : "joined");
+      } catch (e) {
+        setError((e as Error).message.replace(/^\d+ /, ""));
+        setStep("error");
+      }
+    })();
+  }, []);
+
+  const savePassword = f.run(async () => {
+    const { error } = await supabase().auth.updateUser({ password });
+    if (error) throw new Error(error.message);
+    reloadTo("/");
+  });
+
+  const joinedAs = org ? `You joined ${org.name} as ${ROLE_LABEL[org.role]}.` : "";
+  if (step === "password") {
+    return (
+      <AuthScreen title="Choose a password" description={`${joinedAs} Set a password to sign in next time.`}>
+        <form onSubmit={savePassword} className="space-y-4">
+          <Field label="Password" type="password" autoComplete="new-password" required minLength={8} autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
+          {f.error && <Notice tone="error">{f.error}</Notice>}
+          <Button type="submit" size="lg" className="w-full" disabled={f.busy}>{f.busy ? "Saving…" : "Save and continue"}</Button>
+        </form>
+      </AuthScreen>
+    );
+  }
+  if (step === "joined") {
+    return (
+      <AuthScreen title={`Welcome to ${org?.name ?? "your team"}`} description={joinedAs}>
+        <Button size="lg" className="w-full" onClick={() => reloadTo("/")}>Continue</Button>
+      </AuthScreen>
+    );
+  }
+  if (step === "signed-out") {
+    const next = encodeURIComponent(here());
+    return (
+      <AuthScreen
+        title="Join your team"
+        description="Sign in, or create an account, with the email address this invitation was sent to."
+        footer={<>New here? <Linked href={`/sign-up?next=${next}`}>Create an account</Linked></>}
+      >
+        <Button size="lg" className="w-full" asChild>
+          <Link href={`/sign-in?next=${next}`}>Sign in to accept</Link>
+        </Button>
+      </AuthScreen>
+    );
+  }
+  if (step === "error") {
+    return (
+      <AuthScreen
+        title="Couldn't accept the invitation"
+        footer={<button type="button" className="underline-offset-2 hover:underline" onClick={signOut}>Sign out and use another account</button>}
+      >
+        <div className="space-y-4">
+          <Notice tone="error">{error}</Notice>
+          <Button variant="outline" size="lg" className="w-full" onClick={() => reloadTo("/")}>Go to the Admin</Button>
+        </div>
+      </AuthScreen>
+    );
+  }
+  return (
+    <AuthScreen title="Joining…">
+      <p className="text-sm text-muted-foreground motion-safe:animate-pulse">Checking your invitation…</p>
     </AuthScreen>
   );
 }

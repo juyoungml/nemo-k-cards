@@ -191,11 +191,14 @@ export function createJob(prompt: string, scenario: Scenario = "good"): Job {
   return snapshot(job);
 }
 
-export function decide(id: string, kind: "approve" | "reject", extra: { caption?: string; reason?: string }) {
+export function decide(id: string, kind: "approve" | "reject", extra: { caption?: string; reason?: string; overrideReason?: string }) {
   const j = store().jobs.get(id);
   if (!j) return { error: "not found", code: 404 } as const;
   const snap = snapshot(j);
   if (snap.status !== "READY_FOR_REVIEW") return { error: `job is ${snap.status}, not READY_FOR_REVIEW`, code: 409 } as const;
+  // Same rule as the API: approving with blocking Issues is an Override and needs a reason.
+  if (kind === "approve" && snap.issues.some((i) => i.severity === "block") && !extra.overrideReason?.trim())
+    return { error: "this Deck has blocking Issues: approving it is an Override and needs a written reason", code: 422 } as const;
   j.decision = { kind, at: Date.now(), ...extra };
   return { job: snapshot(j) } as const;
 }

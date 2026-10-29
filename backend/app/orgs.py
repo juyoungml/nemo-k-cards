@@ -2,7 +2,8 @@
 without an Organization may call; the Admin calls `POST /orgs` right after sign-up (or on first sign-in when
 email confirmation came in between), and the caller becomes the new Organization's Admin.
 
-One Organization per person for now: switching between several is #14."""
+A person creates at most one Organization (one trial each, and a double-submitted sign-up can't make two); they
+can join any number of others by invitation (app/members.py) and switch between them with `X-Org-Id`."""
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -10,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from app import store
+from app import audit, store
 from app.auth import SignedIn
 
 
@@ -35,24 +36,19 @@ def memberships(user_id: UUID) -> list[Membership]:
         return [Membership(*r) for r in c.execute(_MEMBERSHIPS, (user_id,)).fetchall()]
 
 
-def membership(user_id: UUID) -> Membership | None:
-    """The Organization this person acts for: their only (or oldest) one until #14 adds switching."""
-    with store.tenant(None, user_id=user_id) as c:
-        row = c.execute(_MEMBERSHIPS + " limit 1", (user_id,)).fetchone()
-    return Membership(*row) if row else None
-
-
-def create_org(user_id: UUID, name: str) -> Membership:
+def create_org(user_id: UUID, name: str, email: str = "") -> Membership:
     """Create an Organization with `user_id` as its Admin, in one transaction. A per-person advisory lock makes
     a double-submitted sign-up create one Organization, not two. Runs as the connecting role (`store.system`):
     the new Organization has no Members yet, so there is no Organization for a policy to scope the writes to."""
     with store.system() as c:
         c.execute("select pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"create-org:{user_id}",))
-        if c.execute("select 1 from members where user_id = %s", (user_id,)).fetchone():
+        if c.execute("select 1 from orgs where created_by = %s", (user_id,)).fetchone():
             raise AlreadyMember
         (org_id,) = c.execute("insert into orgs (name, created_by) values (%s, %s) returning id",
                               (name, user_id)).fetchone()
-        c.execute("insert into members (org_id, user_id, role) values (%s, %s, 'admin')", (org_id, user_id))
+        c.execute("insert into members (org_id, user_id, role, email) values (%s, %s, 'admin', %s)",
+                  (org_id, user_id, email or None))
+        audit.insert(c, org_id, user_id, email, "org.created", str(org_id), {"name": name})
     return Membership(org_id, name, "admin")
 
 
@@ -99,7 +95,7 @@ def me(ctx: SignedIn) -> MeOut:
 @router.post("/orgs", response_model=OrgOut, status_code=201)
 def create(req: CreateOrgRequest, ctx: SignedIn) -> OrgOut:
     try:
-        m = create_org(ctx.user.id, req.name)
+        m = create_org(ctx.user.id, req.name, ctx.user.email)
     except AlreadyMember:
-        raise HTTPException(409, "you already belong to an Organization") from None
+        raise HTTPException(409, "you already created an Organization") from None
     return OrgOut(id=m.org_id, name=m.org_name, role=m.role)

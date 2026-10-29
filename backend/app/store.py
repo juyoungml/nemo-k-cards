@@ -14,6 +14,7 @@ import re
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from psycopg import Connection
@@ -22,6 +23,9 @@ from pydantic import BaseModel, ValidationError
 
 from app.config import settings
 from app.schemas import Brainstorm, Job, JobStatus, PolicyEvent
+
+if TYPE_CHECKING:
+    from app.audit import Entry
 
 API_ROLE = "wok_api"  # supabase/migrations/20261029140000_org_isolation.sql
 _lock = threading.Lock()
@@ -91,14 +95,18 @@ def system() -> Iterator[Connection]:
         yield c
 
 
-def _put(org_id: UUID, table: str, id_: str, model: BaseModel, extra: dict | None = None) -> None:
+def _put(org_id: UUID, table: str, id_: str, model: BaseModel, extra: dict | None = None,
+         audit: "Entry | None" = None) -> None:
     cols = {"id": id_, "doc": _json(model), **(extra or {})}
     updates = ", ".join(f"{c} = excluded.{c}" for c in cols if c != "id")
     # org_id is the column default (the transaction's Organization) and never updated; RLS refuses to overwrite
     # another Organization's row that happens to have the same id.
-    with tenant(org_id) as c:
+    with tenant(org_id, user_id=audit.actor if audit else None) as c:
         c.execute(f"insert into {table} ({', '.join(cols)}) values ({', '.join(['%s'] * len(cols))}) "
                   f"on conflict (id) do update set {updates}", list(cols.values()))
+        if audit:  # same transaction: the change and its audit event are saved together or not at all
+            from app import audit as audit_log
+            audit_log.write(c, org_id, audit)
 
 
 def _rows(org_id: UUID, sql: str, params: tuple) -> list[str]:
@@ -106,8 +114,8 @@ def _rows(org_id: UUID, sql: str, params: tuple) -> list[str]:
         return [r[0] for r in c.execute(sql, params).fetchall()]
 
 
-def save_job(org_id: UUID, job: Job) -> Job:
-    _put(org_id, "jobs", job.id, job, {"created_at": job.created_at})
+def save_job(org_id: UUID, job: Job, *, audit: "Entry | None" = None) -> Job:
+    _put(org_id, "jobs", job.id, job, {"created_at": job.created_at}, audit)
     return job
 
 

@@ -125,8 +125,9 @@ def sign_in(auth_keys):
 
     def make(org: str | None = "Test Org", user_id=None) -> TestClient:
         user_id = user_id or uuid.uuid4()
-        org_id = orgs.create_org(user_id, org).org_id if org else None
-        token = auth_keys.token(user_id, email=f"{user_id.hex[:8]}@example.com")
+        email = f"{user_id.hex[:8]}@example.com"
+        org_id = orgs.create_org(user_id, org, email).org_id if org else None
+        token = auth_keys.token(user_id, email=email)
         c = TestClient(app, headers={"Authorization": f"Bearer {token}"})
         c.org_id, c.user_id = org_id, user_id  # for tests that also use the store directly
         return c
@@ -146,3 +147,18 @@ def org():
 def client(sign_in):
     """A TestClient signed in as the Admin of a fresh Organization."""
     return sign_in()
+
+
+def all_api_routes(routes=None):
+    """Every APIRoute of the app, including those added with `include_router` (FastAPI 0.14x keeps them inside
+    an `_IncludedRouter`, so `app.routes` alone misses /me, /orgs and the Member routes)."""
+    from fastapi.routing import APIRoute
+
+    if routes is None:
+        from app.main import app
+        routes = app.routes
+    for r in routes:
+        if isinstance(r, APIRoute):
+            yield r
+        elif hasattr(r, "original_router"):
+            yield from all_api_routes(r.original_router.routes)

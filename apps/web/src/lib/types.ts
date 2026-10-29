@@ -197,3 +197,35 @@ export interface Me {
   org: Org | null; // the Organization this session acts for; null until one is created
   orgs: Org[];
 }
+
+export interface Member {
+  user_id: string;
+  email: string | null;
+  role: Role;
+  invited_by: string | null;
+  joined_at: string;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  invited_by: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export interface InvitationCreated extends Invitation {
+  invite_url: string; // works only for the invited email address
+  email_sent: boolean;
+}
+
+export interface AuditEvent {
+  id: number;
+  actor: string;
+  actor_email: string | null;
+  action: string;
+  target: string | null;
+  detail: Record<string, unknown>;
+  at: string;
+}

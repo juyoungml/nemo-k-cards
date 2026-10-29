@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     theme: Literal["bold", "clean", "pop"] = "clean"
     # Admin origins allowed to call this API from the browser (e.g. a tunnel URL for a shared test).
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # Where the Admin runs: invitation links point at ADMIN_URL/invite. Must be on the Supabase project's
+    # Auth redirect allow list (supabase/config.toml locally, the dashboard on Cloud).
+    admin_url: str = "http://localhost:3000"
 
     # Instagram Graph API — host-only secrets, never forwarded to the sandbox.
     ig_user_id: str = ""
