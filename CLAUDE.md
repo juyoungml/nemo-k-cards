@@ -93,3 +93,17 @@ cd apps/web && npx tsc --noEmit && pnpm lint
 - Secrets (`IG_ACCESS_TOKEN`, `SUPABASE_SERVICE_KEY`, Anthropic keys) stay in `backend/.env` on the host and never go into the sandbox, the agent workspace, logs or commits.
 - Data and caches don't live in the repo (`/data` is a gitignored symlink).
 - Card or UI changes must follow `DESIGN.md`. Re-run the renderer preview after template edits.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for juyoungml/nemo-k-cards (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created as terms and decisions are settled. See `docs/agents/domain.md`.
