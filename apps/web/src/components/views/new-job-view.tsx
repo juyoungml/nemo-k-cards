@@ -22,7 +22,7 @@ function StepDot({ step, n }: { step: PipelineStep; n: number }) {
         step.state === "done" && "bg-success text-white",
         step.state === "running" && "animate-pulse bg-primary text-white",
         step.state === "failed" && "bg-destructive text-white",
-        step.state === "pending" && "bg-muted text-muted-foreground",
+        (step.state === "pending" || step.state === "skipped") && "bg-muted text-muted-foreground",
       )}
     >
       {step.state === "done" ? <Check className="size-3.5" strokeWidth={3} /> : step.state === "failed" ? <X className="size-3.5" strokeWidth={3} /> : n}

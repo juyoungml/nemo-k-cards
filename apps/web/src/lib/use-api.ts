@@ -31,7 +31,7 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = [], pollMs?: n
   return { data, error, reload, setData };
 }
 
-export const TERMINAL_STATUSES = ["READY_FOR_REVIEW", "REJECTED", "PUBLISHED", "FAILED"];
+export const TERMINAL_STATUSES = ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "PUBLISHED", "FAILED"];
 
 /**
  * Keep a running job fresh. SSE is the fast path; it reconnects with backoff when the stream drops

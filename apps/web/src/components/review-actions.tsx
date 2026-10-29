@@ -14,6 +14,7 @@ const STATUS_NOTE: Partial<Record<Job["status"], string>> = {
   PUBLISHING: "Approved — the host is publishing to Instagram…",
   PUBLISHED: "Published to @whatsonkorea.",
   REJECTED: "Rejected — this deck will not be posted.",
+  BLOCKED: "Blocked by the safeguard — this deck can't be published. Regenerate it, or reject it.",
   FAILED: "The pipeline failed before review.",
 };
 
@@ -22,7 +23,9 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
   const [caption, setCaption] = useState(job.deck?.caption ?? "");
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
-  const canDecide = job.status === "READY_FOR_REVIEW" && !pending;
+  const blocked = job.status === "BLOCKED" || job.safeguard?.decision === "block";
+  const canDecide = job.status === "READY_FOR_REVIEW" && !blocked && !pending;
+  const canReject = (job.status === "READY_FOR_REVIEW" || job.status === "BLOCKED") && !pending;
   const publishing = job.status === "PUBLISHING" || (pending && !error);
   const blocks = job.issues.filter((i) => i.severity === "block").length;
 
@@ -55,13 +58,13 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                   ? `${blocks} blocking issue${blocks > 1 ? "s" : ""} flagged. Approving publishes anyway; you are the final check.`
                   : "Publishing runs on the host with the IG token — the agent sandbox cannot post or delete.")}
             </p>
-            <Button variant="destructive" size="lg" disabled={!canDecide} onClick={() => act(() => api.rejectJob(job.id, "Rejected by operator"))}>
+            <Button variant="destructive" size="lg" disabled={!canReject} onClick={() => act(() => api.rejectJob(job.id, "Rejected by operator"))}>
               Reject
             </Button>
             <Button
               variant="outline"
               size="lg"
-              disabled={!canDecide}
+              disabled={!(canDecide || canReject)}
               onClick={() =>
                 startTransition(async () => {
                   await api.createJob(job.prompt);
@@ -83,6 +86,8 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                 <>
                   <Loader2 className="size-4 motion-safe:animate-spin" /> Publishing…
                 </>
+              ) : blocked ? (
+                "Blocked by safeguard"
               ) : blocks > 0 ? (
                 "Approve anyway & Publish"
               ) : (

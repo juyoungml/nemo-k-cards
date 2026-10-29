@@ -20,12 +20,13 @@ class JobStatus(StrEnum):
     REVIEWING = "REVIEWING"
     READY_FOR_REVIEW = "READY_FOR_REVIEW"
     REJECTED = "REJECTED"
+    BLOCKED = "BLOCKED"  # the safeguard refused the deck; it can't be approved (regenerate or reject)
     PUBLISHING = "PUBLISHING"
     PUBLISHED = "PUBLISHED"
     FAILED = "FAILED"
 
 
-TERMINAL = {JobStatus.READY_FOR_REVIEW, JobStatus.REJECTED, JobStatus.PUBLISHED, JobStatus.FAILED}
+TERMINAL = {JobStatus.READY_FOR_REVIEW, JobStatus.REJECTED, JobStatus.BLOCKED, JobStatus.PUBLISHED, JobStatus.FAILED}
 
 
 # ---------------------------------------------------------------- sources & events
@@ -134,6 +135,51 @@ class ReviewVerdict(BaseModel):
     issues: list[Issue] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------- safeguard (hard gate before publishing)
+
+HarmCategory = Literal[
+    "hate",                # slurs, demeaning a nationality, ethnicity, religion, gender, disability, region
+    "harassment",          # targeting or mocking a real, identifiable person
+    "sexual",              # sexual content, sexualised framing, anything sexual involving minors
+    "violence",            # gore, glorified violence, weapons
+    "self_harm",           # suicide or self-harm, incl. as a joke or a hook
+    "dangerous",           # illegal drugs, drunk driving, unsafe or illegal activity presented as fun
+    "historical_tragedy",  # Korean tragedies and atrocities as a hook, pun or sale; history distortion
+    "political",           # partisan or election content, ballot numbers with party colours
+    "territorial_cultural",  # Sea of Japan / Takeshima, rising sun imagery, cultural-origin claims
+    "scam",                # fraud, phishing, fake giveaways, misleading money or safety claims
+    "other",
+]
+
+
+class SafeguardFinding(BaseModel):
+    """One reason the safeguard objects, written for the operator who reads it in Review."""
+    category: HarmCategory
+    severity: Literal["block", "warn"]
+    location: Literal["slide", "caption", "hashtags", "image"]
+    slide_index: int | None = None   # 0-based; None for caption / hashtags
+    excerpt: str                     # the exact offending text, or a short description of the image part
+    rule: str                        # the policy rule it breaks, e.g. "historical_tragedy · 05-18 date gate"
+    explanation: str                 # why it is harmful, in one or two plain sentences for the operator
+    fix: str = ""                    # how to make it publishable
+
+
+class SafeguardModelOutput(BaseModel):
+    """What the safeguard subagent returns (its JSON schema)."""
+    decision: Literal["allow", "block"]
+    summary: str   # 1-3 sentences shown at the top of Review: what is wrong, or why the deck is safe
+    findings: list[SafeguardFinding] = Field(default_factory=list)
+
+
+class SafeguardVerdict(SafeguardModelOutput):
+    """The host's final decision: model output merged with the deterministic rules, tied to the content."""
+    checked_by: list[Literal["rules", "model"]] = Field(default_factory=list)
+    model_error: str | None = None   # set when the model could not run; the gate then fails closed
+    policy_version: str = ""         # hash of the policy files the deck was checked against
+    content_hash: str = ""           # hash of the slide text + caption that was checked
+    checked_at: datetime | None = None
+
+
 # ---------------------------------------------------------------- job (view model the Admin reads)
 
 class PipelineStep(BaseModel):
@@ -173,6 +219,7 @@ class Job(BaseModel):
     verification: VerificationReport | None = None
     deck: CardDeck | None = None
     issues: list[Issue] = Field(default_factory=list)   # QA + review merged for display
+    safeguard: SafeguardVerdict | None = None            # hard gate: "block" means it can't be approved
     slide_urls: list[str] = Field(default_factory=list)  # /assets/{job_id}/slide-NN.jpg
     published_url: str | None = None
     error: str | None = None

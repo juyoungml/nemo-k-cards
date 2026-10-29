@@ -28,9 +28,11 @@ from app.schemas import (
     PolicyEvent,
     PublishProgress,
     ReviewVerdict,
+    SafeguardModelOutput,
+    SafeguardVerdict,
     VerificationReport,
 )
-from app.services import image_host, link_checker, photos, publisher, visual_qa
+from app.services import image_host, link_checker, photos, publisher, safeguard, visual_qa
 
 log = logging.getLogger("orchestrator")
 KST = ZoneInfo("Asia/Seoul")
@@ -43,10 +45,12 @@ STEPS = {
     "render": ("Render", "host · Playwright"),
     "qa": ("Visual QA", "host"),
     "review": ("Final review", "reviewer · sandbox"),
+    "safeguard": ("Safeguard", "safeguard · sandbox"),
     "publish": ("Human publish", "you"),
 }
 STATUS = {"research": JobStatus.RESEARCHING, "verify": JobStatus.VERIFYING, "copy": JobStatus.WRITING,
-          "render": JobStatus.RENDERING, "qa": JobStatus.QA, "review": JobStatus.REVIEWING}
+          "render": JobStatus.RENDERING, "qa": JobStatus.QA, "review": JobStatus.REVIEWING,
+          "safeguard": JobStatus.REVIEWING}
 
 _tasks: set[asyncio.Task] = set()
 
@@ -278,7 +282,20 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
         r.step("review", "done", f"{verdict.verdict} · {len(verdict.issues)} issue(s)")
 
         job.issues = host_issues + qa.issues + verdict.issues
-        # Automated checks advise; the human decides. Never auto-reject — blocking issues are shown in Review.
+
+        # 7. Safeguard (sandbox + host rules) — the one check that can stop a post -------------------
+        current = "safeguard"
+        r.step("safeguard", "running")
+        fixture_fail("safeguard")
+        sg = await run_safeguard(job.id, deck, [s.path for s in rendered], fx if not live else None)
+        job.safeguard = sg
+        _log_safeguard(r, sg)
+        if sg.decision == "block":
+            job.status = JobStatus.BLOCKED
+            r.step("publish", "skipped", "Blocked by safeguard: regenerate or reject")
+            return
+
+        # Other automated checks advise; the human decides. Blocking issues are shown in Review.
         n_block = sum(i.severity == "block" for i in job.issues)
         if n_block:
             r.log("review", f"{n_block} blocking issue(s) flagged for the operator — decide in Review", "warn")
@@ -290,6 +307,39 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
         job.error = f"{STEPS[current][0]} failed: {e}"
         job.status = JobStatus.FAILED
         r.step(current, "failed", str(e)[:120])
+
+
+async def run_safeguard(job_id: str, deck: CardDeck, slide_paths: list, fx=None,
+                        *, use_model: bool = True) -> SafeguardVerdict:
+    """Binding allow/block verdict for exactly this deck. `fx` = fixture loader (DEMO_MODE=fixture)."""
+    today = datetime.now(KST).date()
+    if not use_model:
+        model = None
+    elif fx is not None:
+        async def model(payload, files):
+            await asyncio.sleep(FIXTURE_DELAY)
+            return SafeguardModelOutput.model_validate(
+                fx("safeguard.json") or {"decision": "allow", "summary": "No harmful content found."})
+    else:
+        async def model(payload, files):
+            return await run_stage(
+                "safeguard",
+                "Use the safeguard subagent. Decide whether this card deck is safe to publish on a public "
+                "Instagram account for foreign visitors to Korea. Apply `policy_md` and `sensitive_topics_yaml`, "
+                "look at every image in `slide_paths`, and explain every block for the operator.",
+                payload, SafeguardModelOutput, files=files, job_id=job_id)
+    return await safeguard.check(deck, slide_paths=slide_paths, today=today, model=model)
+
+
+def _log_safeguard(r: Run, sg: SafeguardVerdict) -> None:
+    nb = sum(f.severity == "block" for f in sg.findings)
+    nw = len(sg.findings) - nb
+    if sg.model_error:
+        r.log("safeguard", f"model failed ({sg.model_error[:120]}) → blocked (fail closed)", "warn")
+    r.log("safeguard", f"{sg.decision.upper()} · {nb} block · {nw} warn · policy {sg.policy_version}",
+          "warn" if sg.decision == "block" else "info")
+    r.step("safeguard", "done" if sg.decision == "allow" else "failed",
+           f"allow · {nw} warn" if sg.decision == "allow" else f"BLOCKED · {nb} finding(s)")
 
 
 def _replay_policy_events(r: Run, events: list[dict]) -> None:
@@ -340,6 +390,26 @@ async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
     job.error = None
     job.publish_progress = PublishProgress(mode=mode, step="upload", label=LABELS["upload"],
                                            started_at=datetime.now(UTC))
+    paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
+    # The safeguard verdict vouches for one exact text. An edited caption (or a missing verdict) is checked
+    # again before anything leaves the host; a block here stops the publish.
+    if not job.safeguard or job.safeguard.content_hash != safeguard.content_hash(job.deck):
+        job.publish_progress.label = "Safeguard is checking the edited caption"
+        r.log("safeguard", "caption changed since the last check → checking again before publishing")
+        try:
+            sg = await run_safeguard(job.id, job.deck, paths, use_model=settings.demo_mode == "live")
+        except Exception as e:  # noqa: BLE001 — fail closed
+            sg = SafeguardVerdict(decision="block", summary="Blocked because the safety check could not run.",
+                                  model_error=str(e)[:300])
+        job.safeguard = sg
+        _log_safeguard(r, sg)
+        if sg.decision == "block":
+            job.status = JobStatus.BLOCKED
+            pp = job.publish_progress
+            pp.step, pp.error, pp.finished_at = "failed", sg.summary[:300], datetime.now(UTC)
+            pp.label = "Blocked by safeguard: nothing was posted"
+            r.step("publish", "skipped", "Blocked by safeguard: regenerate or reject")
+            return
     n_block = sum(i.severity == "block" for i in job.issues)
     r.step("publish", "running", f"publishing ({mode})")
     r.log("publish", f"approved by operator → publisher on host (mode: {mode})"
@@ -354,7 +424,6 @@ async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
         r.save()
 
     try:
-        paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
         if mode in ("graph", "dryrun"):
             urls = await image_host.publish_images(job.id, paths, lambda d, t: progress("upload", d, t))
             r.log("publish", f"{len(urls)} slides public via {settings.image_host} → {urls[0].rsplit('/', 2)[0]}/…")

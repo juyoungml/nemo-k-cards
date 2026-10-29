@@ -34,13 +34,20 @@
   "issues": [
     { "severity": "warn", "category": "tone", "slide_index": 4, "message": "\"Must-visit\" is clickbait-y; consider \"worth a look\"." }
   ],
+  "safeguard": {
+    "decision": "allow",
+    "summary": "Safe to post: neutral event listings with practical tips for visitors, and nothing harmful in the text, hashtags or images.",
+    "findings": [],
+    "checked_by": ["rules", "model"], "policy_version": "mock", "content_hash": "mock"
+  },
   "notes": {
     "research": "5 events · 11 sources",
     "verify": "1 dead · 1 lookalike → 2 excluded",
     "copy": "7 slides",
     "render": "7 PNG · 1080×1350",
     "qa": "0 block · 0 warn",
-    "review": "pass · 1 warn"
+    "review": "pass · 1 warn",
+    "safeguard": "allow · 0 warn"
   },
   "log": [
     { "stage": "research", "message": "sandbox created (policy: agent-policy.yaml)" },

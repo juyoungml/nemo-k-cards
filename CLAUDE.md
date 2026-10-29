@@ -62,7 +62,7 @@ curl -s -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{"pr
 curl -N localhost:8000/jobs/<id>/events        # SSE: full Job snapshots
 ```
 
-Pipeline: research → verify (host link check) → copy → render (Jinja2 + Playwright) → visual QA → review → `READY_FOR_REVIEW` → human approves in the Admin → publish. Nothing is auto-rejected; blocking issues are shown and the operator decides.
+Pipeline: research → verify (host link check) → copy → render (Jinja2 + Playwright) → visual QA → review → **safeguard** → `READY_FOR_REVIEW` → human approves in the Admin → publish. QA and review issues are advisory: they're shown and the operator decides. The safeguard is the one hard gate. If it blocks, the job ends `BLOCKED`, the API refuses to approve it, and the only options are to regenerate or reject. It fails closed, and an edited caption is checked again before publishing. The code is in `backend/app/services/safeguard.py`, the policy in `policies/content/safeguard_policy.md` plus `sensitive_topics.yaml`, and the decision record in `docs/adr/0004-safeguard-hard-gate.md`.
 
 To run one stage by hand (what `LocalClaudeRunner` does, cwd `agent/`):
 
@@ -73,7 +73,7 @@ claude -p "<task text + JSON input>" --agent researcher --output-format json \
 # result is in .structured_output
 ```
 
-Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `reviewer` (Read only), defined in `agent/.claude/agents/`. Agents never publish. Only the host does.
+Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `reviewer`, `safeguard` (Read only), defined in `agent/.claude/agents/`. Agents never publish. Only the host does.
 
 **OpenShell (submission path):** one-time `scripts/openshell_setup.sh` (builds the image, imports the provider, registers the key), then `AGENT_RUNNER=openshell`. Policy: `policies/openshell/agent-policy.yaml`. Probe it with `scripts/openshell_probe.sh`.
 

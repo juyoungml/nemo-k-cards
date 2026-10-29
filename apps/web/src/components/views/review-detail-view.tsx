@@ -7,6 +7,7 @@ import { LoadState, PageHeader, Panel } from "@/components/page";
 import { PublishProgress } from "@/components/publish-progress";
 import { PublishToast } from "@/components/publish-toast";
 import { ReviewActions } from "@/components/review-actions";
+import { SafeguardPanel } from "@/components/safeguard-panel";
 import { SlidePreview } from "@/components/slide-preview";
 import { JobStatusBadge, StatusBadge, type Tone } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -98,6 +99,7 @@ function IssueList({ issues, onJump }: { issues: Issue[]; onJump: (slide: number
 }
 
 function reviewSummary(job: Job) {
+  if (job.status === "BLOCKED") return "blocked by safeguard · can't be published";
   if (job.status !== "READY_FOR_REVIEW") return job.status.toLowerCase().replaceAll("_", " ");
   const blocks = job.issues.filter((i) => i.severity === "block").length;
   const warns = job.issues.length - blocks;
@@ -136,7 +138,9 @@ export function ReviewDetailView({ id }: { id: string }) {
         <div className="min-w-0 flex-1 space-y-4">
           <PublishProgress job={job} />
 
-          <Panel title="Automated checks">
+          <SafeguardPanel job={job} onJump={setSlide} />
+
+          <Panel title="Automated checks" description="Advisory: you decide on these. Only the safeguard can block publishing.">
             <div className="flex flex-wrap gap-2">{CHECKS.map((c) => checkBadge(job, c.category, c.label))}</div>
             {job.issues.length > 0 && <IssueList issues={job.issues} onJump={setSlide} />}
           </Panel>

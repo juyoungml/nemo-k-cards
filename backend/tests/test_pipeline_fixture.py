@@ -48,15 +48,21 @@ async def run_brainstorm(draft):
 async def test_good_scenario_is_ready(no_network):
     job = await run_quick("good")
     assert job.status == JobStatus.READY_FOR_REVIEW
+    assert job.safeguard.decision == "allow" and job.safeguard.findings == []
     assert len(job.slide_urls) == len(job.deck.slides)
     assert set(job.verification.excluded_event_ids) == {"ev-kpop-giveaway", "ev-hongdae-character"}
 
 
-async def test_bad_scenario_waits_for_operator_with_block_issues(no_network):
+async def test_bad_scenario_is_blocked_by_the_safeguard(no_network):
     job = await run_quick("bad")
-    # BACKEND §11 #4 (v1.1): checks never auto-reject; blocking issues wait for the operator in Review.
-    assert job.status == JobStatus.READY_FOR_REVIEW
-    assert any(i.severity == "block" for i in job.issues)
+    # The safeguard is the one hard gate: "Tank Day" on 5·18 can't be approved by anyone.
+    assert job.status == JobStatus.BLOCKED
+    assert job.safeguard.decision == "block" and job.safeguard.checked_by == ["rules", "model"]
+    assert {f.excerpt for f in job.safeguard.findings} >= {"Tank Day", "Celebrate with 51.8% off!"}
+    assert job.safeguard.summary.startswith('Blocked phrase "Tank Day"')
+    states = {s.name: s.state for s in job.pipeline}
+    assert states["Safeguard"] == "failed" and states["Human publish"] == "skipped"
+    # The advisory checks still ran and are shown next to the verdict.
     cats = {(i.category, i.severity) for i in job.issues}
     assert ("sensitive", "block") in cats
     assert ("pii", "block") in cats  # phone number on slide 2, found by host QA (not the fixture)
@@ -163,6 +169,20 @@ def test_parse_dates(text, expected):
     assert drafts.parse_dates(text, date(2026, 10, 7)) == expected
 
 
+def allowed_job():
+    """A READY_FOR_REVIEW job with the good deck and an "allow" safeguard verdict for exactly that deck."""
+    import json
+
+    from app.config import settings
+    from app.schemas import CardDeck, SafeguardVerdict
+    from app.services import safeguard
+    job = orchestrator.new_job(secrets.token_hex(3), "approve test")
+    job.status = JobStatus.READY_FOR_REVIEW
+    job.deck = CardDeck.model_validate(json.loads((settings.scenarios_dir / "good/deck.json").read_text()))
+    job.safeguard = SafeguardVerdict(decision="allow", summary="ok", content_hash=safeguard.content_hash(job.deck))
+    return job
+
+
 def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):
     from fastapi.testclient import TestClient
 
@@ -176,9 +196,7 @@ def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):
     monkeypatch.setattr(settings, "publish_mode", "mock")
     client = TestClient(app)
     for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
-        job = orchestrator.new_job(secrets.token_hex(3), "approve test")
-        job.status = JobStatus.READY_FOR_REVIEW
-        store.save_job(job)
+        job = store.save_job(allowed_job())
         r = client.post(f"/jobs/{job.id}/approve", json={"mode": mode} if mode else {})
         assert r.status_code == code, (mode, r.text)
     assert calls == ["mock", "mock"]

@@ -10,6 +10,7 @@ export type JobStatus =
   | "REVIEWING"
   | "READY_FOR_REVIEW"
   | "REJECTED"
+  | "BLOCKED" // safeguard refused the deck: it can't be approved, only regenerated or rejected
   | "PUBLISHING"
   | "PUBLISHED"
   | "FAILED";
@@ -63,6 +64,42 @@ export interface Issue {
   message: string;
 }
 
+export type HarmCategory =
+  | "hate"
+  | "harassment"
+  | "sexual"
+  | "violence"
+  | "self_harm"
+  | "dangerous"
+  | "historical_tragedy"
+  | "political"
+  | "territorial_cultural"
+  | "scam"
+  | "other";
+
+export interface SafeguardFinding {
+  category: HarmCategory;
+  severity: "block" | "warn";
+  location: "slide" | "caption" | "hashtags" | "image";
+  slide_index?: number | null;
+  excerpt: string;
+  rule: string;
+  explanation: string;
+  fix?: string;
+}
+
+/** The hard gate's verdict. "block" means nobody can approve this deck. */
+export interface SafeguardVerdict {
+  decision: "allow" | "block";
+  summary: string;
+  findings: SafeguardFinding[];
+  checked_by: ("rules" | "model")[];
+  model_error?: string | null;
+  policy_version: string;
+  content_hash: string;
+  checked_at?: string | null;
+}
+
 export interface Job {
   id: string;
   prompt: string;
@@ -72,6 +109,7 @@ export interface Job {
   verification?: VerificationReport | null;
   deck?: CardDeck | null;
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
+  safeguard?: SafeguardVerdict | null;
   published_url?: string | null;
   error?: string | null;
   slide_urls?: string[]; // rendered JPEGs, relative to API_URL (/assets/{id}/slide-NN.jpg)
@@ -111,7 +149,7 @@ export interface Metric {
   delta: string;
 }
 
-export type PipelineStepState = "done" | "running" | "pending" | "failed";
+export type PipelineStepState = "done" | "running" | "pending" | "failed" | "skipped";
 
 export interface PipelineStep {
   name: string;

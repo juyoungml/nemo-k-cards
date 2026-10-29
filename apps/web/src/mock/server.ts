@@ -18,6 +18,7 @@ import type {
   Metric,
   PipelineStep,
   PolicyEvent,
+  SafeguardVerdict,
   Scenario,
   VerificationReport,
 } from "@/lib/types";
@@ -29,6 +30,7 @@ interface ScenarioData {
   verification: VerificationReport;
   deck: Omit<CardDeck, "job_id">;
   issues: Issue[];
+  safeguard?: SafeguardVerdict;
   notes: Record<string, string>;
   log: { stage: string; message: string; level?: "info" | "warn" }[];
   policy_events: { stage: string; binary: string; host: string; request: string; result: PolicyEvent["result"] }[];
@@ -45,6 +47,7 @@ const STAGES = [
   { key: "render", name: "Render", where: "host · Playwright", status: "RENDERING", ms: 2500 },
   { key: "qa", name: "Visual QA", where: "host", status: "QA", ms: 1500 },
   { key: "review", name: "Final review", where: "reviewer · sandbox", status: "REVIEWING", ms: 2000 },
+  { key: "safeguard", name: "Safeguard", where: "safeguard · sandbox", status: "REVIEWING", ms: 1500 },
 ] as const;
 const PUBLISH_MS = 2500;
 
@@ -119,8 +122,10 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     t += stages[i].ms;
   }
   const finished = currentIdx === stages.length;
-  if (finished) status = sc.issues.some((i) => i.severity === "block") ? "REJECTED" : "READY_FOR_REVIEW";
+  // Only the safeguard can block; other blocking issues wait for the operator (same as the FastAPI backend).
+  if (finished) status = sc.safeguard?.decision === "block" ? "BLOCKED" : "READY_FOR_REVIEW";
 
+  if (job.decision?.kind === "reject" && finished && status === "BLOCKED") status = "REJECTED";
   if (job.decision && finished && status === "READY_FOR_REVIEW") {
     if (job.decision.kind === "reject") status = "REJECTED";
     else status = now - job.decision.at < PUBLISH_MS ? "PUBLISHING" : "PUBLISHED";
@@ -135,14 +140,16 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     ...stages.map((s, i) => ({
       name: s.name,
       where: s.where,
-      state: (i < currentIdx ? "done" : i === currentIdx ? (failed ? "failed" : "running") : "pending") as PipelineStep["state"],
+      state: (s.key === "safeguard" && finished && sc.safeguard?.decision === "block"
+        ? "failed"
+        : i < currentIdx ? "done" : i === currentIdx ? (failed ? "failed" : "running") : "pending") as PipelineStep["state"],
       note: i < currentIdx || (i === currentIdx && failed) ? sc.notes[s.key] : undefined,
     })),
     {
       name: "Human publish",
       where: "you",
-      state: status === "PUBLISHED" ? "done" : status === "PUBLISHING" ? "running" : "pending",
-      note: status === "PUBLISHED" ? "posted to @whatsonkorea" : "Approve in Review",
+      state: status === "PUBLISHED" ? "done" : status === "PUBLISHING" ? "running" : finished && sc.safeguard?.decision === "block" ? "skipped" : "pending",
+      note: status === "PUBLISHED" ? "posted to @whatsonkorea" : finished && sc.safeguard?.decision === "block" ? "Blocked by safeguard: regenerate or reject" : "Approve in Review",
     },
   ];
 
@@ -170,6 +177,7 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     verification: reached("verify") ? sc.verification : null,
     deck,
     issues: finished ? sc.issues : [],
+    safeguard: finished ? sc.safeguard ?? null : null,
     error: failed ? sc.error : job.decision?.reason ?? null,
     published_url: status === "PUBLISHED" ? `https://www.instagram.com/p/MOCK${job.id.toUpperCase()}/` : null,
     pipeline,
@@ -195,12 +203,15 @@ export function decide(id: string, kind: "approve" | "reject", extra: { caption?
   const j = store().jobs.get(id);
   if (!j) return { error: "not found", code: 404 } as const;
   const snap = snapshot(j);
-  if (snap.status !== "READY_FOR_REVIEW") return { error: `job is ${snap.status}, not READY_FOR_REVIEW`, code: 409 } as const;
+  if (kind === "approve" && snap.status === "BLOCKED")
+    return { error: `blocked by safeguard: ${snap.safeguard?.summary ?? ""}`, code: 409 } as const;
+  const allowed = kind === "reject" ? ["READY_FOR_REVIEW", "BLOCKED"] : ["READY_FOR_REVIEW"];
+  if (!allowed.includes(snap.status)) return { error: `job is ${snap.status}, not READY_FOR_REVIEW`, code: 409 } as const;
   j.decision = { kind, at: Date.now(), ...extra };
   return { job: snapshot(j) } as const;
 }
 
-export const isTerminal = (s: JobStatus) => ["READY_FOR_REVIEW", "REJECTED", "PUBLISHED", "FAILED"].includes(s);
+export const isTerminal = (s: JobStatus) => ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "PUBLISHED", "FAILED"].includes(s);
 
 // ---------------------------------------------------------------- dashboard & policy
 

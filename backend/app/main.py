@@ -27,6 +27,7 @@ from app.schemas import (
     Metric,
     RejectRequest,
 )
+from app.services import safeguard
 
 
 def recover_interrupted() -> None:
@@ -138,9 +139,20 @@ async def job_events(job_id: str, request: Request) -> StreamingResponse:
 async def approve(job_id: str, req: ApproveRequest) -> Job:
     """The ONLY publish path: human approves in Admin -> host publishes (sandbox has no token)."""
     job = _job_or_404(job_id)
+    # Safeguard: the one hard gate. A blocked deck can't be approved by anyone; regenerate or reject it.
+    if job.status == JobStatus.BLOCKED or (job.safeguard and job.safeguard.decision == "block"):
+        raise HTTPException(409, f"blocked by safeguard: {job.safeguard.summary if job.safeguard else ''}")
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
-    # Blocking issues are advisory: the operator saw them in Review and chose to approve.
+    if not job.safeguard or not job.deck:
+        raise HTTPException(409, "this job has no safeguard verdict (created before the safeguard existed); "
+                                 "regenerate it")
+    if req.caption and req.caption != job.deck.caption:
+        # Fast host rules on the edited caption now; the full model check runs before upload (publish_job).
+        edited = job.deck.model_copy(update={"caption": req.caption})
+        if hits := safeguard.rule_findings(edited):
+            raise HTTPException(422, "edited caption blocked by safeguard: " + hits[0].explanation)
+    # Other blocking issues are advisory: the operator saw them in Review and chose to approve.
     # Hard stop only for leaked credentials — those must never be published.
     if any(i.category == "pii" and "credential" in i.message for i in job.issues):
         raise HTTPException(409, "deck contains a credential-like string; regenerate before publishing")
@@ -163,7 +175,7 @@ async def approve(job_id: str, req: ApproveRequest) -> Job:
 @app.post("/jobs/{job_id}/reject", response_model=Job)
 def reject(job_id: str, req: RejectRequest) -> Job:
     job = _job_or_404(job_id)
-    if job.status != JobStatus.READY_FOR_REVIEW:
+    if job.status not in (JobStatus.READY_FOR_REVIEW, JobStatus.BLOCKED):
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
     job.status, job.error = JobStatus.REJECTED, req.reason or "rejected by operator"
     return store.save_job(job)

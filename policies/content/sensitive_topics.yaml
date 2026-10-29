@@ -11,7 +11,7 @@ dates:
   - { date: "06-06", note: "현충일 (Memorial Day)", avoid: [discount hooks, comic military content] }
   - { date: "06-10", note: "6·10 민주항쟁", avoid: ["탁 치니 억", tear-gas jokes] }
   - { date: "06-25", note: "한국전쟁 발발", avoid: [war / North Korea jokes] }
-  - { date: "08-14", note: "일본군 위안부 피해자 기림의 날", avoid: [any joke, "80 years ago" hooks] }
+  - { date: "08-14", note: "일본군 위안부 피해자 기림의 날", avoid: [any joke, '"80 years ago" hooks'] }
   - { date: "08-15", note: "광복절 (Liberation Day)", avoid: [rising sun imagery, japanese militaria, japanese brand promos] }
   - { date: "10-29", note: "10·29 이태원 참사", avoid: [Itaewon Halloween parties, crowd hype, costume promos] }
   - { date: "12-03", note: "2024 비상계엄", avoid: [martial law / tanks as fun imagery] }
