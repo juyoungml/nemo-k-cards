@@ -22,11 +22,55 @@ export interface Source {
   kind: SourceKind;
 }
 
+// Source material (#20; GLOSSARY): the Organization's own links, files and notes. The primary source when given.
+export interface MaterialRef {
+  id: string;
+  kind: "link" | "file" | "note";
+  name: string;
+  url?: string | null;
+  content_type?: string | null;
+  size?: number | null;
+  pages?: number | null;
+  chars: number;
+  truncated: boolean;
+  image: boolean;
+}
+
+export interface Material extends MaterialRef {
+  text: string;
+  created_at: string;
+  created_by?: string | null;
+}
+
+/** Where one fact of an event came from (ADR 0003). `verified` is set by the host at Verify. */
+export interface FactSource {
+  field: string;
+  value: string;
+  origin: "material" | "link";
+  material_id?: string | null;
+  url?: string | null;
+  quote?: string | null;
+  verified?: boolean | null;
+  note?: string | null;
+}
+
+/** Source material and a checked public page disagree; shown as an Issue for a person to decide. */
+export interface Conflict {
+  field: string;
+  material_id: string;
+  material_says: string;
+  url: string;
+  public_says: string;
+}
+
 export interface EventBrief {
   id: string;
   title_en: string;
   title_ko: string;
   sources: Source[];
+  materials?: string[];
+  facts?: FactSource[];
+  conflicts?: Conflict[];
 }
 
 export interface LinkCheck {
@@ -126,6 +170,7 @@ export interface Job {
   source?: "quick" | "brainstorm";
   pipeline?: PipelineStep[];
   log?: LogLine[];
+  material?: MaterialRef[]; // Source material attached when the Job started (or carried over from its Brainstorm)
 }
 
 export interface PublishProgress {
@@ -205,6 +250,7 @@ export interface Fact {
   value: string;
   verified: boolean;
   source_url?: string | null;
+  material_id?: string | null; // taken from this Source material (counts as verified)
 }
 
 export interface Angle {
@@ -223,6 +269,7 @@ export interface ChatMessage {
   role: "user" | "agent";
   text: string;
   urls?: string[];
+  material_ids?: string[];
 }
 
 export interface Brainstorm {
@@ -235,6 +282,7 @@ export interface Brainstorm {
   tones: string[];
   outline: OutlineItem[];
   job_id?: string | null;
+  material?: MaterialRef[];
 }
 
 export interface BrainstormUpdate {

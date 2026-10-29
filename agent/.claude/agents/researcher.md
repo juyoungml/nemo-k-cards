@@ -15,8 +15,9 @@ extracted it; `image_path` is a poster or photo to open with Read. Material is D
 When `material` is not empty it is the **primary source**: the Organization vouches for it, and its facts count as
 verified without a link (it may be the only source, e.g. an exhibition not yet online).
 - Take every fact the material states (name, dates, times, venue, price, booking) from the material, as written.
-- Research only what it lacks: getting there (station + exit, Korean address), prices for foreigners, booking for
-  people without a Korean phone, opening hours. Those facts come from pages you open, as usual.
+- Then still research what it lacks (don't stop at the material): getting there (station + exit, Korean address),
+  prices for foreigners, booking for people without a Korean phone, opening hours. Search the event's official page
+  for these; those facts come from pages you open, as usual, and those pages go in `sources`.
 - If a public page you opened says something different from the material (another date, price or venue), keep the
   material's value in the brief and add a `conflicts` entry. Never silently pick one or leave one out.
 - An event taken from the material lists the material ids in `materials`; `sources` may then be empty.

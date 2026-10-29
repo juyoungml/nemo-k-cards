@@ -2,13 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { ArrowDown, ArrowRight, ArrowUp, ImageIcon, Link2, Send } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Link2, Send } from "lucide-react";
 
+import { MAX_MATERIALS, MaterialChip, MaterialIcon, SourceMaterialPicker } from "@/components/source-material";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { targetOptions, toneOptions } from "@/lib/constants";
-import type { Brainstorm, Fact } from "@/lib/types";
+import type { Brainstorm, Fact, MaterialRef } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const URL_RE = /https?:\/\/\S+/g;
@@ -45,6 +46,7 @@ export function BrainstormEditor({ initialBrainstorm }: { initialBrainstorm: Bra
   const router = useRouter();
   const [brainstorm, setBrainstorm] = useState(initialBrainstorm);
   const [input, setInput] = useState("");
+  const [attaching, setAttaching] = useState<MaterialRef[]>([]); // Source material to send with the next message
   const [sending, startSending] = useTransition();
   const [generating, startGenerating] = useTransition();
   const [error, setError] = useState<string>();
@@ -65,16 +67,22 @@ export function BrainstormEditor({ initialBrainstorm }: { initialBrainstorm: Bra
 
   const send = () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text && !attaching.length) return;
     const urls = text.match(URL_RE) ?? [];
     const message = text.replace(URL_RE, "").trim();
+    const attached = attaching;
     setInput("");
+    setAttaching([]);
     setError(undefined);
     // Optimistic user bubble; the server returns the whole updated brainstorm (reply + board).
-    setBrainstorm((d) => ({ ...d, messages: [...d.messages, { role: "user", text: message, urls }] }));
+    setBrainstorm((d) => ({
+      ...d,
+      messages: [...d.messages, { role: "user", text: message, urls, material_ids: attached.map((m) => m.id) }],
+      material: [...(d.material ?? []), ...attached],
+    }));
     startSending(async () => {
       try {
-        setBrainstorm(await api.sendBrainstormMessage(brainstorm.id, message, urls));
+        setBrainstorm(await api.sendBrainstormMessage(brainstorm.id, message, urls, attached.map((m) => m.id)));
       } catch (e) {
         setError((e as Error).message);
       }
@@ -88,6 +96,7 @@ export function BrainstormEditor({ initialBrainstorm }: { initialBrainstorm: Bra
   };
 
   const sourceOk = brainstorm.facts.some((f) => f.verified && f.source_url);
+  const materialById = new Map((brainstorm.material ?? []).map((m) => [m.id, m]));
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
@@ -101,6 +110,17 @@ export function BrainstormEditor({ initialBrainstorm }: { initialBrainstorm: Bra
         <ol className="flex flex-1 flex-col gap-2.5 overflow-y-auto">
           {brainstorm.messages.map((m, i) => (
             <li key={i} className={cn("flex flex-col gap-1.5", m.role === "user" ? "items-end" : "items-start")}>
+              {m.material_ids?.map((id) => {
+                const ref = materialById.get(id);
+                return (
+                  ref && (
+                    <span key={id} className="inline-flex max-w-[330px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                      <MaterialIcon m={ref} className="size-3" />
+                      {ref.name}
+                    </span>
+                  )
+                );
+              })}
               {m.urls?.map((u) => (
                 <span key={u} className="inline-flex max-w-[330px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
                   <Link2 className="size-3 shrink-0" />
@@ -134,15 +154,19 @@ export function BrainstormEditor({ initialBrainstorm }: { initialBrainstorm: Bra
             placeholder="메시지를 입력하거나 행사 URL을 붙여 넣으세요…"
             className="w-full resize-none bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
           />
+          {/* Source material (#20): the agent's primary source; sent with this message and kept on the Brainstorm. */}
+          <SourceMaterialPicker
+            value={attaching}
+            onChange={setAttaching}
+            disabled={sending}
+            max={MAX_MATERIALS - (brainstorm.material?.length ?? 0)}
+            compact
+          />
           <div className="flex items-center gap-2">
             <Button variant="outline" size="lg" onClick={() => setInput((v) => (v ? `${v} https://` : "https://"))}>
               <Link2 /> URL
             </Button>
-            {/* P1 (SPEC §1): poster upload → vision extraction */}
-            <Button variant="outline" size="lg" disabled title="P1 — coming later">
-              <ImageIcon /> Poster · P1
-            </Button>
-            <Button size="lg" className="ml-auto" onClick={send} disabled={sending || !input.trim()}>
+            <Button size="lg" className="ml-auto" onClick={send} disabled={sending || (!input.trim() && !attaching.length)}>
               <Send /> Send
             </Button>
           </div>
@@ -153,19 +177,33 @@ export function BrainstormEditor({ initialBrainstorm }: { initialBrainstorm: Bra
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <section className="space-y-2.5 rounded-xl border bg-card px-5 py-3.5">
           <div className="flex items-center">
-            <h2 className="flex-1 text-[15px] font-semibold">① Event facts · from URL</h2>
+            <h2 className="flex-1 text-[15px] font-semibold">① Event facts · from your material and links</h2>
             {sourceOk && <StatusBadge tone="success">Link 200 OK · official</StatusBadge>}
           </div>
+          {(brainstorm.material?.length ?? 0) > 0 && (
+            <ul className="grid gap-1.5" aria-label="Source material on this brainstorm">
+              {brainstorm.material!.map((m) => (
+                <MaterialChip key={m.id} m={m} />
+              ))}
+            </ul>
+          )}
           <div className="flex gap-2">
             {brainstorm.facts.map((f) => (
               <div
                 key={f.key}
-                title={f.verified ? f.source_url ?? undefined : "Not found in the source — copywriter won't state it as fact"}
+                title={
+                  f.verified
+                    ? f.material_id
+                      ? `From your material: ${materialById.get(f.material_id)?.name ?? f.material_id}`
+                      : f.source_url ?? undefined
+                    : "Not found in the source — copywriter won't state it as fact"
+                }
                 className={cn("flex-1 space-y-1 rounded-lg px-3 py-2.5", f.verified ? "bg-muted" : "bg-warning-soft")}
               >
                 <p className={cn("text-[11px] font-medium", f.verified ? "text-muted-foreground" : "text-warning")}>
                   {FACT_LABEL[f.key]}
                   {!f.verified && " · unverified"}
+                  {f.verified && f.material_id && " · your material"}
                 </p>
                 <p className="text-xs font-semibold">{f.value}</p>
               </div>

@@ -9,6 +9,7 @@ import { PublishToast } from "@/components/publish-toast";
 import { ReviewActions } from "@/components/review-actions";
 import { SafeguardPanel } from "@/components/safeguard-panel";
 import { SlidePreview } from "@/components/slide-preview";
+import { SourceMaterialPanel } from "@/components/source-material-panel";
 import { JobStatusBadge, StatusBadge, type Tone } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, assetUrl } from "@/lib/api";
@@ -144,6 +145,8 @@ export function ReviewDetailView({ id }: { id: string }) {
             <div className="flex flex-wrap gap-2">{CHECKS.map((c) => checkBadge(job, c.category, c.label))}</div>
             {job.issues.length > 0 && <IssueList issues={job.issues} onJump={setSlide} />}
           </Panel>
+
+          <SourceMaterialPanel job={job} />
 
           {job.briefs.length > 0 && (
             <Panel title="Sources & link status">
