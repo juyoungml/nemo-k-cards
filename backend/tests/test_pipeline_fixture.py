@@ -191,7 +191,7 @@ def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch, client):
     monkeypatch.setattr(settings, "publish_mode", "mock")
     for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
         job = store.save_job(client.org_id, allowed_job())
-        r = client.post(f"/jobs/{job.id}/approve", json={"mode": mode} if mode else {})
+        r = client.post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "mode": mode} if mode else {"deck_version": 1})
         assert r.status_code == code, (mode, r.text)
     assert calls == ["mock", "mock"]
 

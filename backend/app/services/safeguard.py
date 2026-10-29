@@ -161,7 +161,7 @@ async def check(deck: CardDeck, *, slide_paths: list[Path], today: date,
                 model: ModelCall | None) -> SafeguardVerdict:
     """Run the rules and (if given) the model, and merge them into one binding verdict.
 
-    `model=None` means rules only (a quick re-check of a caption edit). A model that raises fails closed.
+    `model=None` means rules only (a fixture server, or a quick rules pass). A model that raises fails closed.
     """
     policy = load_policy()
     rules = rule_findings(deck, policy)

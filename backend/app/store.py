@@ -120,6 +120,22 @@ def save_job(org_id: UUID, job: Job, *, audit: "Entry | None" = None) -> Job:
     return job
 
 
+@contextmanager
+def locked_job(org_id: UUID, job_id: str, *, user_id: UUID | None = None) -> Iterator[tuple[Connection, Job | None]]:
+    """One `tenant` transaction holding the Job's row lock (`for update`): read, decide, write and audit with no
+    other writer in between (Deck edits and the Safeguard re-check, #19). Write back with `write_job(c, job)`.
+    Yields (connection, None) when the Job isn't this Organization's."""
+    with tenant(org_id, user_id=user_id) as c:
+        row = c.execute("select doc::text from jobs where id = %s for update", (job_id,)).fetchone()
+        yield c, (_load(Job, row[0]) if row else None)
+
+
+def write_job(c: Connection, job: Job) -> None:
+    """Update a Job inside `locked_job`'s transaction."""
+    stored = job.model_copy(update={"slide_sources": []}) if job.slide_sources else job  # view only (#25)
+    c.execute("update jobs set doc = %s where id = %s", (_json(stored), job.id))
+
+
 def get_job(org_id: UUID, job_id: str) -> Job | None:
     rows = _rows(org_id, "select doc::text from jobs where id = %s", (job_id,))
     return _load(Job, rows[0]) if rows else None

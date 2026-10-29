@@ -27,7 +27,6 @@ from app.pipeline.agent_runner import run_stage
 from app.renderer.base import RenderedSlide
 from app.renderer.html import HtmlRenderer, weekend_label
 from app.schemas import (
-    BlockedEdit,
     Brainstorm,
     CardDeck,
     EventBrief,
@@ -656,56 +655,42 @@ def _stop_publish(r: Run, status: JobStatus, error: str, note: str) -> tuple[boo
     return False, error
 
 
-async def safeguard_before_publish(r: Run, caption: str | None, mode: str, paths: list[Path],
+async def safeguard_before_publish(r: Run, mode: str, paths: list[Path],
                                    by: dict | None) -> tuple[bool, str | None]:
-    """Nothing leaves the host unless the Safeguard allowed exactly what will be posted. Returns (True, None) to
-    publish (the Job's Deck then holds exactly what was allowed), else (False, why); the publisher (#21,
+    """Nothing leaves the host unless the Safeguard allowed exactly what will be posted: the approved Deck version as
+    stored (#19; nothing is edited at Approve). Returns (True, None) to publish, else (False, why); the publisher (#21,
     app/pipeline/publishing.py) runs it before any upload and fails the Post with `why` (nothing was posted).
 
-    The candidate Deck (with the edited caption, if any) is checked on a copy. A refused edit is recorded on the
-    Job and the Deck keeps its last allowed caption (still approvable); a refused or unverifiable Deck ends BLOCKED.
+    The verdict must be for exactly these words and files (its content hash). If it isn't (something changed after
+    the check), the Deck is checked again now; a refused or unverifiable Deck ends BLOCKED. A real post also needs the
+    model to have checked it, which a fixture server can't do.
     """
     job = r.job
-    edited = bool(caption) and caption != job.deck.caption
-    candidate = job.deck.model_copy(update={"caption": caption}) if edited else job.deck
     checked = job.safeguard and job.safeguard.decision == "allow" and \
-        job.safeguard.content_hash == safeguard.content_hash(candidate, paths)
-    # A real post also needs the model to have checked it (a dry run of an edit may have run the rules only).
+        job.safeguard.content_hash == safeguard.content_hash(job.deck, paths)
     if checked and (mode != "graph" or "model" in job.safeguard.checked_by):
-        job.deck = candidate
         return True, None
     live = settings.demo_mode == "live"
     if mode == "graph" and not live:
-        # A real post needs the model's check; a fixture server can only run the phrase rules.
         r.log("safeguard", "content not checked by the model and the model can't run here → not posted", "warn")
         return _stop_publish(r, JobStatus.READY_FOR_REVIEW,
-                             "Not posted: the safeguard model can't check this edit. This server runs "
-                             "DEMO_MODE=fixture, so an edit can't be checked by the safeguard model before a real "
-                             "post. Approve without editing, or use a live server.",
-                             "Edit needs the safeguard model (live server)")
-    r.log("safeguard", ("caption edited" if edited else "Deck changed since the last check")
-          + " → checking again before publishing")
+                             "Not posted: the safeguard model hasn't checked this Deck. This server runs "
+                             "DEMO_MODE=fixture, so the model can't check it before a real post. Use a live server.",
+                             "Needs the safeguard model (live server)")
+    r.log("safeguard", "Deck changed since the last check → checking again before publishing")
     r.save()
     try:
-        verdict = await run_safeguard(r.org_id, job.id, candidate, paths, use_model=live)
+        verdict = await run_safeguard(r.org_id, job.id, job.deck, paths, use_model=live)
     except Exception as e:  # noqa: BLE001 — fail closed (check() already catches model errors; this is the rest)
         verdict = SafeguardVerdict(decision="block", summary="Blocked because the safety check could not run.",
-                                   model_error=str(e)[:300], content_hash=safeguard.content_hash(candidate, paths))
+                                   model_error=str(e)[:300], content_hash=safeguard.content_hash(job.deck, paths))
+    verdict = verdict.model_copy(update={"deck_version": job.deck_version if job.deck_version > 1 else None})
+    job.safeguard = verdict
     if verdict.decision == "allow":
-        job.deck, job.safeguard, job.blocked_edit = candidate, verdict, None
         r.log("safeguard", f"ALLOW · checked by {'+'.join(verdict.checked_by)} · policy {verdict.policy_version}")
         return True, None
-    if edited and job.safeguard and job.safeguard.decision == "allow" and \
-            job.safeguard.content_hash == safeguard.content_hash(job.deck, paths):
-        job.blocked_edit = BlockedEdit(caption=caption, verdict=verdict)
-        r.log("safeguard", "edited caption BLOCKED · the Deck keeps its original caption", "warn")
-        await _audit(r.org_id, by, "safeguard.edit_blocked", job.id, stage="publish", caption=caption,
-                     **verdict_detail(verdict))
-        return _stop_publish(r, JobStatus.READY_FOR_REVIEW,
-                             "Edited caption blocked by safeguard: " + verdict.summary,
-                             "Edited caption blocked: approve the original or edit again")
-    job.safeguard = verdict
     _log_safeguard(r, verdict)
-    await _audit(r.org_id, by, "safeguard.blocked", job.id, stage="publish", **verdict_detail(verdict))
+    await _audit(r.org_id, by, "safeguard.blocked", job.id, stage="publish", deck_version=job.deck_version,
+                 **verdict_detail(verdict))
     return _stop_publish(r, JobStatus.BLOCKED, "Blocked by safeguard: " + verdict.summary,
                          "Blocked by safeguard: regenerate or reject")

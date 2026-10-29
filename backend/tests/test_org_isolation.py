@@ -63,17 +63,17 @@ def test_b_cannot_approve_reject_or_post_a_job(two, monkeypatch):
     async def fake_start(org_id, post_id, runs=1):
         published.append((org_id, posts.get(org_id, post_id).job_id))
     monkeypatch.setattr(publishing, "start", fake_start)
-    assert b.post(f"/jobs/{job.id}/approve", json={}).status_code == 404
+    assert b.post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 404
     assert b.post(f"/jobs/{job.id}/reject", json={"reason": "B says no"}).status_code == 404
     assert published == []
     assert store.get_job(a.org_id, job.id).status == JobStatus.READY_FOR_REVIEW  # untouched
-    assert a.post(f"/jobs/{job.id}/approve", json={}).status_code == 200  # control: A can
+    assert a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 200  # control: A can
     assert published == [(a.org_id, job.id)]
 
 
 async def test_publishing_with_the_wrong_organization_does_nothing(two):
     a, b, job, _ = two
-    assert await publishing.publish_now(b.org_id, job.id, None, "mock") is None
+    assert await publishing.publish_now(b.org_id, job.id, "mock") is None
     await orchestrator.run_job(b.org_id, job.id)
     after = store.get_job(a.org_id, job.id)
     assert after.status == JobStatus.READY_FOR_REVIEW and after.log == []

@@ -87,7 +87,7 @@ The last check before a Deck can be approved. It decides whether the Deck is saf
 _Avoid_: filter, moderation, censor
 
 **Blocked Deck**:
-A Deck the Safeguard refused. Nobody can approve it, with or without an Override; it can be regenerated or rejected. A caption edit the Safeguard refuses does not block the Deck: the Deck keeps its last allowed caption.
+A Deck the Safeguard refused. Nobody can approve it, with or without an Override; it can be regenerated or rejected. If the refused content came from an edit, the Deck stays in review and can be edited again: one bad edit does not kill a good Deck.
 _Avoid_: rejected (a person rejects), flagged
 
 **Safeguard finding**:

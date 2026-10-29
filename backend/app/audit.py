@@ -4,10 +4,13 @@ the table owner's included (supabase/migrations/20261029150000_members_roles_aud
 
 Actions written today:
   org.created · member.invited · invitation.revoked · member.joined · member.role_changed · member.removed ·
-  job.created · material.added · deck.edited · deck.approved · deck.overridden · deck.rejected ·
-  deck.approve_refused (the Safeguard blocked the Deck, or it has no verdict) · safeguard.blocked (written by the
-  host for the Member who started the Job, or approved it when the publish-time re-check blocked) ·
-  safeguard.edit_blocked (a caption edit refused at Approve or before upload) ·
+  job.created · material.added · deck.edited (a new Deck version with before/after per field, #19; events from
+  before #19 may be a caption changed at Approve, `field: caption`) · deck.approved · deck.overridden (both name the
+  pinned `deck_version`) · deck.rejected ·
+  deck.approve_refused (the Safeguard blocked the Deck, it has no verdict for this version, or it is still checking
+  an edit) · safeguard.blocked (written by the host for the Member who started the Job, edited it (`stage: edit`), or
+  approved it when the publish-time re-check blocked) ·
+  safeguard.edit_blocked (a Deck edit the phrase rules refused on save; older events: a caption edit at Approve) ·
   instagram.connected · instagram.disconnected ·
   Posts (#21, written by the publisher as the Approver, in the same transaction as the Post's state change):
   post.published · post.failed · post.unknown (Instagram's answer didn't prove the outcome) · post.unknown_alert

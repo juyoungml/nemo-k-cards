@@ -15,11 +15,16 @@ export function SlidePreview({
   images,
   current: controlled,
   onSelect,
+  thumbnails = true,
+  className,
 }: {
   slides: Slide[];
   images?: string[];
   current?: number;
   onSelect?: (index: number) => void;
+  /** false: just the large slide (the Deck editor's filmstrip picks it). */
+  thumbnails?: boolean;
+  className?: string;
 }) {
   const [own, setOwn] = useState(0);
   const current = Math.min(controlled ?? own, slides.length - 1);
@@ -28,7 +33,7 @@ export function SlidePreview({
   const img = images?.[current];
 
   return (
-    <div className="mx-auto w-full max-w-[400px] space-y-3 lg:mx-0 lg:w-[400px] lg:shrink-0">
+    <div className={cn("mx-auto w-full max-w-[400px] space-y-3 lg:mx-0 lg:w-[400px] lg:shrink-0", className)}>
       {img ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={img} alt={`Slide ${current + 1}: ${slide.heading}`} className="aspect-[4/5] w-full rounded-xl border object-cover" />
@@ -47,7 +52,7 @@ export function SlidePreview({
           </div>
         </div>
       )}
-      <div className="flex flex-wrap gap-1.5">
+      {thumbnails && <div className="flex flex-wrap gap-1.5">
         {slides.map((s, i) => (
           <button
             key={s.index}
@@ -67,7 +72,7 @@ export function SlidePreview({
             )}
           </button>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

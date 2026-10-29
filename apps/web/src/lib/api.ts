@@ -7,8 +7,8 @@ import { EventSource } from "eventsource";
 import { orgHeader, setActiveOrgId } from "./org";
 import { accessToken, isAuthPath, reloadTo } from "./supabase";
 import type {
-  AuditEvent, Brainstorm, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job, Material, MaterialRef, Me,
-  Member, Metric, Org, PolicyEvent, Post, PublishMode, Role, Scenario,
+  AuditEvent, Brainstorm, DeckEdit, DeckVersion, FitResult, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job,
+  Material, MaterialRef, Me, Member, Metric, Org, PolicyEvent, Post, PublishMode, Role, Scenario,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
@@ -33,6 +33,23 @@ function leaveFor(status: number, detail: unknown) {
 }
 export const UNREACHABLE = "Can't reach the backend";
 
+/** An error answer from the API. `detail` is what it sent: a string, or an object such as a Deck edit's
+ * `{ code: "overflow" | "blocked" | "stale", message, issues | findings }`. */
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public detail: unknown,
+  ) {
+    const text =
+      typeof detail === "string"
+        ? detail
+        : detail && typeof detail === "object" && "message" in detail
+          ? String((detail as { message: unknown }).message)
+          : JSON.stringify(detail);
+    super(`${status} ${text}`);
+  }
+}
+
 async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const token = IS_MOCK ? "" : await accessToken();
   const headers: Record<string, string> = IS_MOCK ? {} : orgHeader();
@@ -54,7 +71,7 @@ async function req<T>(path: string, init?: RequestInit & { json?: unknown }): Pr
   if (!res.ok) {
     const detail = await res.json().then((b) => b.detail).catch(() => res.statusText);
     leaveFor(res.status, detail);
-    throw new Error(`${res.status} ${detail}`);
+    throw new ApiError(res.status, detail);
   }
   return res.json() as Promise<T>;
 }
@@ -65,11 +82,12 @@ export const api = {
   // `scenario` is honored by the mock backend only (QA); FastAPI ignores it.
   createJob: (prompt: string, scenario?: Scenario, materialIds: string[] = []) =>
     req<Job>("/jobs", { method: "POST", json: { prompt, scenario, material_ids: materialIds } }),
-  /** Approve → a Post to the chosen Instagram account (#21). Its outcome is on the Post, not this response. */
-  approveJob: (id: string, caption: string, overrideReason?: string, accountId?: string) =>
+  /** Approve → a Post to the chosen Instagram account (#21) of exactly the Deck version the Approver saw (#19); the
+   * API refuses it if the Deck has been edited since. Its outcome is on the Post, not this response. */
+  approveJob: (id: string, deckVersion: number, overrideReason?: string, accountId?: string) =>
     req<Job>(`/jobs/${id}/approve`, {
       method: "POST",
-      json: { caption, override_reason: overrideReason || undefined, account_id: accountId || undefined },
+      json: { deck_version: deckVersion, override_reason: overrideReason || undefined, account_id: accountId || undefined },
     }),
   listPosts: (jobId?: string) => req<Post[]>(`/posts${jobId ? `?job_id=${encodeURIComponent(jobId)}` : ""}`),
   getPost: (id: string) => req<Post>(`/posts/${id}`),
@@ -78,6 +96,11 @@ export const api = {
     req<Post>(`/posts/${id}/resolve`, { method: "POST", json: { posted, permalink: permalink || undefined } }),
   /** Public server facts: which publish mode Approve uses (mock, dryrun, graph). */
   health: () => req<{ ok: boolean; publish_mode: PublishMode; demo_mode: string }>("/health"),
+  // Deck versions (#19): the history, a save that makes the next version, and the fit check while typing.
+  getVersions: (id: string) => req<DeckVersion[]>(`/jobs/${id}/versions`),
+  saveVersion: (id: string, edit: DeckEdit) => req<Job>(`/jobs/${id}/versions`, { method: "POST", json: edit }),
+  fitCheck: (id: string, edit: Required<Pick<DeckEdit, "base_version" | "slides">>, position: number) =>
+    req<FitResult>(`/jobs/${id}/fit`, { method: "POST", json: { ...edit, position } }),
   rejectJob: (id: string, reason: string) => req<Job>(`/jobs/${id}/reject`, { method: "POST", json: { reason } }),
   /**
    * Live Job snapshots (SSE). Read with fetch rather than the browser's EventSource so the session token

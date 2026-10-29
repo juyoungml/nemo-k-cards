@@ -9,6 +9,9 @@ import slideSources from "./scenarios/slide-sources.json";
 import { seedInstagramAccounts, seedBrainstorm, seedPolicyEvents } from "./seed";
 import type {
   CardDeck,
+  DeckChange,
+  DeckEdit,
+  DeckVersion,
   Brainstorm,
   BrainstormUpdate,
   EventBrief,
@@ -66,8 +69,12 @@ interface MockJob {
   override?: { briefs: EventBrief[]; deck: Omit<CardDeck, "job_id"> };
   titleOverride?: string;
   material?: MaterialRef[];
-  decision?: { kind: "approve" | "reject"; at: number; caption?: string; reason?: string; accountId?: string };
+  decision?: { kind: "approve" | "reject"; at: number; reason?: string; accountId?: string; deckVersion?: number };
+  /** Saved edits (#19): version 2, 3, … The safeguard "checks" each for CHECK_MS after it is saved. */
+  versions?: { version: number; deck: Omit<CardDeck, "job_id">; at: number; changes: DeckChange[] }[];
 }
+
+const CHECK_MS = 1500;
 
 interface Store {
   jobs: Map<string, MockJob>;
@@ -172,7 +179,10 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
   if (job.source === "brainstorm") log.unshift({ time: fmt(job.createdAt), stage: "brainstorm", message: "Generated from a Brainstorm — Research skipped" });
 
   const briefs = job.override?.briefs ?? sc.briefs;
-  const deckSrc = job.override?.deck ?? sc.deck;
+  const edits = job.versions ?? [];
+  const last = edits.at(-1);
+  const deckSrc = last?.deck ?? job.override?.deck ?? sc.deck;
+  const checking = !!last && now - last.at < CHECK_MS;
   const deck = reached("copy") ? { ...deckSrc, job_id: job.id, title: job.titleOverride ?? deckSrc.title } : null;
 
   return {
@@ -185,13 +195,21 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     verification: reached("verify") ? sc.verification : null,
     deck,
     issues: finished ? sc.issues : [],
-    safeguard: finished ? (sc.safeguard ?? null) : null,
+    safeguard: !finished || checking ? null : last && sc.safeguard ? { ...sc.safeguard, deck_version: last.version } : (sc.safeguard ?? null),
+    deck_version: last?.version ?? 1,
+    safeguard_pending: finished && checking,
     error: failed ? sc.error : job.decision?.reason ?? null,
     pipeline,
     log,
     material: job.material ?? [],
     // Fact sources per slide (#25): fixtures here; the real API computes them (backend/app/slide_sources.py).
-    slide_sources: deck && !job.override && reached("verify") ? ((slideSources as unknown as Record<string, SlideSources[]>)[job.scenario] ?? []) : [],
+    slide_sources: deck && !job.override && reached("verify")
+      ? ((slideSources as unknown as Record<string, SlideSources[]>)[job.scenario] ?? []).map((s) => {
+          // Text a person typed (#19): flag it like the API does (the mock doesn't follow reorders).
+          const edited = [...new Set(edits.flatMap((v) => v.changes).filter((c) => c.slide === s.slide_index && c.field.startsWith("slide.")).map((c) => c.field.slice(6) as "heading" | "body"))];
+          return edited.length ? { ...s, edited } : s;
+        })
+      : [],
   };
 }
 
@@ -247,7 +265,8 @@ function postOf(job: MockJob, now = Date.now()): Post | null {
     handle: account?.handle ?? null,
     mode: "mock",
     state: done ? "published" : elapsed < PUBLISH_MS / 2 ? "queued" : "publishing",
-    caption: d.caption ?? null,
+    caption: null, // the Deck version's caption is posted (#19)
+    deck_version: job.versions?.at(-1)?.version ?? 1,
     creation_id: done ? `mock-${job.id}` : null,
     media_id: done ? "MOCK" : null,
     permalink: done ? `https://www.instagram.com/p/MOCK${job.id.toUpperCase()}/` : null,
@@ -276,7 +295,7 @@ export const listPosts = (jobId?: string | null) =>
 export function decide(
   id: string,
   kind: "approve" | "reject",
-  extra: { caption?: string; reason?: string; overrideReason?: string; accountId?: string },
+  extra: { reason?: string; overrideReason?: string; accountId?: string; deckVersion?: number },
 ) {
   const j = store().jobs.get(id);
   if (!j) return { error: "not found", code: 404 } as const;
@@ -285,6 +304,10 @@ export function decide(
   // verdict can't be approved, and a blocked Deck can still be rejected.
   if (kind === "approve" && (snap.status === "BLOCKED" || snap.safeguard?.decision === "block"))
     return { error: `blocked by safeguard, which no Override can approve: ${snap.safeguard?.summary ?? ""}`, code: 409 } as const;
+  if (kind === "approve" && extra.deckVersion !== snap.deck_version)
+    return { error: `you approved version ${extra.deckVersion}, but the Deck is at version ${snap.deck_version} now`, code: 409 } as const;
+  if (kind === "approve" && snap.safeguard_pending)
+    return { error: `the safeguard is still checking version ${snap.deck_version} after an edit`, code: 409 } as const;
   if (kind === "approve" && snap.status === "READY_FOR_REVIEW" && !snap.safeguard)
     return { error: "this job has no safeguard verdict (created before the safeguard existed); regenerate it", code: 409 } as const;
   const allowed = kind === "reject" ? ["READY_FOR_REVIEW", "BLOCKED"] : ["READY_FOR_REVIEW"];
@@ -302,6 +325,85 @@ export function decide(
     extra = { ...extra, accountId: extra.accountId ?? live[0]?.id };
   }
   j.decision = { kind, at: Date.now(), ...extra };
+  return { job: snapshot(j) } as const;
+}
+
+// ---------------------------------------------------------------- deck versions (#19)
+
+const BLOCKED_PHRASE = /tank\s?day|탱크\s?데이|sea of japan/i;
+
+/** Same split as the API: hashtag lines at the end of the caption vs the text above them. */
+function splitCaption(caption: string) {
+  const lines = caption.trimEnd().split("\n");
+  let tags: string[] = [];
+  while (lines.length && lines.at(-1)!.trim() && !lines.at(-1)!.replace(/#[\p{L}\p{N}_]+/gu, "").trim())
+    tags = [...(lines.pop()!.match(/#[\p{L}\p{N}_]+/gu) ?? []), ...tags];
+  return { text: lines.join("\n").trimEnd(), tags };
+}
+
+export function listVersions(id: string): DeckVersion[] | undefined {
+  const j = store().jobs.get(id);
+  const snap = j && snapshot(j);
+  if (!j || !snap?.deck) return undefined;
+  const first = { version: 1, deck: { ...(j.override?.deck ?? SCENARIOS[j.scenario].deck), job_id: j.id }, at: j.createdAt, changes: [] };
+  return [first, ...(j.versions ?? []).map((v) => ({ ...v, deck: { ...v.deck, job_id: j.id } }))]
+    .map((v) => ({
+      version: v.version, deck: v.deck, changes: v.changes, created_at: new Date(v.at).toISOString(), current: v.version === snap.deck_version,
+      edited_by: v.version === 1 ? null : "mock-user", edited_by_email: v.version === 1 ? null : "you@example.com",
+      rerendered: v.changes.flatMap((c) => (c.slide != null ? [c.slide] : [])),
+    }))
+    .reverse();
+}
+
+/** A save in the Deck editor, with the API's refusals: stale base, blocked phrase, overflow (a length heuristic). */
+export function saveVersion(id: string, edit: Partial<DeckEdit>) {
+  const j = store().jobs.get(id);
+  if (!j) return { error: "job not found", code: 404 } as const;
+  const snap = snapshot(j);
+  if (snap.status !== "READY_FOR_REVIEW" || !snap.deck) return { error: `only a Deck in review can be edited; this one is ${snap.status}`, code: 409 } as const;
+  if (edit.base_version !== snap.deck_version)
+    return { error: { code: "stale", message: `Not saved: someone saved version ${snap.deck_version} while you were editing version ${edit.base_version}.` }, code: 409 } as const;
+  const old = snap.deck;
+  const changes: DeckChange[] = [];
+  const slides = (edit.slides ?? old.slides.map((s) => ({ from_index: s.index, heading: s.heading, body: s.body }))).map((e, pos) => {
+    const o = old.slides[e.from_index];
+    if (o.heading !== e.heading) changes.push({ field: "slide.heading", slide: pos, before: o.heading, after: e.heading });
+    if (o.body !== e.body) changes.push({ field: "slide.body", slide: pos, before: o.body, after: e.body });
+    return { ...o, index: pos, heading: e.heading, body: e.body };
+  });
+  if (slides.some((s, i) => s.heading !== old.slides[i].heading && changes.every((c) => c.slide !== i)))
+    changes.unshift({ field: "order", before: old.slides.map((s) => s.heading), after: slides.map((s) => s.heading) });
+  const before = splitCaption(old.caption);
+  const text = edit.caption ?? before.text;
+  const tags = (edit.hashtags ?? before.tags).map((t) => (t.startsWith("#") ? t : `#${t}`));
+  if (text !== before.text) changes.push({ field: "caption", before: before.text, after: text });
+  if (tags.join(" ") !== before.tags.join(" ")) changes.push({ field: "hashtags", before: before.tags, after: tags });
+  if (!changes.length) return { error: "nothing changed", code: 422 } as const;
+  const caption = `${text}${tags.length ? `\n${tags.join(" ")}` : ""}`;
+  const hit = [...slides.map((s, i) => [i, `${s.heading}\n${s.body}`] as const), [null, caption] as const].find(([, t]) => BLOCKED_PHRASE.test(t));
+  if (hit) {
+    const excerpt = hit[1].match(BLOCKED_PHRASE)![0];
+    return {
+      error: {
+        code: "blocked",
+        message: `Not saved: Blocked phrase "${excerpt}" can't be posted.`,
+        findings: [{ category: "historical_tragedy", severity: "block", location: hit[0] == null ? "caption" : "slide", slide_index: hit[0], excerpt,
+          rule: "sensitive_topics.yaml · blocked phrase", explanation: `"${excerpt}" is on the blocked-phrase list.`, fix: `Remove or reword "${excerpt}".` }],
+      },
+      code: 422,
+    } as const;
+  }
+  const overflow = slides.filter((s) => s.heading.length > 70 || s.body.length > 500);
+  if (overflow.length && !edit.allow_overflow)
+    return {
+      error: {
+        code: "overflow",
+        message: `Text overflows its box on ${overflow.map((s) => `slide ${s.index + 1}`).join(", ")}. Shorten it, or save anyway (it stays a blocking Issue).`,
+        issues: overflow.map((s) => ({ severity: "block", category: "visual", slide_index: s.index, message: "text overflows its box" })),
+      },
+      code: 422,
+    } as const;
+  j.versions = [...(j.versions ?? []), { version: snap.deck_version! + 1, deck: { ...old, slides, caption, hashtags: tags }, at: Date.now(), changes }];
   return { job: snapshot(j) } as const;
 }
 

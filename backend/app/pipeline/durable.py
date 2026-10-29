@@ -16,9 +16,10 @@ Process model
   call `launch(listen=False)` so it only enqueues. Both share the database. Each process then needs a stable
   `DBOS__VMID` (executor id), so a restarted process recovers its own work.
 
-Queue
-- One queue, partitioned by Organization: `JOBS_PER_ORG` caps each Organization's running Jobs, `JOBS_PER_WORKER`
+Queues
+- `jobs`, partitioned by Organization: `JOBS_PER_ORG` caps each Organization's running Jobs, `JOBS_PER_WORKER`
   caps one process. A Job waiting for its Organization's slot stays QUEUED.
+- `deck_checks`: the Safeguard re-check of an edited Deck version (#19), one short workflow per version.
 """
 
 import logging
@@ -34,6 +35,8 @@ log = logging.getLogger("durable")
 APP_NAME = "whatsonkorea"
 SCHEMA = "dbos"
 JOB_QUEUE = "jobs"
+DECK_CHECK_QUEUE = "deck_checks"  # the Safeguard re-check after a Deck edit (#19, app/deck_versions.py)
+DECK_CHECKS_PER_WORKER = 4
 QUEUE_POLL_S = 1.0
 _lock = threading.Lock()
 _launched = False
@@ -77,6 +80,7 @@ def launch(*, listen: bool = True) -> None:
     Call it from a thread without a running event loop (`asyncio.to_thread`), so workflows get DBOS's own loop.
     The pipeline module must be imported first: its workflow and steps register at import."""
     global _launched
+    from app import deck_versions  # noqa: F401  (registers the Deck re-check workflow, #19)
     from app.pipeline import (  # noqa: F401  (registers the workflows before launch)
         orchestrator,
         publishing,
@@ -98,6 +102,10 @@ def register_queue(*, per_org: int | None = None, per_worker: int | None = None,
                    poll_s: float = QUEUE_POLL_S) -> None:
     DBOS.register_queue(JOB_QUEUE, partition_concurrency=per_org or settings.jobs_per_org,
                         worker_concurrency=per_worker or settings.jobs_per_worker, polling_interval_sec=poll_s,
+                        on_conflict="always_update")
+    # Not behind the Job queue's per-Organization slot: a re-check takes seconds and the Deck can't be approved
+    # until it finishes, so it must not wait for that Organization's running pipelines.
+    DBOS.register_queue(DECK_CHECK_QUEUE, worker_concurrency=DECK_CHECKS_PER_WORKER, polling_interval_sec=poll_s,
                         on_conflict="always_update")
 
 

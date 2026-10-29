@@ -1,9 +1,9 @@
 "use client";
 
-import { ShieldAlert, ShieldCheck } from "lucide-react";
+import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
-import type { BlockedEdit, HarmCategory, Job, SafeguardFinding } from "@/lib/types";
+import type { HarmCategory, Job, SafeguardFinding } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const CATEGORY: Record<HarmCategory, string> = {
@@ -27,7 +27,7 @@ function where(f: SafeguardFinding) {
   return f.location === "image" ? `${slide} image` : slide;
 }
 
-function Finding({ f, onJump }: { f: SafeguardFinding; onJump: (slide: number) => void }) {
+export function Finding({ f, onJump }: { f: SafeguardFinding; onJump: (slide: number) => void }) {
   const block = f.severity === "block";
   const jump = f.slide_index != null && (f.location === "slide" || f.location === "image");
   return (
@@ -57,35 +57,24 @@ function Finding({ f, onJump }: { f: SafeguardFinding; onJump: (slide: number) =
   );
 }
 
-/** A caption edit the safeguard refused: why, while the Deck itself stays approvable with its original caption. */
-function BlockedEditNotice({ edit, onJump }: { edit: BlockedEdit; onJump: (slide: number) => void }) {
-  const findings = [...edit.verdict.findings].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "block" ? -1 : 1));
-  return (
-    <div className="mt-4 rounded-lg border border-destructive/40 bg-danger-soft p-3">
-      <div className="flex items-center gap-2">
-        <ShieldAlert className="size-4 shrink-0 text-destructive" />
-        <h3 className="text-sm font-semibold text-destructive">Your edited caption was blocked</h3>
-      </div>
-      <p className="mt-1.5 text-xs text-foreground">{edit.verdict.summary}</p>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Nothing was posted. The Deck keeps its original caption and can still be approved, or edit the caption again.
-      </p>
-      <blockquote className="mt-2 border-l-2 border-current/30 pl-2 text-xs whitespace-pre-line text-muted-foreground">{edit.caption}</blockquote>
-      {findings.length > 0 && (
-        <ul className="mt-3 space-y-2">
-          {findings.map((f, i) => (
-            <Finding key={i} f={f} onJump={onJump} />
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 /** The one binding check (ADR 0004). Blocked: why, finding by finding, and what to change; no Override can approve
- * it. Allowed: one line plus any warnings, and the last caption edit it refused, if any. */
+ * it. Allowed: one line plus any warnings. */
 export function SafeguardPanel({ job, onJump }: { job: Job; onJump: (slide: number) => void }) {
   const sg = job.safeguard;
+  if (job.safeguard_pending && job.status === "READY_FOR_REVIEW") {
+    // An edited version (#19): the full check runs on exactly this version before it can be approved.
+    return (
+      <section aria-label="Safeguard verdict" aria-live="polite" className="flex items-start gap-3 rounded-xl border bg-card p-4 md:p-5">
+        <Loader2 className="mt-0.5 size-5 shrink-0 text-muted-foreground motion-safe:animate-spin" />
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold">Safeguard is checking version {job.deck_version ?? 1}…</h2>
+          <p className="text-xs text-muted-foreground">
+            The deck was edited, so the earlier verdict no longer applies. It can be approved once this check passes.
+          </p>
+        </div>
+      </section>
+    );
+  }
   if (!sg) {
     if (job.status !== "READY_FOR_REVIEW") return null;
     return (
@@ -121,7 +110,9 @@ export function SafeguardPanel({ job, onJump }: { job: Job; onJump: (slide: numb
           <p className="text-sm text-foreground">{sg.summary}</p>
           {blocked && (
             <p className="text-xs text-muted-foreground">
-              Nobody can approve this deck, not even with an Override. Regenerate it with a different request, or reject it.
+              {sg.deck_version != null && job.status === "READY_FOR_REVIEW"
+                ? `Nobody can approve version ${sg.deck_version}, not even with an Override. Edit the deck again (fix what is listed below), or reject it.`
+                : "Nobody can approve this deck, not even with an Override. Regenerate it with a different request, or reject it."}
             </p>
           )}
         </div>
@@ -135,10 +126,9 @@ export function SafeguardPanel({ job, onJump }: { job: Job; onJump: (slide: numb
         </ul>
       )}
 
-      {!blocked && job.blocked_edit && <BlockedEditNotice edit={job.blocked_edit} onJump={onJump} />}
-
       <p className="mt-3 text-[11px] text-muted-foreground">
         Checked by {sg.checked_by.join(" + ") || "—"} · policy {sg.policy_version || "—"}
+        {sg.deck_version != null && <> · version {sg.deck_version}</>}
         {blocked && sg.model_decision === "allow" && <> · the model allowed it; a blocked phrase decides</>}
         {sg.model_error && <span className="text-destructive"> · model error: {sg.model_error}</span>}
       </p>

@@ -16,6 +16,7 @@ from app import (
     audit,
     auth,
     brainstorms,
+    deck_versions,
     instagram_accounts,
     materials,
     members,
@@ -31,7 +32,6 @@ from app.schemas import (
     MAX_MATERIALS,
     TERMINAL,
     ApproveRequest,
-    BlockedEdit,
     Brainstorm,
     BrainstormMessageRequest,
     BrainstormPatch,
@@ -43,7 +43,6 @@ from app.schemas import (
     RejectRequest,
 )
 from app.services import safeguard
-from app.services.visual_qa import HASHTAG, scan_text
 
 
 def recover_interrupted() -> None:
@@ -53,6 +52,7 @@ def recover_interrupted() -> None:
     anything is retried. A Post is never marked failed by a restart: it may have gone live."""
     orchestrator.reconcile_after_restart()
     publishing.recover_after_restart()
+    deck_versions.recover_checks()  # an edited Deck still waiting for its Safeguard check (#19)
 
 
 @asynccontextmanager
@@ -83,6 +83,7 @@ app.include_router(members.router)
 app.include_router(instagram_accounts.router)
 app.include_router(materials.router)
 app.include_router(posts.router)
+app.include_router(deck_versions.router)
 
 
 # Every Organization-owned read and write below goes through the store with the caller's Organization
@@ -174,47 +175,44 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
     (app/pipeline/publishing.py); the Post's state, not this response, says what happened on Instagram.
     A Deck the Safeguard blocked can't be approved by anyone, with or without an Override reason (ADR 0004); the
     refusal is audited. Approving a Deck with blocking Issues is an Override and needs a written reason (GLOSSARY).
+    Approval pins one Deck version (#19), and what is posted is exactly that version: its slides, caption and hashtags.
+    There is no editing at Approve; a change is a Deck edit, which makes a new version the Safeguard checks first.
     Self-approval is allowed: whoever started the Job may approve it if their Role allows."""
     job = await asyncio.to_thread(_job_or_404, ctx.org_id, job_id)
     reason = (req.override_reason or "").strip()
     mode = req.mode or settings.publish_mode
     if job.status == JobStatus.BLOCKED or (job.safeguard and job.safeguard.decision == "block"):
         await asyncio.to_thread(_refuse, ctx, job, "blocked_by_safeguard", reason, mode)
+        edited = job.status != JobStatus.BLOCKED and job.safeguard.deck_version is not None
         raise HTTPException(409, "blocked by safeguard, which no Override can approve: "
-                                 f"{job.safeguard.summary if job.safeguard else ''} Regenerate or reject this Deck.")
+                                 f"{job.safeguard.summary if job.safeguard else ''} "
+                                 + ("Edit this version again, or reject the Deck." if edited
+                                    else "Regenerate or reject this Deck."))
     if job.status == JobStatus.PUBLISHING:
         # Approve is locked while a Post is open, unknown included: approving again could post twice.
         raise HTTPException(409, "a Post of this Deck is still in progress or being checked on Instagram; wait "
                                  "until it settles")
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
+    pinned = deck_versions.pin(job, req.deck_version)  # 409 if edited since the Approver loaded it (#19)
+    if job.safeguard_pending:
+        await asyncio.to_thread(_refuse, ctx, job, "safeguard_checking", reason, mode)
+        raise HTTPException(409, f"the safeguard is still checking version {job.deck_version} after an edit; "
+                                 "approve once it has finished")
     if not job.safeguard or not job.deck:
         await asyncio.to_thread(_refuse, ctx, job, "no_safeguard_verdict", reason, mode)
         raise HTTPException(409, "this job has no safeguard verdict (created before the safeguard existed); "
                                  "regenerate it")
+    if not _verdict_matches(job):  # a verdict only vouches for the exact content it checked (ADR 0004)
+        await asyncio.to_thread(_refuse, ctx, job, "verdict_for_other_content", reason, mode)
+        raise HTTPException(409, f"the safeguard verdict is not for version {job.deck_version} as it is now; "
+                                 "edit and save it again to have it checked")
     # A request may ask for a safer mode than PUBLISH_MODE, never a stronger one (e.g. graph on a mock server).
     rank = {"mock": 0, "dryrun": 1, "graph": 2}
     if rank[mode] > rank[settings.publish_mode]:
         raise HTTPException(403, f"publish mode {mode!r} is not enabled on this server "
                                  f"(PUBLISH_MODE={settings.publish_mode})")
     account = await asyncio.to_thread(_pick_account, ctx, req.account_id, mode)
-    if req.caption and req.caption != job.deck.caption:
-        # A real post of an edit needs the safeguard model, which a fixture server can't run.
-        if mode == "graph" and settings.demo_mode != "live":
-            raise HTTPException(409, "an edited caption can't be posted from a DEMO_MODE=fixture server: the "
-                                     "safeguard model must check it first. Approve without editing, or use a live "
-                                     "server.")
-        # Fast host rules now, so the Approver sees why at once; the full check runs before upload (publisher).
-        # The edit is checked on a copy: the Deck keeps its allowed caption.
-        edited = job.deck.model_copy(update={"caption": req.caption})
-        if safeguard.rule_findings(edited):
-            paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
-            verdict = await orchestrator.run_safeguard(ctx.org_id, job.id, edited, paths, use_model=False)
-            job.blocked_edit = BlockedEdit(caption=req.caption, verdict=verdict)
-            await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
-                ctx, "safeguard.edit_blocked", job.id, stage="approve", caption=req.caption,
-                **orchestrator.verdict_detail(verdict))))
-            raise HTTPException(422, "edited caption blocked by safeguard: " + verdict.summary)
     blocking = [i for i in job.issues if i.severity == "block"]
     if blocking and not reason:
         raise HTTPException(422, "this Deck has blocking Issues: approving it is an Override and needs a "
@@ -225,17 +223,15 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
         raise HTTPException(409, "deck contains a credential-like string; regenerate before publishing")
     # The chosen account's own token is a credential too: read on the privileged path, only to look for it.
     tokens = tuple(t for t in [await asyncio.to_thread(_token_of, ctx.org_id, account)] if t)
-    if req.caption and (len(HASHTAG.findall(req.caption)) > 5 or scan_text(req.caption, "caption", secrets=tokens)):
-        raise HTTPException(422, "edited caption fails checks (PII/credential or more than 5 hashtags)")
     if any(t in f"{job.deck.caption}\n" + "\n".join(f"{s.heading}\n{s.body}" for s in job.deck.slides)
            for t in tokens):
         raise HTTPException(409, "deck contains a credential-like string; regenerate before publishing")
     del tokens
-    entries = _approval_entries(ctx, job, req.caption, mode, blocking, reason, account)
+    entries = _approval_entries(ctx, job, mode, blocking, reason, account, pinned)
     try:
+        # The Post records the pinned version and posts exactly it; the publisher stops if the Deck moves on (#19).
         post = await asyncio.to_thread(lambda: publishing.create(
-            ctx.org_id, job, mode=mode, by=_member(ctx), account=account, caption=req.caption or None,
-            deck_version=getattr(job, "deck_version", None), audits=entries))
+            ctx.org_id, job, mode=mode, by=_member(ctx), account=account, deck_version=pinned, audits=entries))
     except posts.Taken as t:
         raise HTTPException(409, "a Post of this Deck is already in progress; wait until it settles" if t.open
                                  else f"this Deck is already posted to {account['handle'] if account else 'it'}; "
@@ -279,22 +275,23 @@ def _refuse(ctx: auth.Ctx, job: Job, why: str, reason: str, mode: str) -> None:
                  summary=job.safeguard.summary if job.safeguard else None)
 
 
-def _approval_entries(ctx: auth.Ctx, job: Job, caption: str | None, mode: str, blocking: list, reason: str,
-                      account: dict | None) -> list[audit.Entry]:
+def _verdict_matches(job: Job) -> bool:
+    try:
+        return job.safeguard.content_hash == safeguard.content_hash(job.deck, assets.slide_files(job))
+    except OSError:  # a slide file is gone: nothing proves what the verdict saw
+        return False
+
+
+def _approval_entries(ctx: auth.Ctx, job: Job, mode: str, blocking: list, reason: str, account: dict | None,
+                      deck_version: int) -> list[audit.Entry]:
     """Written with the Post, in its transaction: the decision stands whatever Instagram later says (that is on the
-    Post). A changed caption is a Deck edit, logged with the before and after text."""
-    before = job.deck.caption if job.deck else None
+    Post). Each names the Deck version it approved (#19)."""
     where = account["handle"] if account else None
-    out = []
-    if caption and caption != before:
-        out.append(audit.entry(ctx, "deck.edited", job.id, field="caption", before=before, after=caption))
     if blocking:
-        out.append(audit.entry(
-            ctx, "deck.overridden", job.id, reason=reason, mode=mode, account=where,
-            issues=[{"category": i.category, "slide_index": i.slide_index, "message": i.message} for i in blocking]))
-    else:
-        out.append(audit.entry(ctx, "deck.approved", job.id, mode=mode, account=where))
-    return out
+        return [audit.entry(
+            ctx, "deck.overridden", job.id, reason=reason, mode=mode, account=where, deck_version=deck_version,
+            issues=[{"category": i.category, "slide_index": i.slide_index, "message": i.message} for i in blocking])]
+    return [audit.entry(ctx, "deck.approved", job.id, mode=mode, account=where, deck_version=deck_version)]
 
 
 @app.post("/jobs/{job_id}/reject", response_model=Job)

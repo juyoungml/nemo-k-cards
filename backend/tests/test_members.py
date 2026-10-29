@@ -295,17 +295,14 @@ def test_audit_log_records_decisions_edits_and_member_changes(sign_in, monkeypat
     monkeypatch.setattr(orchestrator, "run_job", fake)
     admin = sign_in(org="Audited")
     j1, j2 = _ready_job(admin.org_id), _ready_job(admin.org_id)
-    before = j1.deck.caption if j1.deck else None
-    assert admin.post(f"/jobs/{j1.id}/approve", json={"caption": "New caption #seoul"}).status_code == 200
+    assert admin.post(f"/jobs/{j1.id}/approve", json={"deck_version": 1}).status_code == 200
     assert admin.post(f"/jobs/{j2.id}/reject", json={"reason": "Off-brand"}).status_code == 200
     jid = admin.post("/jobs", json={"prompt": "Hongdae buskers"}).json()["id"]
     events = admin.get("/audit").json()
     by_action = {e["action"]: e for e in events}
-    edited = by_action["deck.edited"]["detail"]
-    assert {k: edited[k] for k in ("field", "before", "after")} == {"field": "caption", "before": before,
-                                                                   "after": "New caption #seoul"}
-    assert edited["post"] == by_action["deck.approved"]["detail"]["post"]  # the approval names its Post (#21)
-    assert by_action["deck.approved"]["target"] == j1.id
+    approved = by_action["deck.approved"]
+    assert approved["target"] == j1.id and approved["detail"]["post"]  # the approval names its Post (#21)
+    assert approved["detail"]["deck_version"] == 1 and approved["detail"]["mode"] == "mock"  # and its version (#19)
     assert by_action["deck.rejected"]["detail"] == {"reason": "Off-brand"}
     assert by_action["job.created"]["target"] == jid
     assert all(e["actor"] == str(admin.user_id) for e in events)

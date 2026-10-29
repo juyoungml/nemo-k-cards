@@ -1,20 +1,18 @@
 "use client";
 
 import { ChevronDown, ExternalLink } from "lucide-react";
-import { useState } from "react";
 
+import { DeckBar, SlideWorkspace, useDeckEditor } from "@/components/deck-editor";
 import { LoadState, PageHeader, Panel } from "@/components/page";
 import { PostsList, PublishProgress } from "@/components/publish-progress";
 import { PublishToast } from "@/components/publish-toast";
 import { ReviewActions } from "@/components/review-actions";
 import { SafeguardPanel } from "@/components/safeguard-panel";
-import { SlidePreview } from "@/components/slide-preview";
-import { SlideSourcesPanel } from "@/components/slide-sources-panel";
 import { SourceMaterialPanel } from "@/components/source-material-panel";
 import { JobStatusBadge, StatusBadge, type Tone } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api, assetUrl } from "@/lib/api";
-import type { Issue, Job, LinkCheck } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { Issue, Job, LinkCheck, Post } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 
@@ -113,8 +111,16 @@ export function ReviewDetailView({ id }: { id: string }) {
   const { data: job, error, setData } = useApi(() => api.getJob(id), [id], 1000);
   // Publishing is the Post's (#21): its state, progress and link come from /posts, polled like the Job.
   const { data: posts, reload: reloadPosts } = useApi(() => api.listPosts(id), [id], 1000);
-  const [slide, setSlide] = useState(0);
   if (!job) return <LoadState error={error} />;
+  return <ReviewDetail job={job} setData={setData} posts={posts} reloadPosts={() => void reloadPosts()} />;
+}
+
+/** The review page (#19 layout "B"): header bar with the version and safeguard chips and Save; the deck-level
+ * safeguard summary; the slide workspace (filmstrip · selected slide · inspector with Text, Sources, Issues and
+ * Caption tabs); then the deck-level checks, material, links and the decision bar. */
+function ReviewDetail({ job, setData, posts, reloadPosts }: { job: Job; setData: (j: Job) => void; posts?: Post[]; reloadPosts: () => void }) {
+  const editor = useDeckEditor(job, setData);
+  const setSlide = editor.selectBase; // Issues and findings point at the saved version's slide indexes
   const deck = job.deck;
   const checksById = new Map(job.verification?.checks.map((c) => [c.url, c]));
   const latest = posts?.[0];
@@ -132,27 +138,25 @@ export function ReviewDetailView({ id }: { id: string }) {
           </a>
         )}
         <JobStatusBadge status={job.status} mock={live?.mode === "mock"} />
+        <DeckBar editor={editor} />
       </PageHeader>
 
       <PublishToast post={latest} />
 
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
-        {deck && deck.slides.length > 0 && (
-          <SlidePreview slides={deck.slides} images={job.slide_urls?.map(assetUrl)} current={slide} onSelect={setSlide} />
-        )}
+      <div className="space-y-4">
+        <PublishProgress post={latest} onChange={reloadPosts} />
 
-        <div className="min-w-0 flex-1 space-y-4">
-          <PublishProgress post={latest} onChange={() => void reloadPosts()} />
+        <SafeguardPanel job={job} onJump={setSlide} />
+
+        {deck && deck.slides.length > 0 && <SlideWorkspace editor={editor} />}
+
+        <div className="min-w-0 space-y-4">
           <PostsList posts={posts ?? []} />
-
-          <SafeguardPanel job={job} onJump={setSlide} />
 
           <Panel title="Automated checks" description="Advisory: you decide on these. Only the safeguard can block publishing.">
             <div className="flex flex-wrap gap-2">{CHECKS.map((c) => checkBadge(job, c.category, c.label))}</div>
             {job.issues.length > 0 && <IssueList issues={job.issues} onJump={setSlide} />}
           </Panel>
-
-          <SlideSourcesPanel job={job} slide={slide} />
 
           <SourceMaterialPanel job={job} />
 
