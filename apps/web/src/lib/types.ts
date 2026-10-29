@@ -74,7 +74,7 @@ export interface Job {
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
   published_url?: string | null;
   error?: string | null;
-  slide_urls?: string[]; // rendered JPEGs, relative to API_URL (/assets/{id}/slide-NN.jpg)
+  slide_urls?: string[]; // rendered JPEGs: short-lived signed links relative to API_URL (/assets/{org}/{id}/slide-NN.jpg?exp=…&sig=…)
   publish_progress?: PublishProgress | null; // live sub-steps after Approve & Publish
   // View extras returned by GET /jobs/{id} and the SSE stream.
   source?: "quick" | "brainstorm";

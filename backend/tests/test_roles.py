@@ -38,7 +38,8 @@ def _declared_role(route: APIRoute) -> str | None:
 
 def _api_routes():
     for r in all_api_routes():
-        if r.path != "/health":
+        # Routes the sign-in middleware lets through (health, signed /assets links) carry no Role by design.
+        if r.path not in auth.PUBLIC_PATHS and not r.path.startswith(auth.PUBLIC_PREFIXES):
             for m in sorted(r.methods):
                 yield m, r.path, _declared_role(r)
 

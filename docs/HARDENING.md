@@ -151,6 +151,34 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 
 **Done when:** after a publish or reject, no slide URL from that job resolves.
 
+**Status (#18 Private slides):** done except longer job ids (a separate PR).
+- Nothing serves `/assets/<job>/<file>` any more. The API returns slides as signed links,
+  `/assets/<org>/<job>/slide-NN.jpg?exp&sig` (`backend/app/assets.py`), that last 15 to 20 minutes. A link works
+  only for slides, before `exp`, and while the Job belongs to that Organization (checked under RLS). The Admin
+  polls the Job, so its `<img>` tags always hold fresh links. A cookie was not used because the Admin and the API
+  are on different origins and the session lives in supabase-js, not in a cookie.
+- Instagram links (`backend/app/services/image_host.py`) expire after `PUBLISH_LINK_TTL_S` (15 min). With
+  `IMAGE_HOST=supabase`, slides are uploaded to the **private** bucket `slides` under `<org>/<job>/` and signed
+  with Storage signed URLs, then deleted when the publish attempt ends. A public bucket is refused. With
+  `IMAGE_HOST=local`, the links are signed `/assets` links that work only while the Job is `PUBLISHING`.
+- Bucket and policies: `supabase/migrations/20261029150000_private_slides.sql` makes `slides` private (JPEG only,
+  10 MB max) and drops any storage.objects policy that names it. With no policies, `anon` and `authenticated`
+  can't list, read or sign objects; only the host's service key can.
+- Leftovers: a crash in the middle of a publish can leave objects in the bucket. They are private and their links
+  expire, so this wastes storage but exposes nothing. A periodic sweep is still open (REL-2).
+
+**Staging (k-nemo-card) migration:** run these steps in order. The old backend flips the bucket back to public
+on its next publish, so deploy the new backend first.
+1. Deploy the backend from this change.
+2. Run `supabase db push` (or run the migration's SQL in the SQL editor). This flips `slides` to private and drops
+   policies that open it. To do it by hand instead: Storage, then `slides`, then Edit bucket, then turn off
+   "Public bucket".
+3. Optionally empty the bucket. The old objects sit at `<job_id>/slide-NN.jpg` with no Organization prefix,
+   nothing reads them, and Instagram has its own copies.
+4. Check that `curl -I https://<ref>.supabase.co/storage/v1/object/public/slides/<any key>` returns 400 and not 200.
+   Then run one `PUBLISH_MODE=dryrun` approve. The log says "links that expire in 15 min", and the bucket is
+   empty afterwards.
+
 ### SEC-4 Shared access code, no roles, no audit log
 **P1**
 

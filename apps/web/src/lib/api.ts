@@ -13,7 +13,8 @@ import type {
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
 export const IS_MOCK = !process.env.NEXT_PUBLIC_API_URL;
 
-/** Absolute URL for a backend asset path such as /assets/{job}/slide-00.jpg. */
+/** Absolute URL for a slide link from the API (/assets/{org}/{job}/slide-00.jpg?exp=…&sig=…). The link is signed
+ * and expires in about 15 minutes; the review page polls the Job, so it always holds fresh links. */
 export const assetUrl = (path: string) => (path.startsWith("http") ? path : `${API_URL}${path}`);
 
 /** Where the Admin sends someone the API turned away: signed out → /sign-in, no Organization yet → /welcome. */
