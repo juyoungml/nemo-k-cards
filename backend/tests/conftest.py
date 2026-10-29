@@ -39,7 +39,7 @@ except Exception:
 # Tests must never reach real accounts, even on a machine whose backend/.env holds live credentials:
 # explicit env vars win over .env in pydantic-settings, so blank every outward-facing secret and mode.
 for key, value in {
-    "PUBLISH_MODE": "mock", "IMAGE_HOST": "local", "AGENT_RUNNER": "local",
+    "PUBLISH_MODE": "mock", "IMAGE_HOST": "local", "AGENT_RUNNER": "local", "DBOS_DATABASE_URL": "",
     "IG_USER_ID": "", "IG_ACCESS_TOKEN": "", "PUBLIC_ASSET_BASE_URL": "",
     # Sign-in is checked against a fake Supabase whose signing key exists only in this process (see `auth_keys`).
     "SUPABASE_URL": "http://supabase.test", "SUPABASE_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": "",
@@ -56,10 +56,16 @@ def pytest_sessionstart(session):
     assert "wok-test-" in str(settings.output_dir), "tests would write into the real data dir"
     assert conninfo_to_dict(settings.database_url).get("dbname") == TEST_DB, \
         "tests would write into the real database"
+    assert not settings.dbos_database_url, "DBOS would keep its checkpoints outside the test database"
+    # Durable Jobs (#17): DBOS runs in this process against the test database, as it does in the API.
+    from app.pipeline import durable
+    durable.launch()
 
 
 def pytest_sessionfinish(session, exitstatus):
     from app import store
+    from app.pipeline import durable
+    durable.shutdown()
     store.close()
     _drop_test_db()
 
