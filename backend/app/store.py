@@ -1,7 +1,9 @@
 """Postgres store (BACKEND §8). Models are stored as jsonb documents; one table per kind.
-The schema is in supabase/migrations, applied by the Supabase CLI (`supabase start`, `supabase db push`)."""
+The schema is in supabase/migrations, applied by the Supabase CLI (`supabase start`, `supabase db push`).
+Calls block: async code runs them with `asyncio.to_thread`."""
 
 import logging
+import re
 import threading
 
 from psycopg_pool import ConnectionPool
@@ -12,6 +14,7 @@ from app.schemas import Draft, Job, PolicyEvent
 
 _lock = threading.Lock()
 _pool: ConnectionPool | None = None
+_NUL = re.compile(r"(?<!\\)((?:\\\\)*)\\u0000")
 log = logging.getLogger("store")
 
 
@@ -24,18 +27,32 @@ def _load[M: BaseModel](model: type[M], raw: str) -> M | None:
         return None
 
 
+def _json(model: BaseModel) -> str:
+    """jsonb rejects NUL characters, so drop them (an escaped backslash before "u0000" is kept)."""
+    return _NUL.sub(r"\1", model.model_dump_json())
+
+
 def _db() -> ConnectionPool:
     global _pool
     with _lock:
         if _pool is None:
             # prepare_threshold=None: also works behind Supabase's transaction pooler.
-            _pool = ConnectionPool(settings.database_url, min_size=1, max_size=8, open=True,
+            _pool = ConnectionPool(settings.database_url, min_size=1, max_size=8, open=True, timeout=5,
+                                   max_idle=300, check=ConnectionPool.check_connection,
                                    kwargs={"prepare_threshold": None})
         return _pool
 
 
+def close() -> None:
+    global _pool
+    with _lock:
+        if _pool is not None:
+            _pool.close()
+            _pool = None
+
+
 def _put(table: str, id_: str, model: BaseModel, extra: dict | None = None) -> None:
-    cols = {"id": id_, "doc": model.model_dump_json(), **(extra or {})}
+    cols = {"id": id_, "doc": _json(model), **(extra or {})}
     updates = ", ".join(f"{c} = excluded.{c}" for c in cols if c != "id")
     with _db().connection() as c:
         c.execute(f"insert into {table} ({', '.join(cols)}) values ({', '.join(['%s'] * len(cols))}) "
@@ -58,7 +75,7 @@ def get_job(job_id: str) -> Job | None:
 
 
 def list_jobs(limit: int = 50) -> list[Job]:
-    rows = _rows("select doc::text from jobs order by created_at desc limit %s", (limit,))
+    rows = _rows("select doc::text from jobs order by created_at desc, id desc limit %s", (limit,))
     return [j for r in rows if (j := _load(Job, r))]
 
 
@@ -75,7 +92,7 @@ def get_draft(draft_id: str) -> Draft | None:
 def add_policy_events(events: list[PolicyEvent]) -> None:
     with _db().connection() as c:
         c.cursor().executemany("insert into policy_events (job_id, doc) values (%s, %s)",
-                               [(e.job_id, e.model_dump_json()) for e in events])
+                               [(e.job_id, _json(e)) for e in events])
 
 
 def list_policy_events(limit: int = 200) -> list[PolicyEvent]:

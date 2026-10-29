@@ -3,7 +3,10 @@
 import secrets
 from datetime import UTC, datetime, timedelta
 
+from fastapi.testclient import TestClient
+
 from app import store
+from app.main import app
 from app.schemas import Draft, Job, JobStatus, PolicyEvent
 
 
@@ -20,6 +23,13 @@ def test_save_job_upserts_and_lists_newest_first():
     ids = [j.id for j in store.list_jobs(500)]
     assert ids.index(new.id) < ids.index(old.id) and ids.count(old.id) == 1
     assert store.get_job("missing") is None
+
+
+def test_nul_characters_are_dropped():
+    job = store.save_job(_job(0).model_copy(update={"prompt": "a\x00b"}))
+    assert store.get_job(job.id).prompt == "ab"
+    literal = store.save_job(_job(0).model_copy(update={"prompt": "C:\\u0000"}))  # text, not a NUL
+    assert store.get_job(literal.id).prompt == "C:\\u0000"
 
 
 def test_draft_round_trip():
@@ -40,3 +50,10 @@ def test_bad_row_is_skipped():
         c.execute("insert into jobs (id, created_at, doc) values (%s, %s, '{\"id\": 1}')",
                   (bad.id, bad.created_at))
     assert bad.id not in [j.id for j in store.list_jobs()]
+
+
+def test_jobs_limit_is_bounded():
+    client = TestClient(app)
+    assert client.get("/jobs?limit=0").status_code == 422
+    assert client.get("/jobs?limit=501").status_code == 422
+    assert client.get("/jobs?limit=500").status_code == 200
