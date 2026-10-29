@@ -93,7 +93,7 @@ export function DashboardView() {
                   <TableCell>{j.deck?.slides.length ?? "—"}</TableCell>
                   <TableCell>{formatDateTime(j.created_at)}</TableCell>
                   <TableCell>
-                    <JobStatusBadge status={j.status} mock={!!j.published_url?.includes("/p/MOCK")} />
+                    <JobStatusBadge status={j.status} />
                   </TableCell>
                 </TableRow>
               ))}

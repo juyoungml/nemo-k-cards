@@ -8,7 +8,11 @@ Actions written today:
   deck.approve_refused (the Safeguard blocked the Deck, or it has no verdict) · safeguard.blocked (written by the
   host for the Member who started the Job, or approved it when the publish-time re-check blocked) ·
   safeguard.edit_blocked (a caption edit refused at Approve or before upload) ·
-  instagram.connected · instagram.disconnected"""
+  instagram.connected · instagram.disconnected ·
+  Posts (#21, written by the publisher as the Approver, in the same transaction as the Post's state change):
+  post.published · post.failed · post.unknown (Instagram's answer didn't prove the outcome) · post.unknown_alert
+  (unknown for 30 minutes, or it can't be checked) · post.settled (the reconciler decided an unknown Post: live after
+  all, retry with the same container) · post.resolved (a person settled an unknown Post by hand)"""
 
 import json
 from datetime import datetime

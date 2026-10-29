@@ -77,7 +77,10 @@ def launch(*, listen: bool = True) -> None:
     Call it from a thread without a running event loop (`asyncio.to_thread`), so workflows get DBOS's own loop.
     The pipeline module must be imported first: its workflow and steps register at import."""
     global _launched
-    from app.pipeline import orchestrator  # noqa: F401  (registers the workflow before launch)
+    from app.pipeline import (  # noqa: F401  (registers the workflows before launch)
+        orchestrator,
+        publishing,
+    )
 
     with _lock:
         if _launched:
@@ -87,6 +90,7 @@ def launch(*, listen: bool = True) -> None:
             DBOS.listen_queues([])
         DBOS.launch()
         register_queue()
+        publishing.register_queue()
         _launched = True
 
 

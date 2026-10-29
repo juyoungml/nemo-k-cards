@@ -20,12 +20,13 @@ from app import (
     materials,
     members,
     orgs,
+    posts,
     seed,
     slide_sources,
     store,
 )
 from app.config import settings
-from app.pipeline import durable, orchestrator
+from app.pipeline import durable, orchestrator, publishing
 from app.schemas import (
     MAX_MATERIALS,
     TERMINAL,
@@ -42,20 +43,16 @@ from app.schemas import (
     RejectRequest,
 )
 from app.services import safeguard
+from app.services.visual_qa import HASHTAG, scan_text
 
 
 def recover_interrupted() -> None:
-    """After a restart (and `durable.launch()`, which resumes interrupted Jobs at their unfinished stage): a publish
-    is not durable yet (#21), so a Job left PUBLISHING goes back to Review; a Job whose pipeline can't resume is
-    marked failed (`orchestrator.reconcile_after_restart`). Every Organization's; each saved under its own."""
-    for org_id, job in store.jobs_in({JobStatus.PUBLISHING}):
-        job.status = JobStatus.READY_FOR_REVIEW
-        job.error = "Publish interrupted by a server restart. Nothing was posted; approve again."
-        if job.publish_progress:
-            job.publish_progress.step, job.publish_progress.error = "failed", job.error
-            job.publish_progress.label = "Interrupted by a server restart"
-        store.save_job(org_id, job)
+    """After a restart (and `durable.launch()`, which resumes interrupted Jobs and Posts where they stopped): a Job
+    whose pipeline can't resume is marked failed (`orchestrator.reconcile_after_restart`); an open Post whose
+    workflow can't resume gets a fresh one (`publishing.recover_after_restart`), which checks Instagram before
+    anything is retried. A Post is never marked failed by a restart: it may have gone live."""
     orchestrator.reconcile_after_restart()
+    publishing.recover_after_restart()
 
 
 @asynccontextmanager
@@ -85,6 +82,7 @@ app.include_router(orgs.router)
 app.include_router(members.router)
 app.include_router(instagram_accounts.router)
 app.include_router(materials.router)
+app.include_router(posts.router)
 
 
 # Every Organization-owned read and write below goes through the store with the caller's Organization
@@ -170,7 +168,10 @@ async def job_events(job_id: str, request: Request, ctx: auth.Viewer) -> Streami
 
 @app.post("/jobs/{job_id}/approve", response_model=Job)
 async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
-    """The ONLY publish path: human approves in Admin -> host publishes (sandbox has no token).
+    """The ONLY publish path: a person approves in the Admin → a Post (#21) the host publishes (the sandbox has no
+    token). The Approver picks one of the Organization's connected Instagram accounts (preselected when there is
+    only one; a mock post may go without). Approval creates a `queued` Post and starts its durable workflow
+    (app/pipeline/publishing.py); the Post's state, not this response, says what happened on Instagram.
     A Deck the Safeguard blocked can't be approved by anyone, with or without an Override reason (ADR 0004); the
     refusal is audited. Approving a Deck with blocking Issues is an Override and needs a written reason (GLOSSARY).
     Self-approval is allowed: whoever started the Job may approve it if their Role allows."""
@@ -181,6 +182,10 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
         await asyncio.to_thread(_refuse, ctx, job, "blocked_by_safeguard", reason, mode)
         raise HTTPException(409, "blocked by safeguard, which no Override can approve: "
                                  f"{job.safeguard.summary if job.safeguard else ''} Regenerate or reject this Deck.")
+    if job.status == JobStatus.PUBLISHING:
+        # Approve is locked while a Post is open, unknown included: approving again could post twice.
+        raise HTTPException(409, "a Post of this Deck is still in progress or being checked on Instagram; wait "
+                                 "until it settles")
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
     if not job.safeguard or not job.deck:
@@ -192,13 +197,14 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
     if rank[mode] > rank[settings.publish_mode]:
         raise HTTPException(403, f"publish mode {mode!r} is not enabled on this server "
                                  f"(PUBLISH_MODE={settings.publish_mode})")
+    account = await asyncio.to_thread(_pick_account, ctx, req.account_id, mode)
     if req.caption and req.caption != job.deck.caption:
         # A real post of an edit needs the safeguard model, which a fixture server can't run.
         if mode == "graph" and settings.demo_mode != "live":
             raise HTTPException(409, "an edited caption can't be posted from a DEMO_MODE=fixture server: the "
                                      "safeguard model must check it first. Approve without editing, or use a live "
                                      "server.")
-        # Fast host rules now, so the Approver sees why at once; the full check runs before upload (publish_job).
+        # Fast host rules now, so the Approver sees why at once; the full check runs before upload (publisher).
         # The edit is checked on a copy: the Deck keeps its allowed caption.
         edited = job.deck.model_copy(update={"caption": req.caption})
         if safeguard.rule_findings(edited):
@@ -217,15 +223,54 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
     # Hard stop only for leaked credentials — those must never be published.
     if any(i.category == "pii" and "credential" in i.message for i in job.issues):
         raise HTTPException(409, "deck contains a credential-like string; regenerate before publishing")
-    if req.caption:
-        from app.services.visual_qa import HASHTAG, scan_text
-        if len(HASHTAG.findall(req.caption)) > 5 or scan_text(req.caption, "caption",
-                                                               secrets=(settings.ig_access_token,)):
-            raise HTTPException(422, "edited caption fails checks (PII/credential or more than 5 hashtags)")
-    await asyncio.to_thread(_audit_approval, ctx, job, req.caption, mode, blocking, reason)
-    orchestrator.spawn(orchestrator.publish_job(ctx.org_id, job_id, req.caption, mode, by=_member(ctx)))
-    job.status = JobStatus.PUBLISHING
+    # The chosen account's own token is a credential too: read on the privileged path, only to look for it.
+    tokens = tuple(t for t in [await asyncio.to_thread(_token_of, ctx.org_id, account)] if t)
+    if req.caption and (len(HASHTAG.findall(req.caption)) > 5 or scan_text(req.caption, "caption", secrets=tokens)):
+        raise HTTPException(422, "edited caption fails checks (PII/credential or more than 5 hashtags)")
+    if any(t in f"{job.deck.caption}\n" + "\n".join(f"{s.heading}\n{s.body}" for s in job.deck.slides)
+           for t in tokens):
+        raise HTTPException(409, "deck contains a credential-like string; regenerate before publishing")
+    del tokens
+    entries = _approval_entries(ctx, job, req.caption, mode, blocking, reason, account)
+    try:
+        post = await asyncio.to_thread(lambda: publishing.create(
+            ctx.org_id, job, mode=mode, by=_member(ctx), account=account, caption=req.caption or None,
+            deck_version=getattr(job, "deck_version", None), audits=entries))
+    except posts.Taken as t:
+        raise HTTPException(409, "a Post of this Deck is already in progress; wait until it settles" if t.open
+                                 else f"this Deck is already posted to {account['handle'] if account else 'it'}; "
+                                      "a correction needs a new Deck version") from None
+    await publishing.start(ctx.org_id, post.id)
     return _out(ctx.org_id, job)
+
+
+def _pick_account(ctx: auth.Ctx, account_id: UUID | None, mode: str) -> dict | None:
+    """The Instagram account the Post goes to: one of this Organization's live (connected or expiring) accounts,
+    read under RLS. Preselected when there is exactly one; a mock post may go without any."""
+    with store.tenant(ctx.org_id) as c:
+        rows = c.execute("select id, ig_user_id, username from instagram_accounts where org_id = %s "
+                         "and status in ('connected', 'expiring') order by connected_at, id",
+                         (ctx.org_id,)).fetchall()
+    live = [{"id": r[0], "ig_user_id": r[1], "username": r[2], "handle": f"@{r[2]}"} for r in rows]
+    if account_id is not None:
+        if not (match := [a for a in live if a["id"] == account_id]):
+            raise HTTPException(422, "pick one of this Organization's connected Instagram accounts")
+        return match[0]
+    if len(live) == 1:
+        return live[0]
+    if live:
+        raise HTTPException(422, "this Organization has several Instagram accounts: choose one (account_id)")
+    if mode == "mock":
+        return None
+    raise HTTPException(422, "connect an Instagram account first: a dry run or a real post goes to the "
+                             "Organization's own account")
+
+
+def _token_of(org_id: UUID, account: dict | None) -> str | None:
+    if not account:
+        return None
+    with store.system() as c:
+        return instagram_accounts.access_token(c, org_id, account["id"])
 
 
 def _refuse(ctx: auth.Ctx, job: Job, why: str, reason: str, mode: str) -> None:
@@ -234,21 +279,22 @@ def _refuse(ctx: auth.Ctx, job: Job, why: str, reason: str, mode: str) -> None:
                  summary=job.safeguard.summary if job.safeguard else None)
 
 
-def _audit_approval(ctx: auth.Ctx, job: Job, caption: str | None, mode: str, blocking: list, reason: str) -> None:
-    """Recorded before the publish starts: the decision stands whatever Instagram later says (that is on the Job).
-    A changed caption is a Deck edit, logged with the before and after text."""
+def _approval_entries(ctx: auth.Ctx, job: Job, caption: str | None, mode: str, blocking: list, reason: str,
+                      account: dict | None) -> list[audit.Entry]:
+    """Written with the Post, in its transaction: the decision stands whatever Instagram later says (that is on the
+    Post). A changed caption is a Deck edit, logged with the before and after text."""
     before = job.deck.caption if job.deck else None
-    with store.tenant(ctx.org_id, user_id=ctx.user.id) as c:
-        if caption and caption != before:
-            audit.write(c, ctx.org_id, audit.entry(ctx, "deck.edited", job.id, field="caption",
-                                                   before=before, after=caption))
-        if blocking:
-            audit.write(c, ctx.org_id, audit.entry(
-                ctx, "deck.overridden", job.id, reason=reason, mode=mode,
-                issues=[{"category": i.category, "slide_index": i.slide_index, "message": i.message}
-                        for i in blocking]))
-        else:
-            audit.write(c, ctx.org_id, audit.entry(ctx, "deck.approved", job.id, mode=mode))
+    where = account["handle"] if account else None
+    out = []
+    if caption and caption != before:
+        out.append(audit.entry(ctx, "deck.edited", job.id, field="caption", before=before, after=caption))
+    if blocking:
+        out.append(audit.entry(
+            ctx, "deck.overridden", job.id, reason=reason, mode=mode, account=where,
+            issues=[{"category": i.category, "slide_index": i.slide_index, "message": i.message} for i in blocking]))
+    else:
+        out.append(audit.entry(ctx, "deck.approved", job.id, mode=mode, account=where))
+    return out
 
 
 @app.post("/jobs/{job_id}/reject", response_model=Job)
@@ -308,7 +354,7 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
 
 @app.get("/metrics", response_model=list[Metric])
 def metrics(ctx: auth.Viewer) -> list[Metric]:
-    return seed.metrics(store.list_jobs(ctx.org_id, 200))
+    return seed.metrics(ctx.org_id, store.list_jobs(ctx.org_id, 200))
 
 
 @app.get("/policy-events")

@@ -9,15 +9,15 @@ from datetime import date
 
 import pytest
 from dbos import DBOS, SetEnqueueOptions, SetWorkflowID
-from factories import allowed_job, blocked_job, scenario_deck
+from factories import allowed_job, blocked_job, connect_account, scenario_deck
 from test_durable_jobs import Crash, restart_dbos, wait_for, workflow_done
 from test_roles import add_member, team  # noqa: F401  (fixture)
 
-from app import store
+from app import posts, store
 from app.config import settings
-from app.pipeline import agent_runner, durable, orchestrator
+from app.pipeline import agent_runner, durable, orchestrator, publishing
 from app.schemas import CardDeck, JobStatus, LinkCheck, SafeguardFinding, SafeguardModelOutput
-from app.services import image_host, link_checker, safeguard
+from app.services import image_host, link_checker, publisher, safeguard
 
 DONE = (JobStatus.READY_FOR_REVIEW, JobStatus.BLOCKED, JobStatus.FAILED)
 
@@ -40,7 +40,7 @@ def no_publish(monkeypatch):
 
     async def fake(*args, **kwargs):
         calls.append((args, kwargs))
-    monkeypatch.setattr(orchestrator, "publish_job", fake)
+    monkeypatch.setattr(publishing, "start", fake)
     return calls
 
 
@@ -251,8 +251,10 @@ def test_a_job_without_a_verdict_cant_be_approved(client, no_publish):
 def test_an_allowed_deck_is_approved_and_publishing_knows_the_approver(client, no_publish):
     job = store.save_job(client.org_id, allowed_job())
     assert client.post(f"/jobs/{job.id}/approve", json={}).status_code == 200
-    [(args, kwargs)] = no_publish
-    assert args == (client.org_id, job.id, None, "mock") and kwargs["by"]["id"] == str(client.user_id)
+    [((org_id, post_id), _)] = no_publish
+    post = posts.raw(client.org_id, post_id)
+    assert org_id == client.org_id and post["job_id"] == job.id and post["mode"] == "mock"
+    assert post["approved_by"] == client.user_id and post["caption"] is None
 
 
 def test_a_caption_edit_with_a_blocked_phrase_is_refused_at_approve_and_explained(client, no_publish):
@@ -271,6 +273,7 @@ def test_a_caption_edit_with_a_blocked_phrase_is_refused_at_approve_and_explaine
 
 def test_a_graph_post_of_an_edit_is_refused_on_a_fixture_server(client, no_publish, monkeypatch):
     monkeypatch.setattr(settings, "publish_mode", "graph")
+    connect_account(client.org_id)
     job = store.save_job(client.org_id, allowed_job())
     r = client.post(f"/jobs/{job.id}/approve", json={"caption": "Safe new caption #seoul"})
     assert r.status_code == 409 and "safeguard model" in r.json()["detail"] and no_publish == []
@@ -288,17 +291,18 @@ async def test_a_caption_edit_the_full_check_blocks_keeps_the_original_deck(org,
         return await safeguard.check(deck, slide_paths=paths, today=date(2026, 10, 29),
                                      model=model_says("block", summary="Sexualised framing of a venue."))
     monkeypatch.setattr(orchestrator, "run_safeguard", blocking)
-    await orchestrator.publish_job(org, job.id, "Edited caption #seoul", "dryrun")
+    post = await publishing.publish_now(org, job.id, "Edited caption #seoul", "dryrun",
+                                        account=connect_account(org))
     job = store.get_job(org, job.id)
-    assert uploads == [] and job.published_url is None
+    assert uploads == [] and post.state == "failed"
     assert job.status == JobStatus.READY_FOR_REVIEW
     assert job.deck.caption == original and job.safeguard.decision == "allow"
     assert job.blocked_edit.caption == "Edited caption #seoul"
     assert job.blocked_edit.verdict.summary == "Sexualised framing of a venue."
-    assert job.publish_progress.step == "failed" and "Sexualised" in job.publish_progress.error
+    assert "Sexualised" in post.last_error and post.progress.step == "failed"
     # The original Deck is still approvable, and unchanged content isn't checked again.
     monkeypatch.setattr(orchestrator, "run_safeguard", None)
-    await orchestrator.publish_job(org, job.id, None, "mock")
+    assert (await publishing.publish_now(org, job.id, None, "mock")).state == "published"
     assert store.get_job(org, job.id).status == JobStatus.PUBLISHED
 
 
@@ -310,7 +314,7 @@ async def test_a_blocked_edit_during_publishing_is_audited_for_the_approver(clie
                                      model=model_says("block", summary="Mocks a disaster."))
     monkeypatch.setattr(orchestrator, "run_safeguard", blocking)
     by = {"id": str(client.user_id), "email": "x@example.com"}
-    await orchestrator.publish_job(client.org_id, job.id, "Edited caption #seoul", "mock", by=by)
+    await publishing.publish_now(client.org_id, job.id, "Edited caption #seoul", "mock", by=by)
     e = await asyncio.to_thread(audit_of, client, job.id, "safeguard.edit_blocked")
     assert e["actor"] == str(client.user_id) and e["detail"]["stage"] == "publish"
 
@@ -319,9 +323,9 @@ async def test_a_deck_changed_after_the_check_is_checked_again_and_blocked(org):
     job = allowed_job()
     job.deck.slides[1].body = "Tank Day sale"  # changed after the check, not through a caption edit
     store.save_job(org, job)
-    await orchestrator.publish_job(org, job.id, None, "mock")
+    post = await publishing.publish_now(org, job.id, None, "mock")
     job = store.get_job(org, job.id)
-    assert job.status == JobStatus.BLOCKED and job.published_url is None and job.safeguard.decision == "block"
+    assert job.status == JobStatus.BLOCKED and post.state == "failed" and job.safeguard.decision == "block"
     states = {s.name: s.state for s in job.pipeline}
     assert states["Human publish"] == "skipped"
 
@@ -330,10 +334,10 @@ async def test_a_graph_post_of_unchecked_content_is_refused_on_a_fixture_server(
     uploads = []
     monkeypatch.setattr(image_host, "exposed", lambda *a, **k: uploads.append(a))
     job = store.save_job(org, allowed_job())
-    await orchestrator.publish_job(org, job.id, "Safe new caption #seoul", "graph")
+    post = await publishing.publish_now(org, job.id, "Safe new caption #seoul", "graph", account=connect_account(org))
     job = store.get_job(org, job.id)
-    assert uploads == [] and job.status == JobStatus.READY_FOR_REVIEW and job.published_url is None
-    assert "can't check this edit" in job.publish_progress.label
+    assert uploads == [] and job.status == JobStatus.READY_FOR_REVIEW and post.state == "failed"
+    assert "can't check this edit" in post.last_error
 
 
 async def test_a_rules_only_check_of_an_edit_is_not_enough_for_a_real_post(org, monkeypatch):
@@ -341,16 +345,18 @@ async def test_a_rules_only_check_of_an_edit_is_not_enough_for_a_real_post(org, 
     the model, so the same caption is refused in graph mode."""
     job = store.save_job(org, allowed_job())
 
-    async def instagram(urls, caption, publish=True, on_progress=lambda *a: None):
-        return "dryrun:1"
-    monkeypatch.setattr(orchestrator.publisher, "publish_carousel", instagram)
+    async def instagram(ig, urls, caption, on_progress=lambda *a: None):
+        return "17890000000000001"
+    monkeypatch.setattr(publisher, "build_carousel", instagram)
     monkeypatch.setattr(settings, "public_asset_base_url", "https://tunnel.example")
-    await orchestrator.publish_job(org, job.id, "Safe new caption #seoul", "dryrun")
+    acct = connect_account(org)
+    dry = await publishing.publish_now(org, job.id, "Safe new caption #seoul", "dryrun", account=acct)
+    assert (dry.state, dry.mode, dry.creation_id) == ("container_ready", "dryrun", "17890000000000001")
     job = store.get_job(org, job.id)
     assert job.deck.caption == "Safe new caption #seoul" and job.safeguard.checked_by == ["rules"]
-    await orchestrator.publish_job(org, job.id, None, "graph")
+    real = await publishing.publish_now(org, job.id, None, "graph", account=acct)
     job = store.get_job(org, job.id)
-    assert job.status == JobStatus.READY_FOR_REVIEW and job.published_url is None
+    assert job.status == JobStatus.READY_FOR_REVIEW and real.state == "failed" and real.attempts == 0
 
 
 async def test_unchanged_content_skips_the_recheck(org, monkeypatch):
@@ -359,13 +365,14 @@ async def test_unchanged_content_skips_the_recheck(org, monkeypatch):
     async def boom(*a, **k):
         raise AssertionError("should not re-check unchanged content")
     monkeypatch.setattr(orchestrator, "run_safeguard", boom)
-    await orchestrator.publish_job(org, job.id, None, "mock")
+    await publishing.publish_now(org, job.id, None, "mock")
     assert store.get_job(org, job.id).status == JobStatus.PUBLISHED
 
 
 async def test_a_safe_edit_is_checked_again_and_posted(org):
     job = store.save_job(org, allowed_job())
-    await orchestrator.publish_job(org, job.id, "Three easy things to do in Seoul. #seoul", "mock")
+    post = await publishing.publish_now(org, job.id, "Three easy things to do in Seoul. #seoul", "mock")
+    assert post.state == "published" and post.permalink.endswith(f"/p/MOCK{job.id.upper()}/")
     job = store.get_job(org, job.id)
     assert job.status == JobStatus.PUBLISHED and job.deck.caption.startswith("Three easy things")
     assert job.safeguard.content_hash == safeguard.content_hash(job.deck)
@@ -400,7 +407,7 @@ async def test_publishing_under_another_organization_checks_nothing(sign_in, mon
     async def boom(*a, **k):
         raise AssertionError("B's publish must not reach A's Job")
     monkeypatch.setattr(orchestrator, "run_safeguard", boom)
-    await orchestrator.publish_job(b.org_id, job.id, "탱크데이 #seoul", "mock")
+    assert await publishing.publish_now(b.org_id, job.id, "탱크데이 #seoul", "mock") is None
     after = store.get_job(a.org_id, job.id)
     assert after.status == JobStatus.READY_FOR_REVIEW and after.blocked_edit is None and after.log == []
 

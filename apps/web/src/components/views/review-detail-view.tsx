@@ -4,7 +4,7 @@ import { ChevronDown, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
 import { LoadState, PageHeader, Panel } from "@/components/page";
-import { PublishProgress } from "@/components/publish-progress";
+import { PostsList, PublishProgress } from "@/components/publish-progress";
 import { PublishToast } from "@/components/publish-toast";
 import { ReviewActions } from "@/components/review-actions";
 import { SafeguardPanel } from "@/components/safeguard-panel";
@@ -111,10 +111,14 @@ function reviewSummary(job: Job) {
 
 export function ReviewDetailView({ id }: { id: string }) {
   const { data: job, error, setData } = useApi(() => api.getJob(id), [id], 1000);
+  // Publishing is the Post's (#21): its state, progress and link come from /posts, polled like the Job.
+  const { data: posts, reload: reloadPosts } = useApi(() => api.listPosts(id), [id], 1000);
   const [slide, setSlide] = useState(0);
   if (!job) return <LoadState error={error} />;
   const deck = job.deck;
   const checksById = new Map(job.verification?.checks.map((c) => [c.url, c]));
+  const latest = posts?.[0];
+  const live = posts?.find((p) => p.state === "published");
 
   return (
     <>
@@ -122,15 +126,15 @@ export function ReviewDetailView({ id }: { id: string }) {
         title={deck?.title ?? job.prompt}
         description={`job ${job.id} · ${deck?.slides.length ?? 0} slides · ${reviewSummary(job)}`}
       >
-        {job.published_url && (
-          <a href={job.published_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
+        {live?.permalink && live.mode !== "mock" && (
+          <a href={live.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
             View post <ExternalLink className="size-3.5" />
           </a>
         )}
-        <JobStatusBadge status={job.status} mock={!!job.published_url?.includes("/p/MOCK")} />
+        <JobStatusBadge status={job.status} mock={live?.mode === "mock"} />
       </PageHeader>
 
-      <PublishToast job={job} />
+      <PublishToast post={latest} />
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
         {deck && deck.slides.length > 0 && (
@@ -138,7 +142,8 @@ export function ReviewDetailView({ id }: { id: string }) {
         )}
 
         <div className="min-w-0 flex-1 space-y-4">
-          <PublishProgress job={job} />
+          <PublishProgress post={latest} onChange={() => void reloadPosts()} />
+          <PostsList posts={posts ?? []} />
 
           <SafeguardPanel job={job} onJump={setSlide} />
 

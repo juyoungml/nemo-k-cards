@@ -21,6 +21,7 @@ import type {
   Metric,
   PipelineStep,
   PolicyEvent,
+  Post,
   SafeguardVerdict,
   SlideSources,
   Scenario,
@@ -65,7 +66,7 @@ interface MockJob {
   override?: { briefs: EventBrief[]; deck: Omit<CardDeck, "job_id"> };
   titleOverride?: string;
   material?: MaterialRef[];
-  decision?: { kind: "approve" | "reject"; at: number; caption?: string; reason?: string };
+  decision?: { kind: "approve" | "reject"; at: number; caption?: string; reason?: string; accountId?: string };
 }
 
 interface Store {
@@ -156,7 +157,7 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
       name: "Human publish",
       where: "you",
       state: status === "PUBLISHED" ? "done" : status === "PUBLISHING" ? "running" : blockedBySafeguard ? "skipped" : "pending",
-      note: status === "PUBLISHED" ? "posted to @whatsonkorea" : blockedBySafeguard ? "Blocked by safeguard: regenerate or reject" : "Approve in Review",
+      note: status === "PUBLISHED" ? "mock post created" : blockedBySafeguard ? "Blocked by safeguard: regenerate or reject" : "Approve in Review",
     },
   ];
 
@@ -186,7 +187,6 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     issues: finished ? sc.issues : [],
     safeguard: finished ? (sc.safeguard ?? null) : null,
     error: failed ? sc.error : job.decision?.reason ?? null,
-    published_url: status === "PUBLISHED" ? `https://www.instagram.com/p/MOCK${job.id.toUpperCase()}/` : null,
     pipeline,
     log,
     material: job.material ?? [],
@@ -231,7 +231,53 @@ export function createJob(prompt: string, scenario: Scenario = "good", material:
   return snapshot(job);
 }
 
-export function decide(id: string, kind: "approve" | "reject", extra: { caption?: string; reason?: string; overrideReason?: string }) {
+/** The Post an approval made (#21), as the API would show it at `now`: mock mode, so nothing leaves the server. */
+function postOf(job: MockJob, now = Date.now()): Post | null {
+  const d = job.decision;
+  if (!d || d.kind !== "approve") return null;
+  const account = seedInstagramAccounts.find((a) => a.id === d.accountId);
+  const elapsed = now - d.at;
+  const done = elapsed >= PUBLISH_MS;
+  const at = new Date(d.at).toISOString();
+  const step = done ? "done" : elapsed < PUBLISH_MS / 3 ? "upload" : elapsed < (2 * PUBLISH_MS) / 3 ? "containers" : "publish";
+  return {
+    id: `00000000-0000-4000-9000-${job.id.padStart(12, "0")}`,
+    job_id: job.id,
+    instagram_account_id: account?.id ?? null,
+    handle: account?.handle ?? null,
+    mode: "mock",
+    state: done ? "published" : elapsed < PUBLISH_MS / 2 ? "queued" : "publishing",
+    caption: d.caption ?? null,
+    creation_id: done ? `mock-${job.id}` : null,
+    media_id: done ? "MOCK" : null,
+    permalink: done ? `https://www.instagram.com/p/MOCK${job.id.toUpperCase()}/` : null,
+    attempts: done ? 1 : 0,
+    progress: {
+      step,
+      label: done ? "Mock publish complete (nothing posted)" : "Publishing (mock)",
+      done: 0,
+      total: 0,
+      percent: done ? 100 : Math.round((elapsed / PUBLISH_MS) * 99),
+    },
+    created_at: at,
+    updated_at: new Date(Math.min(now, d.at + PUBLISH_MS)).toISOString(),
+    published_at: done ? new Date(d.at + PUBLISH_MS).toISOString() : null,
+    finished_at: done ? new Date(d.at + PUBLISH_MS).toISOString() : null,
+  };
+}
+
+export const listPosts = (jobId?: string | null) =>
+  [...store().jobs.values()]
+    .filter((j) => !jobId || j.id === jobId)
+    .map((j) => postOf(j))
+    .filter((p): p is Post => p !== null)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+export function decide(
+  id: string,
+  kind: "approve" | "reject",
+  extra: { caption?: string; reason?: string; overrideReason?: string; accountId?: string },
+) {
   const j = store().jobs.get(id);
   if (!j) return { error: "not found", code: 404 } as const;
   const snap = snapshot(j);
@@ -246,6 +292,15 @@ export function decide(id: string, kind: "approve" | "reject", extra: { caption?
   // Same rule as the API: approving with blocking Issues is an Override and needs a reason.
   if (kind === "approve" && snap.issues.some((i) => i.severity === "block") && !extra.overrideReason?.trim())
     return { error: "this Deck has blocking Issues: approving it is an Override and needs a written reason", code: 422 } as const;
+  // Same rule as the API: one of the Organization's live accounts, preselected when there is only one.
+  if (kind === "approve") {
+    const live = seedInstagramAccounts.filter((a) => a.live);
+    if (extra.accountId && !live.some((a) => a.id === extra.accountId))
+      return { error: "pick one of this Organization's connected Instagram accounts", code: 422 } as const;
+    if (!extra.accountId && live.length > 1)
+      return { error: "this Organization has several Instagram accounts: choose one (account_id)", code: 422 } as const;
+    extra = { ...extra, accountId: extra.accountId ?? live[0]?.id };
+  }
   j.decision = { kind, at: Date.now(), ...extra };
   return { job: snapshot(j) } as const;
 }

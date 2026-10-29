@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app import auth, orgs, store
 from app.main import app
-from app.pipeline import orchestrator
+from app.pipeline import orchestrator, publishing
 from app.schemas import Issue, JobStatus
 
 ROLES = auth.ROLES
@@ -78,6 +78,9 @@ EXPECTED = {
     ("POST", "/materials"): "editor",
     ("POST", "/materials/files"): "editor",
     ("GET", "/materials/{material_id}"): "viewer",
+    ("GET", "/posts"): "viewer",
+    ("GET", "/posts/{post_id}"): "viewer",
+    ("POST", "/posts/{post_id}/resolve"): "approver",
 }
 
 
@@ -118,7 +121,7 @@ def no_background(monkeypatch):
     async def fake(*args, **kwargs):
         calls.append(args)
     monkeypatch.setattr(orchestrator, "run_job", fake)
-    monkeypatch.setattr(orchestrator, "publish_job", fake)
+    monkeypatch.setattr(publishing, "start", fake)
     return calls
 
 
@@ -141,7 +144,8 @@ def test_each_role_is_allowed_exactly_its_routes(team, role, no_background):
     c = team[role]
     other = add_member(c.org_id, "viewer")
     ids = {"job_id": _ready_job(c.org_id).id, "brainstorm_id": "nope", "user_id": str(other),
-           "invitation_id": str(uuid.uuid4()), "account_id": str(uuid.uuid4()), "material_id": "m-0000000000000000"}
+           "invitation_id": str(uuid.uuid4()), "account_id": str(uuid.uuid4()), "material_id": "m-0000000000000000",
+           "post_id": str(uuid.uuid4())}
     for (method, path), need in EXPECTED.items():
         if need == "signed-in":
             continue

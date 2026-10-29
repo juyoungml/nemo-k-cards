@@ -31,6 +31,12 @@ const ACTION: Record<string, [Tone, string]> = {
   "org.created": ["neutral", "Organization created"],
   "instagram.connected": ["success", "Instagram connected"],
   "instagram.disconnected": ["warning", "Instagram disconnected"],
+  "post.published": ["success", "Post published"],
+  "post.failed": ["danger", "Post not posted"],
+  "post.unknown": ["warning", "Post outcome unknown"],
+  "post.unknown_alert": ["warning", "Post needs a check"],
+  "post.settled": ["info", "Post settled by reconciler"],
+  "post.resolved": ["info", "Post resolved by hand"],
 };
 
 const role = (r: unknown) => (typeof r === "string" && r in ROLE_LABEL ? ROLE_LABEL[r as Role] : String(r ?? ""));
@@ -72,6 +78,20 @@ function describe(e: AuditEvent): React.ReactNode {
       return <>{String(d.name)}</>;
     case "instagram.connected":
       return <>{d.account_type === "MEDIA_CREATOR" ? "Creator" : "Business"} account{d.reconnected ? " · reconnected" : ""}</>;
+    case "post.published":
+    case "post.failed":
+    case "post.unknown":
+    case "post.unknown_alert":
+    case "post.settled":
+    case "post.resolved":
+      return (
+        <>
+          {String(d.mode ?? "")} · {String(d.account ?? "no account")}
+          {d.error ? ` · ${String(d.error)}` : ""}
+          {e.action === "post.resolved" ? ` · ${d.posted ? "posted" : "not posted"}` : ""}
+          {e.action === "post.settled" && d.container ? ` · container ${String(d.container)}` : ""}
+        </>
+      );
     case "material.added":
       return <>{String(d.kind)}: {String(d.name ?? d.url ?? "")}</>;
     default:
@@ -81,7 +101,7 @@ function describe(e: AuditEvent): React.ReactNode {
 
 function Target({ e }: { e: AuditEvent }) {
   if (!e.target) return null;
-  if (e.action.startsWith("deck.") || e.action.startsWith("safeguard.") || e.action === "job.created") {
+  if (e.action.startsWith("deck.") || e.action.startsWith("safeguard.") || e.action.startsWith("post.") || e.action === "job.created") {
     return <Link href={`/review/${e.target}`} className="font-mono text-xs hover:underline">{e.target}</Link>;
   }
   return <span className="text-[13px]">{e.target}</span>;

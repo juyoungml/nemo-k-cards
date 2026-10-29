@@ -67,7 +67,7 @@ def _isolate_live(out: Path | None) -> Path:
     """Before app.config is imported: live agents, mock publishing, no publishing credentials, scratch data."""
     out = (out or REPO / "backend/.data/golden").expanduser().resolve()
     os.environ.update({"DEMO_MODE": "live", "PUBLISH_MODE": "mock", "IMAGE_HOST": "local",
-                       "OUTPUT_DIR": str(out / "out"), "IG_USER_ID": "", "IG_ACCESS_TOKEN": "",
+                       "OUTPUT_DIR": str(out / "out"),
                        "SUPABASE_URL": "", "SUPABASE_SERVICE_KEY": ""})
     from app.config import settings
     if hasattr(settings, "database_url"):  # Postgres store: never the configured (possibly live) database

@@ -1,25 +1,47 @@
 "use client";
 
-import { AlertCircle, Check, Circle, ExternalLink, Loader2, MinusCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertCircle, Check, Circle, ExternalLink, HelpCircle, Loader2, MinusCircle } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
 
 import { StatusBadge, type Tone } from "@/components/status-badge";
-import type { Job, PublishProgress as Progress } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
+import { atLeast, useMe } from "@/lib/roles";
+import type { Post, PostProgress, PostState, PublishMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const STEPS: { key: Progress["step"]; label: string }[] = [
-  { key: "upload", label: "Upload slides to public storage" },
+const STEPS: { key: PostProgress["step"]; label: string }[] = [
+  { key: "upload", label: "Upload slides on private links" },
   { key: "containers", label: "Send slides to Instagram" },
   { key: "processing", label: "Instagram processes the images" },
   { key: "publish", label: "Publish the carousel" },
 ];
 const ORDER = STEPS.map((s) => s.key);
 
-const MODE: Record<Progress["mode"], [Tone, string]> = {
+export const MODE: Record<PublishMode, [Tone, string]> = {
   graph: ["danger", "Live"],
   dryrun: ["info", "Dry run"],
   mock: ["neutral", "Mock"],
 };
+
+/** What each Post state means, in words an Approver can act on (docs/spec/v1.md "Publish state machine"). */
+export const POST_STATE: Record<PostState, [Tone, string]> = {
+  queued: ["warning", "Queued"],
+  container_ready: ["warning", "Carousel ready"],
+  publishing: ["warning", "Publishing"],
+  published: ["success", "Published"],
+  failed: ["danger", "Not posted"],
+  unknown: ["warning", "Checking Instagram"],
+};
+
+export const isDryRunDone = (p: Post) => p.mode === "dryrun" && p.state === "container_ready" && !!p.finished_at;
+
+export function postBadge(p: Post) {
+  if (isDryRunDone(p)) return <StatusBadge tone="info">Dry run · nothing posted</StatusBadge>;
+  if (p.state === "published" && p.mode === "mock") return <StatusBadge tone="neutral">Published (mock)</StatusBadge>;
+  const [tone, label] = POST_STATE[p.state];
+  return <StatusBadge tone={tone}>{label}</StatusBadge>;
+}
 
 function useElapsed(start?: string, end?: string | null) {
   const [now, setNow] = useState(() => Date.now());
@@ -35,38 +57,50 @@ function useElapsed(start?: string, end?: string | null) {
 }
 
 /**
- * Publish progress after "Approve & Publish": determinate bar + named steps with real counts,
- * elapsed time, and a clear end state (View on Instagram / error + retry / dry-run result).
+ * The latest Post of this Deck after "Approve & Publish": determinate bar and named steps while it runs, then an
+ * honest end state. "Nothing was posted" appears only for `failed`. An `unknown` Post says Instagram didn't prove
+ * the outcome, keeps Approve locked, and (once the reconciler has alerted) lets an Approver settle it by hand.
  */
-export function PublishProgress({ job }: { job: Job }) {
-  const p = job.publish_progress;
-  const elapsed = useElapsed(p?.started_at, p?.finished_at);
-  const starting = job.status === "PUBLISHING" && !p;
-  if (!p && !starting) return null;
+export function PublishProgress({ post, onChange }: { post?: Post; onChange?: (p: Post) => void }) {
+  const elapsed = useElapsed(post?.created_at, post?.finished_at);
+  const { role } = useMe();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string>();
+  if (!post) return null;
 
-  const failed = p?.step === "failed";
-  const finished = p?.step === "done";
-  const dryrun = p?.mode === "dryrun";
-  const percent = starting ? 2 : (p?.percent ?? 0);
-  // Index of the step in progress (failed: the step that was running when it failed).
-  const failedAt = failed ? (p?.label.toLowerCase() ?? "") : "";
-  const current = finished
-    ? ORDER.length
-    : failed
-      ? Math.max(0, STEPS.findIndex((s) => failedAt.includes(s.label.toLowerCase().split(" ")[0])))
-      : Math.max(0, ORDER.indexOf(p?.step ?? "upload"));
+  const p = post.progress;
+  const dryrun = isDryRunDone(post);
+  const failed = post.state === "failed";
+  const unknown = post.state === "unknown";
+  const published = post.state === "published";
+  const finished = published || dryrun;
+  const where = post.handle ?? "Instagram";
+  const percent = finished || failed ? 100 : (p?.percent ?? 2);
+  const current = finished ? ORDER.length : Math.max(0, ORDER.indexOf(p?.step && p.step !== "failed" ? p.step : "upload"));
+  const canResolve = unknown && atLeast(role, "approver");
+  const mayNotPosted = !!(post.alerted_at || !post.next_check_at);
 
-  const title = starting
-    ? "Starting publish…"
-    : failed
-      ? "Publish failed"
-      : finished
-        ? dryrun
-          ? "Dry run complete"
-          : p?.mode === "mock"
+  const title = failed
+    ? "Not posted"
+    : unknown
+      ? "Checking Instagram…"
+      : dryrun
+        ? "Dry run complete"
+        : published
+          ? post.mode === "mock"
             ? "Mock publish complete"
-            : "Published to @whatsonkorea"
-        : "Publishing to @whatsonkorea";
+            : `Published to ${where}`
+          : `Publishing to ${where}`;
+
+  const resolve = (posted: boolean) =>
+    startTransition(async () => {
+      try {
+        setError(undefined);
+        onChange?.(await api.resolvePost(post.id, posted));
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    });
 
   return (
     <section
@@ -74,13 +108,16 @@ export function PublishProgress({ job }: { job: Job }) {
       className={cn(
         "scroll-mt-6 space-y-4 rounded-xl border bg-card p-5",
         failed && "border-destructive/40",
-        finished && !dryrun && p?.mode === "graph" && "border-success/40",
+        unknown && "border-warning/40",
+        published && post.mode === "graph" && "border-success/40",
       )}
       aria-live="polite"
     >
       <div className="flex items-center gap-2.5">
         {failed ? (
           <AlertCircle className="size-5 text-destructive" />
+        ) : unknown ? (
+          <HelpCircle className="size-5 text-warning" />
         ) : finished ? (
           <span className="grid size-5 place-items-center rounded-full bg-success text-white">
             <Check className="size-3.5" />
@@ -89,7 +126,7 @@ export function PublishProgress({ job }: { job: Job }) {
           <Loader2 className="size-5 text-primary motion-safe:animate-spin" />
         )}
         <h2 className="flex-1 text-base font-semibold">{title}</h2>
-        {p && <StatusBadge tone={MODE[p.mode][0]}>{MODE[p.mode][1]}</StatusBadge>}
+        <StatusBadge tone={MODE[post.mode][0]}>{MODE[post.mode][1]}</StatusBadge>
         <span className="text-xs text-muted-foreground tabular-nums" title="Elapsed">
           {elapsed}
         </span>
@@ -107,69 +144,84 @@ export function PublishProgress({ job }: { job: Job }) {
           <div
             className={cn(
               "h-full rounded-full transition-[width] duration-500 ease-out",
-              failed ? "bg-destructive" : finished ? "bg-success" : "bg-primary",
+              failed ? "bg-destructive" : unknown ? "bg-warning" : finished ? "bg-success" : "bg-primary",
             )}
             style={{ width: `${percent}%` }}
           />
         </div>
         <div className="flex text-xs text-muted-foreground">
-          <span className="flex-1">{starting ? "Approved, handing off to the host publisher…" : p?.label}</span>
+          <span className="flex-1">{p?.label ?? "Approved, handing off to the publisher…"}</span>
           <span className="tabular-nums">{percent}%</span>
         </div>
       </div>
 
-      <ol className="space-y-2">
-        {STEPS.map((s, i) => {
-          const skipped = dryrun && s.key === "publish" && finished;
-          const state = skipped
-            ? "skipped"
-            : i < current
-              ? "done"
-              : i === current && failed
-                ? "failed"
-                : i === current && !finished
-                  ? "running"
-                  : "pending";
-          const count = p && p.step === s.key && p.total > 1 ? ` ${p.done}/${p.total}` : "";
-          return (
-            <li key={s.key} className="flex items-center gap-2.5 text-[13px]">
-              {state === "done" && <Check className="size-4 text-success" />}
-              {state === "running" && <Loader2 className="size-4 text-primary motion-safe:animate-spin" />}
-              {state === "failed" && <AlertCircle className="size-4 text-destructive" />}
-              {state === "pending" && <Circle className="size-4 text-muted-foreground/50" />}
-              {state === "skipped" && <MinusCircle className="size-4 text-muted-foreground" />}
-              <span
-                className={cn(
-                  state === "pending" && "text-muted-foreground",
-                  state === "running" && "font-medium",
-                  state === "failed" && "text-destructive",
-                )}
-              >
-                {s.label}
-                {state === "running" && count}
-                {state === "skipped" && " — skipped (dry run, nothing posted)"}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
+      {!failed && !unknown && (
+        <ol className="space-y-2">
+          {STEPS.map((s, i) => {
+            const skipped = dryrun && s.key === "publish";
+            const state = skipped ? "skipped" : i < current ? "done" : i === current && !finished ? "running" : "pending";
+            const count = p && p.step === s.key && p.total > 1 ? ` ${p.done}/${p.total}` : "";
+            return (
+              <li key={s.key} className="flex items-center gap-2.5 text-[13px]">
+                {state === "done" && <Check className="size-4 text-success" />}
+                {state === "running" && <Loader2 className="size-4 text-primary motion-safe:animate-spin" />}
+                {state === "pending" && <Circle className="size-4 text-muted-foreground/50" />}
+                {state === "skipped" && <MinusCircle className="size-4 text-muted-foreground" />}
+                <span className={cn(state === "pending" && "text-muted-foreground", state === "running" && "font-medium")}>
+                  {s.label}
+                  {state === "running" && count}
+                  {state === "skipped" && " — skipped (dry run, nothing posted)"}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
 
-      {failed && p?.error && (
+      {failed && (
         <p className="rounded-lg bg-danger-soft px-3 py-2.5 text-xs text-destructive">
-          {p.error}
+          {post.last_error ?? "Instagram refused the post."}
           <br />
-          Nothing was posted. Fix the issue and click Approve &amp; Publish again.
+          Nothing was posted. Fix the cause and approve again.
         </p>
       )}
-      {finished && dryrun && (
+      {unknown && (
+        <div className="space-y-3 rounded-lg bg-warning-soft px-3 py-2.5 text-xs text-warning">
+          <p>
+            Instagram&apos;s answer didn&apos;t say whether the carousel went live ({post.last_error ?? "no answer"}). We are
+            checking with Instagram before anything is retried, so it can&apos;t be posted twice. Approve stays locked until
+            this settles.
+            {post.alerted_at && " It has been over 30 minutes: please check the account on Instagram."}
+          </p>
+          {canResolve && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-foreground">I checked {where} on Instagram:</span>
+              <Button size="sm" variant="outline" disabled={pending} onClick={() => resolve(true)}>
+                It is posted
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending || !mayNotPosted}
+                title={mayNotPosted ? undefined : "Available after 30 minutes, while the check may still find it"}
+                onClick={() => resolve(false)}
+              >
+                It is not posted
+              </Button>
+            </div>
+          )}
+          {error && <p className="text-destructive">{error}</p>}
+        </div>
+      )}
+      {dryrun && (
         <p className="rounded-lg bg-info-soft px-3 py-2.5 text-xs text-info">
-          Instagram accepted all slides and prepared the carousel. Nothing was posted. Switch the backend to live
-          publishing and approve again to post.
+          Instagram accepted all slides and prepared the carousel on {where}. Nothing was posted. Switch the backend to
+          live publishing and approve again to post.
         </p>
       )}
-      {finished && job.published_url && !dryrun && (
+      {published && post.permalink && post.mode !== "mock" && (
         <a
-          href={job.published_url}
+          href={post.permalink}
           target="_blank"
           rel="noreferrer"
           className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:bg-primary/90"
@@ -177,6 +229,36 @@ export function PublishProgress({ job }: { job: Job }) {
           View on Instagram <ExternalLink className="size-3.5" />
         </a>
       )}
+      {published && !post.permalink && post.mode === "graph" && (
+        <p className="text-xs text-muted-foreground">Live on {where}; Instagram hasn&apos;t given us its link yet.</p>
+      )}
+    </section>
+  );
+}
+
+/** Every Post of this Deck, newest first: where it went, in which mode, and how it ended. */
+export function PostsList({ posts }: { posts: Post[] }) {
+  if (posts.length < 2) return null;
+  return (
+    <section className="space-y-2 rounded-xl border bg-card p-5">
+      <h2 className="text-base font-semibold">Posts of this Deck</h2>
+      <ul className="divide-y text-[13px]">
+        {posts.map((p) => (
+          <li key={p.id} className="flex flex-wrap items-center gap-2 py-2">
+            {postBadge(p)}
+            <StatusBadge tone={MODE[p.mode][0]}>{MODE[p.mode][1]}</StatusBadge>
+            <span className="min-w-0 flex-1 truncate">{p.handle ?? "no account"}</span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {new Date(p.created_at).toLocaleString("en-GB", { timeZone: "Asia/Seoul", dateStyle: "short", timeStyle: "short" })}
+            </span>
+            {p.permalink && p.mode !== "mock" && (
+              <a href={p.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                View <ExternalLink className="size-3" />
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

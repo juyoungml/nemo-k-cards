@@ -34,7 +34,7 @@ def isolation_problem(settings: Any) -> str | None:
         return "DEMO_MODE is not live"
     if settings.publish_mode != "mock":
         return f"PUBLISH_MODE is {settings.publish_mode}; golden runs use mock"
-    if settings.ig_access_token or settings.supabase_service_key:
+    if settings.supabase_service_key:  # Instagram tokens live in Vault, never in the scratch database (#21)
         return "publishing credentials are set"
     if hasattr(settings, "database_url"):
         if not SCRATCH_DB.search(db_name(settings.database_url)):

@@ -11,8 +11,8 @@ from datetime import date
 import pytest
 from factories import allowed_job
 
-from app import brainstorms, orgs, store
-from app.pipeline import orchestrator
+from app import brainstorms, orgs, posts, store
+from app.pipeline import orchestrator, publishing
 from app.schemas import Fact, JobStatus, LinkCheck
 from app.services import link_checker
 
@@ -185,9 +185,9 @@ def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch, client):
     from app.config import settings
     calls = []
 
-    async def fake_publish(org_id, job_id, caption, mode, by=None):
-        calls.append(mode)
-    monkeypatch.setattr(orchestrator, "publish_job", fake_publish)
+    async def fake_start(org_id, post_id, runs=1):
+        calls.append(posts.get(org_id, post_id).mode)
+    monkeypatch.setattr(publishing, "start", fake_start)
     monkeypatch.setattr(settings, "publish_mode", "mock")
     for mode, code in (("graph", 403), ("dryrun", 403), ("mock", 200), (None, 200)):
         job = store.save_job(client.org_id, allowed_job())
