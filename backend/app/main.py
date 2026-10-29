@@ -11,7 +11,18 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app import assets, audit, auth, brainstorms, instagram_accounts, materials, members, orgs, seed, store
+from app import (
+    assets,
+    audit,
+    auth,
+    brainstorms,
+    instagram_accounts,
+    materials,
+    members,
+    orgs,
+    seed,
+    store,
+)
 from app.config import settings
 from app.pipeline import durable, orchestrator
 from app.schemas import (
