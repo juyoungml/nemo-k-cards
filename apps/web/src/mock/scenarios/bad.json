@@ -34,7 +34,7 @@
   ],
   "safeguard": {
     "decision": "block",
-    "summary": "Blocked phrase \"Tank Day\" can't be posted (see below). Slide 2 turns May 18, the anniversary of the 1980 Gwangju Uprising in which hundreds of civilians were killed by troops, into a \"Tank Day\" sale with a 51.8% discount that echoes the date. Korean readers would see this as mocking the victims, so it can't be posted.",
+    "summary": "Blocked phrase \"Tank Day\" can't be posted. Slide 2 turns May 18, the anniversary of the 1980 Gwangju Uprising in which hundreds of civilians were killed by troops, into a \"Tank Day\" sale with a 51.8% discount that echoes the date. Korean readers would see this as mocking the victims, so it can't be posted.",
     "findings": [
       {"category": "historical_tragedy", "severity": "block", "location": "slide", "slide_index": 1, "excerpt": "Tank Day", "rule": "sensitive_topics.yaml · blocked phrase /(?i)tank\\s*day|탱크\\s*데이/", "explanation": "\"Tank Day\" is on the blocked-phrase list: 스타벅스 탱크데이 (2026-05-18). Posting it would read as mocking a Korean tragedy or taking a side on a sensitive issue.", "fix": "Remove or reword \"Tank Day\" and generate again."},
       {"category": "historical_tragedy", "severity": "block", "location": "slide", "slide_index": 1, "excerpt": "Celebrate with 51.8% off!", "rule": "historical_tragedy · 05-18 date gate (no discounts or celebration)", "explanation": "51.8% encodes the date 5·18, and \"celebrate\" frames the anniversary of a massacre as a party. Both are on the date-gate list for May 15–20.", "fix": "Drop the event, or list it neutrally without the discount or the celebration framing."}

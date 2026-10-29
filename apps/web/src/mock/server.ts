@@ -205,6 +205,8 @@ export function decide(id: string, kind: "approve" | "reject", extra: { caption?
   const snap = snapshot(j);
   if (kind === "approve" && snap.status === "BLOCKED")
     return { error: `blocked by safeguard: ${snap.safeguard?.summary ?? ""}`, code: 409 } as const;
+  if (kind === "approve" && snap.status === "READY_FOR_REVIEW" && !snap.safeguard)
+    return { error: "this job has no safeguard verdict (created before the safeguard existed); regenerate it", code: 409 } as const;
   const allowed = kind === "reject" ? ["READY_FOR_REVIEW", "BLOCKED"] : ["READY_FOR_REVIEW"];
   if (!allowed.includes(snap.status)) return { error: `job is ${snap.status}, not READY_FOR_REVIEW`, code: 409 } as const;
   j.decision = { kind, at: Date.now(), ...extra };

@@ -4,7 +4,7 @@
 
 A publishing agent finds what's on in Korea, then researches, verifies, writes and renders Instagram card news (1080×1350 carousels) for tourists. A human approves each post in the Admin before it goes to @whatsonkorea.
 
-- Spec: `docs/BACKEND.md` (frozen v1.1) and `docs/SPEC.md`. Design system: `DESIGN.md`. Read it before touching cards or UI.
+- Spec: `docs/BACKEND.md` (frozen v1.3) and `docs/SPEC.md`. Design system: `DESIGN.md`. Read it before touching cards or UI.
 - Layout: `backend/` is FastAPI, the trusted host that holds the IG token and does all publishing. `apps/web/` is the Next.js Admin. `agent/` is the Claude Code workspace mounted into OpenShell sandboxes. `policies/` holds OpenShell and content policies. `demo/scenarios/` holds fixtures.
 
 ## Prerequisites

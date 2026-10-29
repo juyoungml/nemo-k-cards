@@ -75,12 +75,24 @@ A Deck that has not been approved yet.
 _Avoid_: draft, pending post
 
 **Issue**:
-A problem QA or review found in a Deck: blocking or a warning. Nothing is rejected automatically; a person decides.
+A problem QA or review found in a Deck: blocking or a warning. Nothing is rejected automatically; a person decides. The one exception is a Safeguard block, which is not an Issue.
 _Avoid_: error, flag, finding, violation
 
 **Override**:
-Approving a Deck despite blocking Issues, with a written reason recorded against the approver.
+Approving a Deck despite blocking Issues, with a written reason recorded against the approver. Never possible for a Blocked Deck.
 _Avoid_: force, skip, ignore
+
+**Safeguard**:
+The last check before a Deck can be approved. It decides whether the Deck is safe to post: harmful or controversial content (hate, sexual content, dangerous acts, a Korean tragedy used as a hook or sale, "Sea of Japan") blocks it, and the Approver is shown why. Its block is binding, with no Override (see ADR 0004).
+_Avoid_: filter, moderation, censor
+
+**Blocked Deck**:
+A Deck the Safeguard refused. Nobody can approve it; it can be regenerated or rejected. An edited caption the Safeguard refuses does not block the Deck: the Deck keeps its last allowed caption.
+_Avoid_: rejected (a person rejects), flagged
+
+**Safeguard finding**:
+One reason behind a Safeguard decision: the exact text or image part, the rule it breaks, why it is harmful to foreign readers, and a fix. Findings that block decide; Issues only advise.
+_Avoid_: Issue (for these), violation
 
 **Post**:
 One publication of an approved Deck version to one Instagram account, now or at a scheduled time. Once published it never changes; a correction needs a new Post.

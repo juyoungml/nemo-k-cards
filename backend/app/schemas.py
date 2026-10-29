@@ -176,8 +176,14 @@ class SafeguardVerdict(SafeguardModelOutput):
     checked_by: list[Literal["rules", "model"]] = Field(default_factory=list)
     model_error: str | None = None   # set when the model could not run; the gate then fails closed
     policy_version: str = ""         # hash of the policy files the deck was checked against
-    content_hash: str = ""           # hash of the slide text + caption that was checked
+    content_hash: str = ""           # hash of the slide text, caption and images that were checked
     checked_at: datetime | None = None
+
+
+class BlockedEdit(BaseModel):
+    """A caption edit the safeguard refused. The Deck keeps its last allowed caption and stays approvable."""
+    caption: str
+    verdict: SafeguardVerdict
 
 
 # ---------------------------------------------------------------- job (view model the Admin reads)
@@ -220,6 +226,7 @@ class Job(BaseModel):
     deck: CardDeck | None = None
     issues: list[Issue] = Field(default_factory=list)   # QA + review merged for display
     safeguard: SafeguardVerdict | None = None            # hard gate: "block" means it can't be approved
+    blocked_edit: BlockedEdit | None = None              # last caption edit the safeguard refused, if any
     slide_urls: list[str] = Field(default_factory=list)  # /assets/{job_id}/slide-NN.jpg
     published_url: str | None = None
     error: str | None = None

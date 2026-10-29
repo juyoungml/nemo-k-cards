@@ -1,5 +1,7 @@
-# Content rules for the reviewer subagent (SPEC §7, BACKEND §11 #12).
+# Content rules for the reviewer and safeguard subagents (SPEC §7, BACKEND §11 #12).
 # block = must not publish · warn = human check. Source: team research (risk_review_checklist), 2026-10-07.
+# The safeguard host matches every block phrase itself, so each needs a `category` (a HarmCategory
+# from backend/app/schemas.py, e.g. historical_tragedy, territorial_cultural, hate).
 
 date_gate_days: 3   # publish date or event date within ±N days of a listed date → neutral tone, no promos
 
@@ -17,13 +19,13 @@ dates:
   - { date: "12-03", note: "2024 비상계엄", avoid: [martial law / tanks as fun imagery] }
 
 phrases:
-  - { pattern: "책상\\s*(을|에)?\\s*탁", severity: block, note: "박종철 고문치사 은폐 발언 — 탱크데이(2026), 무신사(2019)" }
-  - { pattern: "탁\\s*치니\\s*억", severity: block, note: "박종철 은폐 발언" }
-  - { pattern: "(?i)tank\\s*day|탱크\\s*데이", severity: block, note: "스타벅스 탱크데이 (2026-05-18)" }
-  - { pattern: "폭동", severity: block, note: "5·18/4·3 비하" }
-  - { pattern: "북한군\\s*개입", severity: block, note: "5·18 왜곡" }
-  - { pattern: "가만히\\s*있으라", severity: block, note: "세월호" }
-  - { pattern: "(?i)sea of japan|takeshima", severity: block, note: "use East Sea / Dokdo" }
+  - { pattern: "책상\\s*(을|에)?\\s*탁", severity: block, category: historical_tragedy, note: "박종철 고문치사 은폐 발언 — 탱크데이(2026), 무신사(2019)" }
+  - { pattern: "탁\\s*치니\\s*억", severity: block, category: historical_tragedy, note: "박종철 은폐 발언" }
+  - { pattern: "(?i)tank\\s*day|탱크\\s*데이", severity: block, category: historical_tragedy, note: "스타벅스 탱크데이 (2026-05-18)" }
+  - { pattern: "폭동", severity: block, category: historical_tragedy, note: "5·18/4·3 비하" }
+  - { pattern: "북한군\\s*개입", severity: block, category: historical_tragedy, note: "5·18 왜곡" }
+  - { pattern: "가만히\\s*있으라", severity: block, category: historical_tragedy, note: "세월호" }
+  - { pattern: "(?i)sea of japan|takeshima", severity: block, category: territorial_cultural, note: "use East Sea / Dokdo" }
   - { pattern: "(?i)must[- ]visit|insane|you won't believe", severity: warn, note: "clickbait" }
 
 topics:

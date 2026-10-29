@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app import drafts, store
@@ -17,6 +18,7 @@ from app.config import settings
 from app.pipeline.agent_runner import run_stage
 from app.renderer.html import HtmlRenderer, weekend_label
 from app.schemas import (
+    BlockedEdit,
     CardDeck,
     Draft,
     EventBrief,
@@ -309,7 +311,7 @@ async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good
         r.step(current, "failed", str(e)[:120])
 
 
-async def run_safeguard(job_id: str, deck: CardDeck, slide_paths: list, fx=None,
+async def run_safeguard(job_id: str, deck: CardDeck, slide_paths: list[Path], fx=None,
                         *, use_model: bool = True) -> SafeguardVerdict:
     """Binding allow/block verdict for exactly this deck. `fx` = fixture loader (DEMO_MODE=fixture)."""
     today = datetime.now(KST).date()
@@ -373,6 +375,60 @@ def _deck_from_draft(draft: Draft, event_id: str | None = None) -> CardDeck:
                     "#thingstodoinseoul #whatsonkorea", slides=slides)
 
 
+def _stop_publish(r: Run, status: JobStatus, label: str, error: str, note: str) -> bool:
+    pp = r.job.publish_progress
+    pp.step, pp.label, pp.error, pp.finished_at = "failed", label, error[:300], datetime.now(UTC)
+    r.job.status = status
+    r.step("publish", "skipped" if status == JobStatus.BLOCKED else "pending", note)
+    return False
+
+
+async def _safeguard_before_publish(r: Run, caption: str | None, mode: str, paths: list[Path]) -> bool:
+    """Nothing leaves the host unless the safeguard allowed exactly what will be posted.
+
+    The candidate Deck (with the edited caption, if any) is checked on a copy. A blocked edit is recorded and the
+    Deck keeps its last allowed caption; a blocked or unverifiable Deck ends BLOCKED. Returns True to publish.
+    """
+    job = r.job
+    edited = bool(caption) and caption != job.deck.caption
+    candidate = job.deck.model_copy(update={"caption": caption}) if edited else job.deck
+    if job.safeguard and job.safeguard.decision == "allow" and \
+            job.safeguard.content_hash == safeguard.content_hash(candidate, paths):
+        return True
+    live = settings.demo_mode == "live"
+    if mode == "graph" and not live:
+        # A real post needs the model's check; a fixture server can only run the phrase rules.
+        r.log("safeguard", "content changed since the last check and the model can't run here → not posted", "warn")
+        return _stop_publish(r, JobStatus.READY_FOR_REVIEW, "Not posted: the safeguard model can't check this edit",
+                             "This server runs DEMO_MODE=fixture, so an edit can't be checked by the safeguard model "
+                             "before a real post. Approve without editing, or use a live server.",
+                             "Edit needs the safeguard model (live server)")
+    job.publish_progress.label = "Safeguard is checking the edited caption" if edited else \
+        "Safeguard is checking the Deck again"
+    r.log("safeguard", ("caption edited" if edited else "Deck changed since the last check") +
+          " → checking again before publishing")
+    try:
+        verdict = await run_safeguard(job.id, candidate, paths, use_model=live)
+    except Exception as e:  # noqa: BLE001 — fail closed
+        verdict = SafeguardVerdict(decision="block", summary="Blocked because the safety check could not run.",
+                                   model_error=str(e)[:300], content_hash=safeguard.content_hash(candidate, paths))
+    if verdict.decision == "allow":
+        job.deck, job.safeguard, job.blocked_edit = candidate, verdict, None
+        r.log("safeguard", f"ALLOW · policy {verdict.policy_version}")
+        return True
+    if edited and job.safeguard and job.safeguard.decision == "allow" and \
+            job.safeguard.content_hash == safeguard.content_hash(job.deck, paths):
+        job.blocked_edit = BlockedEdit(caption=caption, verdict=verdict)
+        r.log("safeguard", "edited caption BLOCKED · the Deck keeps its original caption", "warn")
+        return _stop_publish(r, JobStatus.READY_FOR_REVIEW,
+                             "Edited caption blocked by safeguard: nothing was posted", verdict.summary,
+                             "Edited caption blocked: approve the original or edit again")
+    job.safeguard = verdict
+    _log_safeguard(r, verdict)
+    return _stop_publish(r, JobStatus.BLOCKED, "Blocked by safeguard: nothing was posted", verdict.summary,
+                         "Blocked by safeguard: regenerate or reject")
+
+
 # Progress bands per publish step (percent of the bar), so the UI shows steady, honest progress.
 BANDS = {"upload": (0, 30), "containers": (30, 60), "processing": (60, 85), "publish": (85, 99)}
 LABELS = {"upload": "Uploading slides to public storage", "containers": "Sending slides to Instagram",
@@ -384,32 +440,13 @@ async def publish_job(job_id: str, caption: str | None, mode: str) -> None:
     if not job or not job.deck:
         return
     r = Run(job)
-    if caption:
-        job.deck.caption = caption
     job.status = JobStatus.PUBLISHING
     job.error = None
     job.publish_progress = PublishProgress(mode=mode, step="upload", label=LABELS["upload"],
                                            started_at=datetime.now(UTC))
     paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
-    # The safeguard verdict vouches for one exact text. An edited caption (or a missing verdict) is checked
-    # again before anything leaves the host; a block here stops the publish.
-    if not job.safeguard or job.safeguard.content_hash != safeguard.content_hash(job.deck):
-        job.publish_progress.label = "Safeguard is checking the edited caption"
-        r.log("safeguard", "caption changed since the last check → checking again before publishing")
-        try:
-            sg = await run_safeguard(job.id, job.deck, paths, use_model=settings.demo_mode == "live")
-        except Exception as e:  # noqa: BLE001 — fail closed
-            sg = SafeguardVerdict(decision="block", summary="Blocked because the safety check could not run.",
-                                  model_error=str(e)[:300])
-        job.safeguard = sg
-        _log_safeguard(r, sg)
-        if sg.decision == "block":
-            job.status = JobStatus.BLOCKED
-            pp = job.publish_progress
-            pp.step, pp.error, pp.finished_at = "failed", sg.summary[:300], datetime.now(UTC)
-            pp.label = "Blocked by safeguard: nothing was posted"
-            r.step("publish", "skipped", "Blocked by safeguard: regenerate or reject")
-            return
+    if not await _safeguard_before_publish(r, caption, mode, paths):
+        return
     n_block = sum(i.severity == "block" for i in job.issues)
     r.step("publish", "running", f"publishing ({mode})")
     r.log("publish", f"approved by operator → publisher on host (mode: {mode})"

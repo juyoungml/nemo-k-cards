@@ -7,29 +7,45 @@ Two layers, both of which can block:
    policies/content/safeguard_policy.md, and decides allow/block with an explanation for the operator.
 
 The gate fails closed. If the model can't run or returns unusable output, the deck is blocked, and the
-summary says so. The verdict carries a hash of the content it checked, so an edited caption must be
-checked again before publishing.
+summary says so. The verdict carries a hash of the content it checked (text, image choices and the rendered
+slide files), so anything that changes after the check must be checked again before publishing.
 """
 
 import hashlib
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
+from pydantic import TypeAdapter
 
 from app.config import REPO_ROOT
-from app.schemas import CardDeck, SafeguardFinding, SafeguardModelOutput, SafeguardVerdict
+from app.schemas import (
+    CardDeck,
+    HarmCategory,
+    SafeguardFinding,
+    SafeguardModelOutput,
+    SafeguardVerdict,
+)
+from app.services.visual_qa import HASHTAG
 
 POLICY_DIR = REPO_ROOT / "policies/content"
 POLICY_MD = POLICY_DIR / "safeguard_policy.md"
 SENSITIVE_YAML = POLICY_DIR / "sensitive_topics.yaml"
-HASHTAG = re.compile(r"#[\w가-힣]+")
+_CATEGORY = TypeAdapter(HarmCategory)
 
 ModelCall = Callable[[dict, list[Path]], Awaitable[SafeguardModelOutput]]
+
+
+@dataclass(frozen=True)
+class BlockedPhrase:
+    pattern: re.Pattern
+    category: HarmCategory
+    note: str
 
 
 @dataclass(frozen=True)
@@ -37,14 +53,16 @@ class Policy:
     markdown: str
     sensitive_yaml: str
     version: str
-    phrases: tuple[tuple[re.Pattern, str], ...]   # (pattern, note) for severity: block
+    phrases: tuple[BlockedPhrase, ...]   # every `severity: block` phrase
 
 
 @lru_cache(maxsize=1)
 def _load(md_mtime: float, yaml_mtime: float) -> Policy:
     md = POLICY_MD.read_text(encoding="utf-8")
     raw = SENSITIVE_YAML.read_text(encoding="utf-8")
-    phrases = tuple((re.compile(p["pattern"]), p.get("note", ""))
+    # A missing or unknown `category` raises here: a broken policy must fail loudly, not block nothing.
+    phrases = tuple(BlockedPhrase(re.compile(p["pattern"]), _CATEGORY.validate_python(p["category"]),
+                                  p.get("note", ""))
                     for p in (yaml.safe_load(raw) or {}).get("phrases", []) if p.get("severity") == "block")
     version = hashlib.sha256((md + "\0" + raw).encode()).hexdigest()[:7]
     return Policy(md, raw, version, phrases)
@@ -55,10 +73,16 @@ def load_policy() -> Policy:
     return _load(POLICY_MD.stat().st_mtime, SENSITIVE_YAML.stat().st_mtime)
 
 
-def content_hash(deck: CardDeck) -> str:
-    """What the verdict vouches for: every word that will be posted (slide text + caption)."""
-    parts = [f"{s.index}\x1f{s.heading}\x1f{s.body}" for s in sorted(deck.slides, key=lambda s: s.index)]
-    return hashlib.sha256("\x1e".join([*parts, deck.caption]).encode()).hexdigest()[:16]
+def content_hash(deck: CardDeck, slide_files: Sequence[Path] = ()) -> str:
+    """What the verdict vouches for: every word, every image choice and every rendered slide that will be posted."""
+    h = hashlib.sha256()
+    for s in sorted(deck.slides, key=lambda s: s.index):
+        image = s.image.url if s.image else ""
+        h.update(f"{s.index}\x1f{s.heading}\x1f{s.body}\x1f{image}\x1f{s.stock_id or ''}\x1e".encode())
+    h.update(deck.caption.encode())
+    for f in sorted(slide_files, key=lambda p: p.name):
+        h.update(b"\x1d" + f.name.encode() + b"\x1f" + hashlib.sha256(f.read_bytes()).digest())
+    return h.hexdigest()[:16]
 
 
 def _texts(deck: CardDeck) -> list[tuple[str, int | None, str]]:
@@ -76,20 +100,17 @@ def rule_findings(deck: CardDeck, policy: Policy | None = None) -> list[Safeguar
     policy = policy or load_policy()
     found: list[SafeguardFinding] = []
     for location, idx, text in _texts(deck):
-        for rx, note in policy.phrases:
-            if m := rx.search(text):
+        for p in policy.phrases:
+            if m := p.pattern.search(text):
+                note = p.note
                 found.append(SafeguardFinding(
-                    category=_category(note), severity="block", location=location, slide_index=idx,
-                    excerpt=m.group(0), rule=f"sensitive_topics.yaml · blocked phrase /{rx.pattern}/",
+                    category=p.category, severity="block", location=location, slide_index=idx,
+                    excerpt=m.group(0), rule=f"sensitive_topics.yaml · blocked phrase /{p.pattern.pattern}/",
                     explanation=(f"\"{m.group(0)}\" is on the blocked-phrase list: {note}. Posting it would read "
                                  "as mocking a Korean tragedy or taking a side on a sensitive issue."
                                  if note else f"\"{m.group(0)}\" is on the blocked-phrase list."),
                     fix=f"Remove or reword \"{m.group(0)}\" and generate again."))
     return found
-
-
-def _category(note: str) -> str:
-    return "territorial_cultural" if re.search(r"East Sea|Dokdo", note, re.IGNORECASE) else "historical_tragedy"
 
 
 def _block_summary(rules: list[SafeguardFinding], findings: list[SafeguardFinding],
@@ -98,7 +119,7 @@ def _block_summary(rules: list[SafeguardFinding], findings: list[SafeguardFindin
     lead = ""
     if rules:
         lead = "Blocked phrase " + ", ".join(sorted({f'"{f.excerpt}"' for f in rules})) + \
-            " can't be posted (see below)."
+            " can't be posted."
     if out.decision == "block" and out.summary:
         return f"{lead} {out.summary}".strip()
     if lead:
@@ -117,7 +138,7 @@ async def check(deck: CardDeck, *, slide_paths: list[Path], today: date,
     policy = load_policy()
     rules = rule_findings(deck, policy)
     out = SafeguardModelOutput(decision="allow", summary="")
-    checked_by: list = ["rules"]
+    checked_by: list[Literal["rules", "model"]] = ["rules"]
     error = None
     if model is not None:
         payload = {"deck": deck.model_dump(mode="json"), "slide_paths": [str(p) for p in slide_paths],
@@ -140,5 +161,6 @@ async def check(deck: CardDeck, *, slide_paths: list[Path], today: date,
         summary = _block_summary(rules, findings, out) if decision == "block" else (
             out.summary or "No harmful content found by the safety rules.")
     return SafeguardVerdict(decision=decision, summary=summary, findings=findings, checked_by=checked_by,
-                            model_error=error, policy_version=policy.version, content_hash=content_hash(deck),
+                            model_error=error, policy_version=policy.version,
+                            content_hash=content_hash(deck, slide_paths),
                             checked_at=datetime.now(UTC))

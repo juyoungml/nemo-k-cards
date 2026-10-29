@@ -12,6 +12,7 @@ from app import drafts, store
 from app.pipeline import orchestrator
 from app.schemas import Fact, JobStatus, LinkCheck
 from app.services import link_checker
+from tests.factories import allowed_job
 
 
 @pytest.fixture(autouse=True)
@@ -119,6 +120,7 @@ async def test_brainstorm_sample_verifies_its_own_source(no_network):
     assert brief.title_en == "Mangwon Night Market" and brief.title_ko == "망원 야시장"
     assert (brief.start_date.month, brief.start_date.day, brief.end_date.day) == (10, 17, 19)
     assert [c.url for c in job.verification.checks] == [drafts.SAMPLE_URL]
+    assert job.safeguard.decision == "allow"  # Brainstorm jobs go through the safeguard too
     assert job.deck.slides[1].event_id == brief.id
 
 
@@ -167,20 +169,6 @@ def test_demote_unverified_keeps_only_checked_sources():
 ])
 def test_parse_dates(text, expected):
     assert drafts.parse_dates(text, date(2026, 10, 7)) == expected
-
-
-def allowed_job():
-    """A READY_FOR_REVIEW job with the good deck and an "allow" safeguard verdict for exactly that deck."""
-    import json
-
-    from app.config import settings
-    from app.schemas import CardDeck, SafeguardVerdict
-    from app.services import safeguard
-    job = orchestrator.new_job(secrets.token_hex(3), "approve test")
-    job.status = JobStatus.READY_FOR_REVIEW
-    job.deck = CardDeck.model_validate(json.loads((settings.scenarios_dir / "good/deck.json").read_text()))
-    job.safeguard = SafeguardVerdict(decision="allow", summary="ok", content_hash=safeguard.content_hash(job.deck))
-    return job
 
 
 def test_approve_cannot_ask_for_a_stronger_publish_mode(monkeypatch):

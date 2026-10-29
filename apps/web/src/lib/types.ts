@@ -100,6 +100,12 @@ export interface SafeguardVerdict {
   checked_at?: string | null;
 }
 
+/** A caption edit the safeguard refused. The Deck keeps its last allowed caption. */
+export interface BlockedEdit {
+  caption: string;
+  verdict: SafeguardVerdict;
+}
+
 export interface Job {
   id: string;
   prompt: string;
@@ -110,6 +116,7 @@ export interface Job {
   deck?: CardDeck | null;
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
   safeguard?: SafeguardVerdict | null;
+  blocked_edit?: BlockedEdit | null;
   published_url?: string | null;
   error?: string | null;
   slide_urls?: string[]; // rendered JPEGs, relative to API_URL (/assets/{id}/slide-NN.jpg)

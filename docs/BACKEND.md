@@ -1,6 +1,7 @@
 # Backend Spec: What's On Korea
 
-> Status: **FROZEN v1.2** (2026-10-07; v1.1: no auto-reject — the operator decides). Changes after this point need a team heads-up in Slack + a version bump here.
+> Status: **FROZEN v1.3** (2026-10-29; v1.1: no auto-reject — the operator decides). Changes after this point need a team heads-up in Slack + a version bump here.
+> v1.3: the Safeguard is a hard gate, the one exception to "no auto-reject" (§2.1, §3, §4, §5, §10, §11 #4 and #14, [ADR 0004](adr/0004-safeguard-hard-gate.md)). Agreed with Luke on 2026-10-29.
 > v1.2: §6 runner flow and #13 updated from running OpenShell 0.1.2 for real (MicroVM driver, native Claude Code binary).
 > Builds on [SPEC.md](SPEC.md) **v0.3** (incl. Brainstorm §4-1) and the [Admin Figma mockups](https://www.figma.com/design/OrkSDRFk7FwMzJ5WFxgYDY) (5 screens). Where they disagree, **Figma wins for UI behavior** and this doc wins for the backend contract.
 
@@ -126,13 +127,17 @@ UI text → backend field: Quick stepper sub-lines → `PipelineStep.note` · Re
 ### 2.1 Job
 ```
 QUEUED → RESEARCHING → VERIFYING → WRITING → RENDERING → QA → REVIEWING
-       → READY_FOR_REVIEW ──approve──▶ PUBLISHING → PUBLISHED
-                          ──reject────▶ REJECTED
-                          ──regenerate▶ WRITING   (keeps briefs + verification)
+       → SAFEGUARD ──block──▶ BLOCKED ──reject──▶ REJECTED   (no approve; regenerate = new Job)
+                   └─allow──▶ READY_FOR_REVIEW ──approve──▶ PUBLISHING → PUBLISHED
+                                                ──reject────▶ REJECTED
+                                                ──regenerate▶ WRITING   (keeps briefs + verification)
+PUBLISHING ──safeguard re-check blocks the Deck──▶ BLOCKED
+PUBLISHING ──safeguard re-check blocks a caption edit──▶ READY_FOR_REVIEW (original caption kept, `blocked_edit` set)
 any stage error ─────────────────────▶ FAILED (error message)
 ```
+- The Safeguard stage runs while the status is `REVIEWING`. `BLOCKED` is terminal for approval.
 - Quick: starts at `RESEARCHING`. Brainstorm `generate`: starts at `VERIFYING` (Research step = `skipped`).
-- Review/QA issues (`block` or `warn`) never change the status; they're shown in Review and the human approves or rejects.
+- Review/QA issues (`block` or `warn`) never change the status; they're shown in Review and the human approves or rejects. Only the Safeguard can block (§11 #4).
 
 ### 2.2 Draft (Brainstorm, SPEC §4-1)
 - One draft = **one event**. Roundups go through Quick.
@@ -183,6 +188,15 @@ class QAReport / ReviewVerdict: unchanged
                          + sources: list[SourceRow]        # Review table
                          + checks: list[CheckResult]       # Review chips
                          + issues: list[Issue]             # QA + review merged (frontend already uses this)
+                         + safeguard?: SafeguardVerdict    # binding allow/block; "block" → BLOCKED
+                         + blocked_edit?: BlockedEdit      # last caption edit the Safeguard refused
++ class SafeguardFinding: category(HarmCategory) · severity("block"|"warn") · location("slide"|"caption"|"hashtags"|"image")
+                         slide_index? · excerpt · rule · explanation · fix
++ class SafeguardModelOutput: decision("allow"|"block") · summary · findings   # the safeguard agent's output
++ class SafeguardVerdict(SafeguardModelOutput): checked_by["rules"|"model"] · model_error? · policy_version
+                         content_hash (slide text, caption, image choices, rendered slides) · checked_at
++ class BlockedEdit:     caption · verdict: SafeguardVerdict
+HarmCategory = hate|harassment|sexual|violence|self_harm|dangerous|historical_tragedy|political|territorial_cultural|scam|other
                          + slide_urls: list[str]           # /assets/... for preview
                          + published_at?
 + class PipelineStep:    name · where("sandbox"|"host"|"human") · state("pending"|"running"|"done"|"failed"|"skipped") · note
@@ -220,9 +234,9 @@ Base `http://localhost:8000` (`NEXT_PUBLIC_API_URL`). JSON. Errors: `{"error": c
 | GET | `/jobs` | `?limit&status` → `Job[]` | newest first |
 | GET | `/jobs/{id}` | → `Job` | |
 | GET | `/jobs/{id}/events` | SSE of `JobEvent` | replays history, then live; closes on terminal state |
-| POST | `/jobs/{id}/regenerate` | `{instruction?}` → `Job` | from READY_FOR_REVIEW/REJECTED → WRITING |
-| POST | `/jobs/{id}/reject` | `{reason}` → `Job` | |
-| POST | `/jobs/{id}/approve` | `{caption, mode?:"mock"\|"dryrun"\|"graph"}` → `Job` | **only publish path**; 409 unless READY_FOR_REVIEW (or if a credential leak was found); re-runs PII + secret + hashtag checks on the edited caption |
+| POST | `/jobs/{id}/regenerate` | `{instruction?}` → `Job` | from READY_FOR_REVIEW/REJECTED/BLOCKED → WRITING (not built yet: the Admin starts a new Job with the same prompt) |
+| POST | `/jobs/{id}/reject` | `{reason}` → `Job` | from READY_FOR_REVIEW or BLOCKED |
+| POST | `/jobs/{id}/approve` | `{caption, mode?:"mock"\|"dryrun"\|"graph"}` → `Job` | **only publish path**; 409 unless READY_FOR_REVIEW, if the Safeguard blocked or never checked the Deck, if a credential leak was found, or for a `graph` post of an edited caption on a `DEMO_MODE=fixture` server; an edited caption that hits a blocked phrase → 422 + `blocked_edit`; re-runs PII + secret + hashtag checks on the edited caption. Any content that differs from what the Safeguard checked is checked again before upload |
 | GET | `/assets/{job_id}/slide-NN.jpg` | image/jpeg | exists (StaticFiles); public via tunnel for Graph API |
 | POST | `/drafts` | `{}` → `Draft` | |
 | GET | `/drafts/{id}` | → `Draft` | |
@@ -251,9 +265,10 @@ No auth (localhost demo). CORS: `http://localhost:3000`.
 | 4 | Render | host | `HtmlRenderer` | deck → JPEG ×N + `TextMeasure` | 60 s | — | `slides/` |
 | 5 | QA | host | `visual_qa` + secret scanner | slides + text → `QAReport` | 10 s | re-render once | `qa.json` |
 | 6 | Review | sandbox `reviewer` (vision) | `run_stage` | deck + slides + reports → `ReviewVerdict` | 120 s | 1 | `review.json` |
+| 6b | Safeguard | host rules + sandbox `safeguard` (vision) | `safeguard.check` + `run_stage` | deck + slides + policy → `SafeguardVerdict` | 300 s | 1 (then fail closed) | `safeguard.json` |
 | 7 | Publish | host | `publisher` | approved deck → permalink | 120 s | — | mock permalink |
 
-After 6: orchestrator builds `checks` + merged `issues` → `READY_FOR_REVIEW` or `REJECTED`.
+After 6: orchestrator merges `issues`. After 6b: `BLOCKED` if the Safeguard blocks, else `READY_FOR_REVIEW`.
 
 ---
 
@@ -298,7 +313,7 @@ Agent-side keys (`ANTHROPIC_API_KEY`, `TOURAPI_KEY`, `SEOUL_API_KEY`, `KAKAO_KEY
 ## 10. Demo fixtures (`demo/scenarios/`)
 ```
 good/        briefs verification deck qa review .json + slides/*.jpg   → READY_FOR_REVIEW
-bad/         review.json verdict=fail (tank-day phrasing, tofu slide, PII in caption) → REJECTED
+bad/         review.json verdict=fail (tank-day phrasing, tofu slide, PII in caption) + safeguard.json block → BLOCKED
 injection/   event page with hidden instructions + policy_events.json (graph DELETE + pastebin denied)
 brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 ```
@@ -313,7 +328,7 @@ brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 | 1 | Brainstorm: one event per draft; roundups via Quick |
 | 2 | Re-generate a draft → new Job; `Draft.job_id` = latest |
 | 3 | Brainstorm chat: request/response (no streaming) in v1 |
-| 4 | Automated checks never auto-reject: every finished deck goes to READY_FOR_REVIEW with its issues; the operator decides (approving over `block` issues is logged as an override). Only credential leaks hard-stop publishing |
+| 4 | Automated checks never auto-reject: every finished deck goes to READY_FOR_REVIEW with its issues; the operator decides (approving over `block` issues is logged as an override). Credential leaks hard-stop publishing, and the Safeguard (#14) is the one check that blocks a Deck |
 | 5 | Storage: SQLite |
 | 6 | Image hosting: backend `/assets` + public tunnel (`PUBLIC_ASSET_BASE_URL`) |
 | 7 | Publishing via Instagram Login API → `graph.instagram.com`; OpenShell policy must guard **both** `graph.instagram.com` and `graph.facebook.com` |
@@ -323,6 +338,7 @@ brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 | 11 | Hashtags ≤ 5 (SPEC §6 updated) |
 | 12 | Secrets: used via OpenShell providers, never read by the agent; secret scanner on all outputs |
 | 13 | Policy `binaries`: real paths (`/usr/local/bin/claude` — Claude Code ships a native binary, no Node), `enforcement: enforce` everywhere, `DISABLE_AUTOUPDATER=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` |
+| 14 | Safeguard is a hard gate ([ADR 0004](adr/0004-safeguard-hard-gate.md)): host phrase rules + the `safeguard` agent decide allow/block for harmful content (text, hashtags, images) against `policies/content/safeguard_policy.md` + `sensitive_topics.yaml`. A block has no override; the gate fails closed; the verdict is bound to a hash of the posted content, and a refused caption edit leaves the Deck on its last allowed caption |
 
 ## 12. Build order & owners (SPEC §13 roles)
 

@@ -3,7 +3,7 @@
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
-import type { HarmCategory, Job, SafeguardFinding } from "@/lib/types";
+import type { BlockedEdit, HarmCategory, Job, SafeguardFinding } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const CATEGORY: Record<HarmCategory, string> = {
@@ -54,6 +54,31 @@ function Finding({ f, onJump }: { f: SafeguardFinding; onJump: (slide: number) =
       )}
       <p className="mt-1.5 text-[11px] break-all text-muted-foreground">Rule: {f.rule}</p>
     </li>
+  );
+}
+
+/** A caption edit the safeguard refused: why, while the Deck itself stays approvable with its original caption. */
+function BlockedEditNotice({ edit, onJump }: { edit: BlockedEdit; onJump: (slide: number) => void }) {
+  const findings = [...edit.verdict.findings].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "block" ? -1 : 1));
+  return (
+    <div className="mt-4 rounded-lg border border-destructive/40 bg-danger-soft p-3">
+      <div className="flex items-center gap-2">
+        <ShieldAlert className="size-4 shrink-0 text-destructive" />
+        <h3 className="text-sm font-semibold text-destructive">Your edited caption was blocked</h3>
+      </div>
+      <p className="mt-1.5 text-xs text-foreground">{edit.verdict.summary}</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Nothing was posted. The Deck keeps its original caption and can still be approved, or edit the caption again.
+      </p>
+      <blockquote className="mt-2 border-l-2 border-current/30 pl-2 text-xs whitespace-pre-line text-muted-foreground">{edit.caption}</blockquote>
+      {findings.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {findings.map((f, i) => (
+            <Finding key={i} f={f} onJump={onJump} />
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -108,6 +133,8 @@ export function SafeguardPanel({ job, onJump }: { job: Job; onJump: (slide: numb
           ))}
         </ul>
       )}
+
+      {!blocked && job.blocked_edit && <BlockedEditNotice edit={job.blocked_edit} onJump={onJump} />}
 
       <p className="mt-3 text-[11px] text-muted-foreground">
         Checked by {sg.checked_by.join(" + ") || "—"} · policy {sg.policy_version || "—"}

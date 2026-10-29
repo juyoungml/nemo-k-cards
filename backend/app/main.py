@@ -16,6 +16,7 @@ from app.pipeline import orchestrator
 from app.schemas import (
     TERMINAL,
     ApproveRequest,
+    BlockedEdit,
     Channel,
     CreateDraftRequest,
     CreateJobRequest,
@@ -147,11 +148,26 @@ async def approve(job_id: str, req: ApproveRequest) -> Job:
     if not job.safeguard or not job.deck:
         raise HTTPException(409, "this job has no safeguard verdict (created before the safeguard existed); "
                                  "regenerate it")
+    rank = {"mock": 0, "dryrun": 1, "graph": 2}
+    mode = req.mode or settings.publish_mode
+    # A request may ask for a safer mode than PUBLISH_MODE, never a stronger one (e.g. graph on a mock server).
+    if rank[mode] > rank[settings.publish_mode]:
+        raise HTTPException(403, f"publish mode {mode!r} is not enabled on this server "
+                                 f"(PUBLISH_MODE={settings.publish_mode})")
     if req.caption and req.caption != job.deck.caption:
-        # Fast host rules on the edited caption now; the full model check runs before upload (publish_job).
+        # A real post of an edit needs the safeguard model, which a fixture server can't run.
+        if mode == "graph" and settings.demo_mode != "live":
+            raise HTTPException(409, "an edited caption can't be posted from a DEMO_MODE=fixture server: the "
+                                     "safeguard model must check it first. Approve without editing, or use a live "
+                                     "server.")
+        # Fast host rules now, so the Approver sees why at once; the full check runs before upload (publish_job).
         edited = job.deck.model_copy(update={"caption": req.caption})
-        if hits := safeguard.rule_findings(edited):
-            raise HTTPException(422, "edited caption blocked by safeguard: " + hits[0].explanation)
+        if safeguard.rule_findings(edited):
+            paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
+            verdict = await orchestrator.run_safeguard(job.id, edited, paths, use_model=False)
+            job.blocked_edit = BlockedEdit(caption=req.caption, verdict=verdict)
+            store.save_job(job)
+            raise HTTPException(422, "edited caption blocked by safeguard: " + verdict.summary)
     # Other blocking issues are advisory: the operator saw them in Review and chose to approve.
     # Hard stop only for leaked credentials — those must never be published.
     if any(i.category == "pii" and "credential" in i.message for i in job.issues):
@@ -161,12 +177,6 @@ async def approve(job_id: str, req: ApproveRequest) -> Job:
         if len(HASHTAG.findall(req.caption)) > 5 or scan_text(req.caption, "caption",
                                                                secrets=(settings.ig_access_token,)):
             raise HTTPException(422, "edited caption fails checks (PII/credential or more than 5 hashtags)")
-    # A request may ask for a safer mode than PUBLISH_MODE, never a stronger one (e.g. graph on a mock server).
-    rank = {"mock": 0, "dryrun": 1, "graph": 2}
-    mode = req.mode or settings.publish_mode
-    if rank[mode] > rank[settings.publish_mode]:
-        raise HTTPException(403, f"publish mode {mode!r} is not enabled on this server "
-                                 f"(PUBLISH_MODE={settings.publish_mode})")
     orchestrator.spawn(orchestrator.publish_job(job_id, req.caption, mode))
     job.status = JobStatus.PUBLISHING
     return job

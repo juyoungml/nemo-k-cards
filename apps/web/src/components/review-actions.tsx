@@ -24,7 +24,8 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
   const blocked = job.status === "BLOCKED" || job.safeguard?.decision === "block";
-  const canDecide = job.status === "READY_FOR_REVIEW" && !blocked && !pending;
+  const unchecked = job.status === "READY_FOR_REVIEW" && !job.safeguard; // created before the safeguard existed
+  const canDecide = job.status === "READY_FOR_REVIEW" && !blocked && !unchecked && !pending;
   const canReject = (job.status === "READY_FOR_REVIEW" || job.status === "BLOCKED") && !pending;
   const publishing = job.status === "PUBLISHING" || (pending && !error);
   const blocks = job.issues.filter((i) => i.severity === "block").length;
@@ -54,7 +55,9 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
             <p className={cn("w-full text-xs md:w-auto md:flex-1", error ? "text-destructive" : "text-muted-foreground")}>
               {error ??
                 STATUS_NOTE[job.status] ??
-                (blocks > 0
+                (unchecked
+                  ? "No safeguard verdict: this job was created before the safeguard existed. Regenerate it to publish."
+                  : blocks > 0
                   ? `${blocks} blocking issue${blocks > 1 ? "s" : ""} flagged. Approving publishes anyway; you are the final check.`
                   : "Publishing runs on the host with the IG token — the agent sandbox cannot post or delete.")}
             </p>
@@ -64,7 +67,7 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
             <Button
               variant="outline"
               size="lg"
-              disabled={!(canDecide || canReject)}
+              disabled={!canReject}
               onClick={() =>
                 startTransition(async () => {
                   await api.createJob(job.prompt);
@@ -88,6 +91,8 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                 </>
               ) : blocked ? (
                 "Blocked by safeguard"
+              ) : unchecked ? (
+                "Needs safeguard check"
               ) : blocks > 0 ? (
                 "Approve anyway & Publish"
               ) : (
