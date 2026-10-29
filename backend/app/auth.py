@@ -1,6 +1,14 @@
-"""Sign-in (docs/spec/v1.md, pseudocode 1). Every request except /health carries a Supabase Auth access token
-as `Authorization: Bearer <jwt>`; the middleware verifies it, looks up the caller's Organization and Role in
-`members`, and leaves a `Ctx` on `request.state` for handlers (`Depends(member)` / `Depends(signed_in)`).
+"""Sign-in and Roles (docs/spec/v1.md, pseudocode 1). Every request except /health carries a Supabase Auth access
+token as `Authorization: Bearer <jwt>`; the middleware verifies it, looks up the caller's Organization and Role in
+`members`, and leaves a `Ctx` on `request.state` for handlers.
+
+Which Organization: a person may be a Member of several, and the Admin sends the one they are working in as
+`X-Org-Id` on every call. The header is only a choice, never a grant: it must name an Organization the verified
+caller is a Member of, or the request is refused (403). Without it the request acts for their oldest membership.
+
+Roles (GLOSSARY): every route declares the least Role it needs with `Viewer`, `Editor`, `Approver` or `Admin`
+(or `SignedIn` for the few routes that work without an Organization). tests/test_roles.py fails if a route
+declares none.
 
 Deny by default: a new route is protected without doing anything. Only /health, CORS preflights and the
 rendered-slide files under /assets (Instagram fetches them anonymously) are public.
@@ -34,7 +42,12 @@ LEEWAY_S = 30  # clock skew between Supabase and this host
 PUBLIC_PATHS = {"/health"}
 PUBLIC_PREFIXES = ("/assets/",)  # rendered slides: Instagram fetches them anonymously via PUBLIC_ASSET_BASE_URL
 # Signed in is enough here: these are how a person without an Organization gets one.
-NO_ORG_ROUTES = {("GET", "/me"), ("POST", "/orgs")}
+NO_ORG_ROUTES = {("GET", "/me"), ("POST", "/orgs"), ("POST", "/invitations/accept")}
+ORG_HEADER = "x-org-id"
+NOT_A_MEMBER = "not a member of this Organization"
+
+ROLES = ("viewer", "editor", "approver", "admin")
+ROLE_RANK = {r: i for i, r in enumerate(ROLES)}
 
 
 @dataclass(frozen=True)
@@ -169,8 +182,20 @@ async def require_session(request: Request, call_next):
         return _deny(401, "sign in required")
     from app import orgs  # imported here: orgs imports this module for its dependencies
 
-    m = await asyncio.to_thread(orgs.membership, user.id)
-    if m is None and (request.method, path) not in NO_ORG_ROUTES:
+    no_org_ok = (request.method, path) in NO_ORG_ROUTES
+    mine = await asyncio.to_thread(orgs.memberships, user.id)
+    m = mine[0] if mine else None
+    if wanted := request.headers.get(ORG_HEADER, "").strip():
+        try:
+            wanted_id = UUID(wanted)
+        except ValueError:
+            wanted_id = None
+        chosen = next((x for x in mine if x.org_id == wanted_id), None)
+        if chosen is not None:
+            m = chosen
+        elif not no_org_ok:  # /me and friends fall back to the default so the Admin can recover
+            return _deny(403, NOT_A_MEMBER)
+    if m is None and not no_org_ok:
         return _deny(403, "no Organization yet: create one first")
     request.state.ctx = Ctx(user, m.org_id if m else None, m.org_name if m else None, m.role if m else None)
     return await call_next(request)
@@ -192,6 +217,28 @@ def member(request: Request) -> Ctx:
     return ctx
 
 
+def requires(min_role: str) -> Callable[[Request], Ctx]:
+    """Dependency factory: a Member whose Role is at least `min_role` (viewer < editor < approver < admin)."""
+    if min_role not in ROLE_RANK:
+        raise ValueError(f"unknown role {min_role!r}")
+
+    def dep(request: Request) -> Ctx:
+        ctx = member(request)
+        if ROLE_RANK.get(ctx.role or "", -1) < ROLE_RANK[min_role]:
+            raise HTTPException(403, f"{min_role} role required")
+        return ctx
+    dep.min_role = min_role  # read by tests/test_roles.py
+    dep.__name__ = f"requires_{min_role}"
+    return dep
+
+
+def at_least(role: str | None, min_role: str) -> bool:
+    return ROLE_RANK.get(role or "", -1) >= ROLE_RANK[min_role]
+
 
 SignedIn = Annotated[Ctx, Depends(signed_in)]
-Member = Annotated[Ctx, Depends(member)]
+Viewer = Annotated[Ctx, Depends(requires("viewer"))]
+Editor = Annotated[Ctx, Depends(requires("editor"))]
+Approver = Annotated[Ctx, Depends(requires("approver"))]
+Admin = Annotated[Ctx, Depends(requires("admin"))]
+Member = Viewer  # any Role

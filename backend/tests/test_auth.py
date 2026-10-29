@@ -8,8 +8,8 @@ import uuid
 
 import jwt
 import pytest
+from conftest import all_api_routes
 from cryptography.hazmat.primitives.asymmetric import ec
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app import auth, orgs, store
@@ -21,8 +21,8 @@ anon = TestClient(app)
 
 
 def _routes():
-    for r in app.routes:
-        if isinstance(r, APIRoute) and r.path != "/health" and r.include_in_schema:
+    for r in all_api_routes():  # included routers too: /me, /orgs and the Member routes
+        if r.path != "/health" and r.include_in_schema:
             for m in r.methods:
                 yield m, re.sub(r"\{[^}]+\}", "x", r.path)
 

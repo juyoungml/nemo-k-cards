@@ -14,8 +14,8 @@ export const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? 
 export const AUTH_REQUIRED = !!process.env.NEXT_PUBLIC_API_URL;
 export const AUTH_CONFIGURED = !!(SUPABASE_URL && SUPABASE_KEY);
 
-/** Pages a signed-out person may open. */
-export const AUTH_PATHS = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/auth/callback"];
+/** Pages a signed-out person may open. /invite signs people in itself (Supabase's invite email lands there). */
+export const AUTH_PATHS = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/auth/callback", "/invite"];
 export const isAuthPath = (path: string) => AUTH_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 
 let client: SupabaseClient | undefined;

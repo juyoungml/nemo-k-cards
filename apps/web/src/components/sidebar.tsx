@@ -3,26 +3,38 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
-import { FileCheck2, LayoutDashboard, LogOut, RotateCcw, ShieldAlert, Sparkles } from "lucide-react";
+import { ChevronsUpDown, FileCheck2, LayoutDashboard, LogOut, RotateCcw, ScrollText, ShieldAlert, Sparkles, Users } from "lucide-react";
 
 import { IS_MOCK, api } from "@/lib/api";
-import { signOut } from "@/lib/supabase";
-import { useApi } from "@/lib/use-api";
+import { setActiveOrgId } from "@/lib/org";
+import { ROLE_LABEL, atLeast, useMe } from "@/lib/roles";
+import { reloadTo, signOut } from "@/lib/supabase";
+import type { Role } from "@/lib/types";
 
 import { cn } from "@/lib/utils";
 
-const NAV = [
+type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; min?: Role; desktopOnly?: boolean };
+// `min`: hidden below that Role (the API refuses it anyway). Team and Audit log live in the sidebar; phones reach
+// Team from the top bar so the tab bar keeps four tabs.
+const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/jobs/new", label: "New deck", icon: Sparkles },
+  { href: "/jobs/new", label: "New deck", icon: Sparkles, min: "editor" },
   { href: "/review", label: "Review", icon: FileCheck2 },
   { href: "/policy", label: "Policy Log", icon: ShieldAlert },
+  { href: "/team", label: "Team", icon: Users, desktopOnly: true },
+  { href: "/audit", label: "Audit log", icon: ScrollText, min: "admin", desktopOnly: true },
 ];
+
+function useNav(desktop: boolean) {
+  const { role } = useMe();
+  return NAV.filter((n) => (desktop || !n.desktopOnly) && (!n.min || atLeast(role, n.min)));
+}
 
 function NavLinks({ pathname }: { pathname: string | null }) {
   const isActive = (href: string) => pathname !== null && (href === "/" ? pathname === "/" : pathname.startsWith(href));
   return (
     <nav className="flex flex-col gap-1">
-      {NAV.map(({ href, label, icon: Icon }) => (
+      {useNav(true).map(({ href, label, icon: Icon }) => (
         <Link
           key={href}
           href={href}
@@ -58,9 +70,10 @@ export function Brand() {
 
 function TabLinks({ pathname }: { pathname: string | null }) {
   const isActive = (href: string) => pathname !== null && (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const tabs = useNav(false);
   return (
-    <nav className="grid grid-cols-4">
-      {NAV.map(({ href, label, icon: Icon }) => (
+    <nav className={cn("grid", tabs.length === 4 ? "grid-cols-4" : "grid-cols-3")}>
+      {tabs.map(({ href, label, icon: Icon }) => (
         <Link
           key={href}
           href={href}
@@ -88,7 +101,17 @@ export function MobileNav() {
       <header className="admin-chrome sticky top-0 z-30 border-b bg-card/95 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3 backdrop-blur md:hidden">
         <div className="flex items-center justify-between gap-3">
           <Brand />
-          {!IS_MOCK && <SignOutButton />}
+          <div className="flex items-center gap-1">
+            <Link
+              href="/team"
+              aria-label="Team"
+              title="Team"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Users className="size-4" />
+            </Link>
+            {!IS_MOCK && <SignOutButton />}
+          </div>
         </div>
       </header>
       <div className="admin-chrome fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
@@ -114,9 +137,35 @@ function SignOutButton() {
   );
 }
 
-/** Who is signed in, for which Organization, and the way out. */
+/** People in several Organizations pick the one they work in; the choice goes to the API as X-Org-Id. */
+function OrgSwitcher() {
+  const { me } = useMe();
+  if (!me || me.orgs.length < 2) return null;
+  return (
+    <label className="relative mb-3 block">
+      <span className="sr-only">Organization</span>
+      <select
+        value={me.org?.id ?? ""}
+        onChange={(e) => {
+          setActiveOrgId(e.target.value);
+          reloadTo("/"); // start over: every screen reloads its data for the new Organization
+        }}
+        className="h-10 w-full appearance-none rounded-lg border bg-card pr-8 pl-3 text-[13px] font-semibold outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        {me.orgs.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name} · {ROLE_LABEL[o.role]}
+          </option>
+        ))}
+      </select>
+      <ChevronsUpDown className="pointer-events-none absolute top-3 right-2.5 size-4 text-muted-foreground" />
+    </label>
+  );
+}
+
+/** Who is signed in, for which Organization and Role, and the way out. */
 function Account() {
-  const { data: me } = useApi(() => (IS_MOCK ? Promise.resolve(undefined) : api.me()));
+  const { me } = useMe();
   if (IS_MOCK) {
     return (
       <>
@@ -133,7 +182,10 @@ function Account() {
       </div>
       <div className="min-w-0 flex-1 leading-tight">
         <p className="truncate text-[13px] font-semibold">{me?.org?.name ?? " "}</p>
-        <p className="truncate text-[11px] text-muted-foreground" title={me?.user.email}>{me?.user.email ?? " "}</p>
+        <p className="truncate text-[11px] text-muted-foreground" title={me?.user.email}>
+          {me?.org ? `${ROLE_LABEL[me.org.role]} · ` : ""}
+          {me?.user.email ?? " "}
+        </p>
       </div>
       <SignOutButton />
     </>
@@ -162,8 +214,11 @@ export function Sidebar() {
           </button>
         </div>
       )}
-      <div className={cn("flex items-center gap-2.5 px-2", IS_MOCK ? "mt-4" : "mt-auto")}>
-        <Account />
+      <div className={cn(IS_MOCK ? "mt-4" : "mt-auto")}>
+        <OrgSwitcher />
+        <div className="flex items-center gap-2.5 px-2">
+          <Account />
+        </div>
       </div>
     </aside>
   );

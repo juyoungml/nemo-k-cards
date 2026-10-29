@@ -194,6 +194,8 @@ class CreateJobRequest(BaseModel):
 class ApproveRequest(BaseModel):
     caption: str | None = None
     mode: Literal["mock", "dryrun", "graph"] | None = None
+    # Required when the Deck has blocking Issues (an Override, GLOSSARY); recorded in the audit log.
+    override_reason: str | None = Field(None, max_length=2000)
 
 
 class RejectRequest(BaseModel):

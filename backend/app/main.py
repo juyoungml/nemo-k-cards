@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, brainstorms, orgs, seed, store
+from app import audit, auth, brainstorms, members, orgs, seed, store
 from app.config import settings
 from app.pipeline import orchestrator
 from app.schemas import (
@@ -68,10 +68,13 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_me
 settings.output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=settings.output_dir), name="assets")
 app.include_router(orgs.router)
+app.include_router(members.router)
 
 
 # Every Organization-owned read and write below goes through the store with the caller's Organization
 # (`ctx.org_id`): RLS makes another Organization's Job or Brainstorm look like it doesn't exist (404).
+# Each route names the least Role it needs (GLOSSARY "Role"; docs/spec/v1.md API table): Viewer reads,
+# Editor starts Jobs and Brainstorms, Approver approves and rejects, Admin manages Members (app/members.py).
 
 def _job_or_404(org_id: UUID, job_id: str) -> Job:
     if not (job := store.get_job(org_id, job_id)):
@@ -94,25 +97,25 @@ def health() -> dict:
 # ---------------------------------------------------------------- jobs
 
 @app.post("/jobs", response_model=Job, status_code=201)
-async def create_job(req: CreateJobRequest, ctx: auth.Member) -> Job:
+async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
     job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
-    await asyncio.to_thread(store.save_job, ctx.org_id, job)
+    await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "job.created", job.id)))
     orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, scenario=req.scenario or "good"))
     return job
 
 
 @app.get("/jobs", response_model=list[Job])
-def list_jobs(ctx: auth.Member, limit: int = Query(50, ge=1, le=500)) -> list[Job]:
+def list_jobs(ctx: auth.Viewer, limit: int = Query(50, ge=1, le=500)) -> list[Job]:
     return store.list_jobs(ctx.org_id, limit)
 
 
 @app.get("/jobs/{job_id}", response_model=Job)
-def get_job(job_id: str, ctx: auth.Member) -> Job:
+def get_job(job_id: str, ctx: auth.Viewer) -> Job:
     return _job_or_404(ctx.org_id, job_id)
 
 
 @app.get("/jobs/{job_id}/events")
-async def job_events(job_id: str, request: Request, ctx: auth.Member) -> StreamingResponse:
+async def job_events(job_id: str, request: Request, ctx: auth.Viewer) -> StreamingResponse:
     """SSE: a full Job snapshot whenever it changes, until a terminal state (same as the mock backend).
     The Admin reads it with fetch so the session token goes in the Authorization header, never the URL; the
     stream ends when that token expires and the client reconnects with a fresh one."""
@@ -136,11 +139,18 @@ async def job_events(job_id: str, request: Request, ctx: auth.Member) -> Streami
 
 
 @app.post("/jobs/{job_id}/approve", response_model=Job)
-async def approve(job_id: str, req: ApproveRequest, ctx: auth.Member) -> Job:
-    """The ONLY publish path: human approves in Admin -> host publishes (sandbox has no token)."""
+async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
+    """The ONLY publish path: human approves in Admin -> host publishes (sandbox has no token).
+    Approving a Deck with blocking Issues is an Override and needs a written reason (GLOSSARY). Self-approval is
+    allowed: whoever started the Job may approve it if their Role allows."""
     job = await asyncio.to_thread(_job_or_404, ctx.org_id, job_id)
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
+    blocking = [i for i in job.issues if i.severity == "block"]
+    reason = (req.override_reason or "").strip()
+    if blocking and not reason:
+        raise HTTPException(422, "this Deck has blocking Issues: approving it is an Override and needs a "
+                                 "written reason (override_reason)")
     # Blocking issues are advisory: the operator saw them in Review and chose to approve.
     # Hard stop only for leaked credentials — those must never be published.
     if any(i.category == "pii" and "credential" in i.message for i in job.issues):
@@ -156,54 +166,73 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Member) -> Job:
     if rank[mode] > rank[settings.publish_mode]:
         raise HTTPException(403, f"publish mode {mode!r} is not enabled on this server "
                                  f"(PUBLISH_MODE={settings.publish_mode})")
+    await asyncio.to_thread(_audit_approval, ctx, job, req.caption, mode, blocking, reason)
     orchestrator.spawn(orchestrator.publish_job(ctx.org_id, job_id, req.caption, mode))
     job.status = JobStatus.PUBLISHING
     return job
 
 
+def _audit_approval(ctx: auth.Ctx, job: Job, caption: str | None, mode: str, blocking: list, reason: str) -> None:
+    """Recorded before the publish starts: the decision stands whatever Instagram later says (that is on the Job).
+    A changed caption is a Deck edit, logged with the before and after text."""
+    before = job.deck.caption if job.deck else None
+    with store.tenant(ctx.org_id, user_id=ctx.user.id) as c:
+        if caption and caption != before:
+            audit.write(c, ctx.org_id, audit.entry(ctx, "deck.edited", job.id, field="caption",
+                                                   before=before, after=caption))
+        if blocking:
+            audit.write(c, ctx.org_id, audit.entry(
+                ctx, "deck.overridden", job.id, reason=reason, mode=mode,
+                issues=[{"category": i.category, "slide_index": i.slide_index, "message": i.message}
+                        for i in blocking]))
+        else:
+            audit.write(c, ctx.org_id, audit.entry(ctx, "deck.approved", job.id, mode=mode))
+
+
 @app.post("/jobs/{job_id}/reject", response_model=Job)
-def reject(job_id: str, req: RejectRequest, ctx: auth.Member) -> Job:
+def reject(job_id: str, req: RejectRequest, ctx: auth.Approver) -> Job:
     job = _job_or_404(ctx.org_id, job_id)
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
     job.status, job.error = JobStatus.REJECTED, req.reason or "rejected by operator"
-    return store.save_job(ctx.org_id, job)
+    return store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "deck.rejected", job.id, reason=job.error))
 
 
 # ---------------------------------------------------------------- brainstorms
 
 @app.post("/brainstorms", response_model=Brainstorm, status_code=201)
-def create_brainstorm(ctx: auth.Member, req: CreateBrainstormRequest | None = None) -> Brainstorm:
+def create_brainstorm(ctx: auth.Editor, req: CreateBrainstormRequest | None = None) -> Brainstorm:
     # The Mangwon sample (its facts are marked verified against a page that doesn't exist) is for demos only;
     # a live server starts every Brainstorm from an empty board.
     return brainstorms.create(ctx.org_id, (req.sample if req else True) and settings.demo_mode == "fixture")
 
 
 @app.get("/brainstorms/{brainstorm_id}", response_model=Brainstorm)
-def get_brainstorm(brainstorm_id: str, ctx: auth.Member) -> Brainstorm:
+def get_brainstorm(brainstorm_id: str, ctx: auth.Viewer) -> Brainstorm:
     return _brainstorm_or_404(ctx.org_id, brainstorm_id)
 
 
 @app.patch("/brainstorms/{brainstorm_id}", response_model=Brainstorm)
-def patch_brainstorm(brainstorm_id: str, patch: BrainstormPatch, ctx: auth.Member) -> Brainstorm:
+def patch_brainstorm(brainstorm_id: str, patch: BrainstormPatch, ctx: auth.Editor) -> Brainstorm:
     d = _brainstorm_or_404(ctx.org_id, brainstorm_id)
     return store.save_brainstorm(ctx.org_id, d.model_copy(update=patch.model_dump(exclude_unset=True)))
 
 
 @app.post("/brainstorms/{brainstorm_id}/messages", response_model=Brainstorm)
-async def brainstorm_message(brainstorm_id: str, req: BrainstormMessageRequest, ctx: auth.Member) -> Brainstorm:
+async def brainstorm_message(brainstorm_id: str, req: BrainstormMessageRequest, ctx: auth.Editor) -> Brainstorm:
     d = await asyncio.to_thread(_brainstorm_or_404, ctx.org_id, brainstorm_id)
     return await brainstorms.send_message(ctx.org_id, d, req.text, req.urls)
 
 
 @app.post("/brainstorms/{brainstorm_id}/generate", response_model=Job, status_code=201)
-async def generate(brainstorm_id: str, ctx: auth.Member) -> Job:
+async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
     d = await asyncio.to_thread(_brainstorm_or_404, ctx.org_id, brainstorm_id)
     angle = next((a for a in d.angles if a.id == d.selected_angle_id), None)
     if not angle:
         raise HTTPException(422, "pick an angle first")
     job = orchestrator.new_job(secrets.token_hex(8), f"Brainstorm: {angle.title}", "brainstorm", d.id)
-    await asyncio.to_thread(store.save_job, ctx.org_id, job)
+    await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
+        ctx, "job.created", job.id, brainstorm=d.id)))
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))
     orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, brainstorm=d))
     return job
@@ -212,17 +241,17 @@ async def generate(brainstorm_id: str, ctx: auth.Member) -> Job:
 # ---------------------------------------------------------------- dashboard & policy
 
 @app.get("/metrics", response_model=list[Metric])
-def metrics(ctx: auth.Member) -> list[Metric]:
+def metrics(ctx: auth.Viewer) -> list[Metric]:
     return seed.metrics(store.list_jobs(ctx.org_id, 200))
 
 
 @app.get("/instagram-accounts", response_model=list[InstagramAccount])
-def instagram_accounts() -> list[InstagramAccount]:
+def instagram_accounts(_: auth.Viewer) -> list[InstagramAccount]:
     return seed.instagram_accounts()
 
 
 @app.get("/policy-events")
-def policy_events(ctx: auth.Member) -> dict:
+def policy_events(ctx: auth.Viewer) -> dict:
     events = store.list_policy_events(ctx.org_id) + (seed.POLICY_SEED if settings.demo_mode == "fixture" else [])
     try:
         version = hashlib.sha256(settings.openshell_policy.read_bytes()).hexdigest()[:7]
@@ -233,6 +262,6 @@ def policy_events(ctx: auth.Member) -> dict:
 
 
 @app.post("/reset")
-def reset() -> dict:
+def reset(_: auth.Viewer) -> dict:
     """Mock-backend QA endpoint; no-op on the real backend."""
     return {"ok": True}
