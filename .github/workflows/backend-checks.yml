@@ -2,9 +2,9 @@ name: Backend checks
 on:
   push:
     branches: [main]
-    paths: ['backend/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
+    paths: ['backend/**', 'supabase/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
   pull_request:
-    paths: ['backend/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
+    paths: ['backend/**', 'supabase/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
   workflow_dispatch:
 permissions:
   contents: read
