@@ -4,7 +4,7 @@
 
 A publishing agent finds what's on in Korea, then researches, verifies, writes and renders Instagram card news (1080×1350 carousels) for tourists. A human approves each post in the Admin before it goes to @whatsonkorea.
 
-- Spec: `docs/BACKEND.md` (frozen v1.1) and `docs/SPEC.md`. Design system: `DESIGN.md`. Read it before touching cards or UI.
+- Spec: `docs/BACKEND.md` (frozen v1.3) and `docs/SPEC.md`. Design system: `DESIGN.md`. Read it before touching cards or UI.
 - Layout: `backend/` is FastAPI, the trusted host that holds the IG token and does all publishing. `apps/web/` is the Next.js Admin. `agent/` is the Claude Code workspace mounted into OpenShell sandboxes. `policies/` holds OpenShell and content policies. `demo/scenarios/` holds fixtures.
 
 ## Prerequisites
@@ -49,7 +49,7 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
 | `DATABASE_URL` | `postgresql://…` | default is the local Supabase database (`127.0.0.1:54322/postgres`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL`'s server (default: the same local server) |
 | `JOBS_PER_ORG` / `JOBS_PER_WORKER` | default `2` / `4` | Jobs one Organization runs at once (the rest wait as `QUEUED`) / Jobs one process runs at once |
-| `WORKFLOW_VERSION` | default `1` | bump it when the pipeline's stage list or order changes (`STAGES` in `orchestrator.py`) |
+| `WORKFLOW_VERSION` | default `2` (in code; leave it unset) | bump the default in `config.py` when the pipeline's stage list or order changes (`STAGES` in `orchestrator.py`) |
 | `SUPABASE_URL` | e.g. `http://127.0.0.1:54321` | Supabase project for sign-in (and slide hosting with `IMAGE_HOST=supabase`). Every route except `/health` needs a session from it; empty = every route 401 |
 | `ADMIN_URL` | default `http://localhost:3000` | where invitation links point (`/invite?token=…`); must be on the Supabase project's Auth redirect allow list |
 | `SUPABASE_JWT_SECRET` | secret | only for projects still signing with the legacy HS256 secret. The local CLI and new cloud projects use asymmetric keys from `SUPABASE_URL/auth/v1/.well-known/jwks.json` (cached 10 min) |
@@ -86,7 +86,7 @@ TOKEN=$(curl -s "http://127.0.0.1:54321/auth/v1/token?grant_type=password" -H "a
 curl -H "Authorization: Bearer $TOKEN" localhost:8000/me
 ```
 
-**Members and Roles (#14).** Every route declares its least Role (`auth.Viewer` / `Editor` / `Approver` / `Admin`, or `auth.SignedIn` for `/me`, `POST /orgs`, `POST /invitations/accept`); `backend/tests/test_roles.py` holds the matrix and fails on a route that declares none. A person in several Organizations picks one in the sidebar; the Admin sends it as `X-Org-Id` and the API refuses (403) an Organization the caller isn't a Member of. Admins invite on the Team page: the link is `ADMIN_URL/invite?token=…`, emailed by Supabase Auth when `SUPABASE_SERVICE_KEY` is set (locally it lands in Mailpit) and always shown to the Admin to copy. Approving a Deck with blocking Issues needs `override_reason`. Approvals, Overrides, rejections, caption edits and Member changes go to `audit_events` (append-only; Admins read it at `/audit`).
+**Members and Roles (#14).** Every route declares its least Role (`auth.Viewer` / `Editor` / `Approver` / `Admin`, or `auth.SignedIn` for `/me`, `POST /orgs`, `POST /invitations/accept`); `backend/tests/test_roles.py` holds the matrix and fails on a route that declares none. A person in several Organizations picks one in the sidebar; the Admin sends it as `X-Org-Id` and the API refuses (403) an Organization the caller isn't a Member of. Admins invite on the Team page: the link is `ADMIN_URL/invite?token=…`, emailed by Supabase Auth when `SUPABASE_SERVICE_KEY` is set (locally it lands in Mailpit) and always shown to the Admin to copy. Approving a Deck with blocking Issues needs `override_reason`; a Deck the Safeguard blocked can't be approved at all. Approvals, Overrides, rejections, caption edits, Safeguard blocks, refused approvals and Member changes go to `audit_events` (append-only; Admins read it at `/audit`).
 
 `/assets/*` (rendered slides) stays public because Instagram fetches it anonymously. Tests sign their own tokens with a throwaway key (`backend/tests/conftest.py`), so they need no Supabase Auth.
 
@@ -99,7 +99,7 @@ curl -s -X POST localhost:8000/jobs -H "Authorization: Bearer $TOKEN" -H 'conten
 curl -N -H "Authorization: Bearer $TOKEN" localhost:8000/jobs/<id>/events   # SSE: full Job snapshots ($TOKEN: see Sign-in)
 ```
 
-Pipeline: research → verify (host link check) → copy → render (Jinja2 + Playwright) → visual QA → review → `READY_FOR_REVIEW` → human approves in the Admin → publish. Nothing is auto-rejected; blocking issues are shown and the operator decides.
+Pipeline: research → verify (host link check) → copy → render (Jinja2 + Playwright) → visual QA → review → safeguard → `READY_FOR_REVIEW` → human approves in the Admin → publish. QA and review Issues are advisory: they're shown and the operator decides (an Override approves blocking Issues). The Safeguard is the one exception: if it blocks, the Job ends `BLOCKED`, the API refuses to approve it for every Role and even with an Override reason, and the only options are Regenerate or Reject. It fails closed, and an edited caption is checked again (host rules at Approve, the full check before upload) without touching the allowed original. Code: `backend/app/services/safeguard.py`; policy: `policies/content/safeguard_policy.md` + `sensitive_topics.yaml`; decision: `docs/adr/0004-safeguard-hard-gate.md`.
 
 To run one stage by hand (what `LocalClaudeRunner` does, cwd `agent/`):
 
@@ -110,7 +110,7 @@ claude -p "<task text + JSON input>" --agent researcher --output-format json \
 # result is in .structured_output
 ```
 
-Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `reviewer` (Read only), defined in `agent/.claude/agents/`. Agents never publish. Only the host does.
+Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `reviewer`, `safeguard` (Read only), defined in `agent/.claude/agents/`. Agents never publish. Only the host does.
 
 **OpenShell (submission path):** one-time `scripts/openshell_setup.sh` (builds the image, imports the provider, registers the key), then `AGENT_RUNNER=openshell`. Policy: `policies/openshell/agent-policy.yaml`. Probe it with `scripts/openshell_probe.sh`.
 
@@ -124,14 +124,14 @@ cd backend && uv run python -m app.renderer.preview  # renders demo deck → bac
 cd apps/web && npx tsc --noEmit && pnpm lint
 ```
 
-**Golden set** (HARDENING AGT-3): fixed requests in `backend/golden/cases.json` (bump `version` when a case changes), checked for schema, slide structure, ≤ 5 hashtags, valid links, no invented facts, relevant photos and the case's expectations. Checks marked `[llm]` read the recorded reviewer verdict; everything else is a deterministic rule (`backend/app/golden/checks.py`).
+**Golden set** (HARDENING AGT-3): fixed requests in `backend/golden/cases.json` (bump `version` when a case changes), checked for schema, slide structure, ≤ 5 hashtags, valid links, no invented facts, relevant photos, the Safeguard's verdict and the case's expectations. `kind: "safeguard"` cases replay a fixed Deck with an expected allow or block (Tank Day, Sea of Japan, a slur, a respectful memorial). Checks marked `[llm]` read the recorded reviewer verdict; everything else is a deterministic rule (`backend/app/golden/checks.py`).
 
 ```bash
 cd backend && uv run python -m app.golden            # replay recordings: free, deterministic, what CI runs
 cd backend && uv run python -m app.golden --live --case seongsu-popups --record   # real agents, costs tokens
 ```
 
-Run it after editing `agent/**`, the orchestrator's stage tasks, stage output schemas or `AGENT_MODEL`. Replay re-checks recorded outputs, so it marks a recording STALE when any of those changed (a hash of all of them) or when it was made on another model than the `model` pinned in `cases.json` (override with `--model`). Re-record stale cases with `--live --record` (one case ≈ three `claude -p` stages) and commit the JSON; a recording stores the model id and `claude` CLI version the run actually used. Recordings built from demo data (`demo-scenario`, `synthetic`) report as FIXTURE and never count as a pass.
+Run it after editing `agent/**`, the orchestrator's stage tasks, stage output schemas or `AGENT_MODEL`. Replay re-checks recorded outputs, so it marks a recording STALE when any of those changed (a hash of all of them) or when it was made on another model than the `model` pinned in `cases.json` (override with `--model`). Re-record stale cases with `--live --record` (one case ≈ four `claude -p` stages) and commit the JSON; a recording stores the model id and `claude` CLI version the run actually used. Recordings built from demo data (`demo-scenario`, `synthetic`) report as FIXTURE and never count as a pass.
 
 Live runs never publish (`PUBLISH_MODE=mock`, publishing credentials blanked) and never write the Admin's data: slides go under `--out` (default `backend/.data/golden`). With the SQLite store its database sits there too; with the Postgres store live mode uses `GOLDEN_DATABASE_URL` (its database name must contain `golden` or `test`) or creates a scratch database on `TEST_DATABASE_URL`'s server, applies `supabase/migrations` and drops it at exit, and refuses to start otherwise. CI (`.github/workflows/golden-set.yml`) runs replay; live CI needs an `ANTHROPIC_API_KEY` secret (steps in that file).
 

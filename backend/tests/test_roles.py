@@ -8,6 +8,7 @@ import uuid
 
 import pytest
 from conftest import all_api_routes
+from factories import allowed
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -116,10 +117,11 @@ def no_background(monkeypatch):
 
 
 def _ready_job(org_id, issues=()):
+    """A finished Job waiting for a decision: the Safeguard allowed its Deck (factories.allowed)."""
     job = orchestrator.new_job(secrets.token_hex(4), "Seongsu pop-ups")
     job.status = JobStatus.READY_FOR_REVIEW
     job.issues = list(issues)
-    return store.save_job(org_id, job)
+    return store.save_job(org_id, allowed(job))
 
 
 def _concrete(path: str, ids: dict) -> str:
@@ -167,7 +169,7 @@ def test_self_approval_is_allowed(team, no_background):
     jid = c.post("/jobs", json={"prompt": "Seongsu pop-ups"}).json()["id"]
     job = store.get_job(c.org_id, jid)
     job.status = JobStatus.READY_FOR_REVIEW
-    store.save_job(c.org_id, job)
+    store.save_job(c.org_id, allowed(job))
     assert c.post(f"/jobs/{jid}/approve", json={}).status_code == 200
 
 

@@ -16,6 +16,7 @@ dependencies = [
     "psycopg-pool>=3.2",
     "pyjwt[crypto]>=2.10",
     "dbos>=3.4,<4",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]

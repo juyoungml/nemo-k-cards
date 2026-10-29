@@ -18,6 +18,7 @@ import type {
   Metric,
   PipelineStep,
   PolicyEvent,
+  SafeguardVerdict,
   Scenario,
   VerificationReport,
 } from "@/lib/types";
@@ -29,6 +30,7 @@ interface ScenarioData {
   verification: VerificationReport;
   deck: Omit<CardDeck, "job_id">;
   issues: Issue[];
+  safeguard?: SafeguardVerdict;
   notes: Record<string, string>;
   log: { stage: string; message: string; level?: "info" | "warn" }[];
   policy_events: { stage: string; binary: string; host: string; request: string; result: PolicyEvent["result"] }[];
@@ -45,6 +47,7 @@ const STAGES = [
   { key: "render", name: "Render", where: "host · Playwright", status: "RENDERING", ms: 2500 },
   { key: "qa", name: "Visual QA", where: "host", status: "QA", ms: 1500 },
   { key: "review", name: "Final review", where: "reviewer · sandbox", status: "REVIEWING", ms: 2000 },
+  { key: "safeguard", name: "Safeguard", where: "safeguard · sandbox", status: "REVIEWING", ms: 1500 },
 ] as const;
 const PUBLISH_MS = 2500;
 
@@ -119,8 +122,11 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     t += stages[i].ms;
   }
   const finished = currentIdx === stages.length;
-  if (finished) status = sc.issues.some((i) => i.severity === "block") ? "REJECTED" : "READY_FOR_REVIEW";
+  // Only the Safeguard can block; other blocking Issues wait for the operator (same as the FastAPI backend).
+  const blockedBySafeguard = finished && sc.safeguard?.decision === "block";
+  if (finished) status = blockedBySafeguard ? "BLOCKED" : "READY_FOR_REVIEW";
 
+  if (job.decision?.kind === "reject" && status === "BLOCKED") status = "REJECTED";
   if (job.decision && finished && status === "READY_FOR_REVIEW") {
     if (job.decision.kind === "reject") status = "REJECTED";
     else status = now - job.decision.at < PUBLISH_MS ? "PUBLISHING" : "PUBLISHED";
@@ -135,14 +141,16 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     ...stages.map((s, i) => ({
       name: s.name,
       where: s.where,
-      state: (i < currentIdx ? "done" : i === currentIdx ? (failed ? "failed" : "running") : "pending") as PipelineStep["state"],
+      state: (s.key === "safeguard" && blockedBySafeguard
+        ? "failed"
+        : i < currentIdx ? "done" : i === currentIdx ? (failed ? "failed" : "running") : "pending") as PipelineStep["state"],
       note: i < currentIdx || (i === currentIdx && failed) ? sc.notes[s.key] : undefined,
     })),
     {
       name: "Human publish",
       where: "you",
-      state: status === "PUBLISHED" ? "done" : status === "PUBLISHING" ? "running" : "pending",
-      note: status === "PUBLISHED" ? "posted to @whatsonkorea" : "Approve in Review",
+      state: status === "PUBLISHED" ? "done" : status === "PUBLISHING" ? "running" : blockedBySafeguard ? "skipped" : "pending",
+      note: status === "PUBLISHED" ? "posted to @whatsonkorea" : blockedBySafeguard ? "Blocked by safeguard: regenerate or reject" : "Approve in Review",
     },
   ];
 
@@ -170,6 +178,7 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     verification: reached("verify") ? sc.verification : null,
     deck,
     issues: finished ? sc.issues : [],
+    safeguard: finished ? (sc.safeguard ?? null) : null,
     error: failed ? sc.error : job.decision?.reason ?? null,
     published_url: status === "PUBLISHED" ? `https://www.instagram.com/p/MOCK${job.id.toUpperCase()}/` : null,
     pipeline,
@@ -195,7 +204,14 @@ export function decide(id: string, kind: "approve" | "reject", extra: { caption?
   const j = store().jobs.get(id);
   if (!j) return { error: "not found", code: 404 } as const;
   const snap = snapshot(j);
-  if (snap.status !== "READY_FOR_REVIEW") return { error: `job is ${snap.status}, not READY_FOR_REVIEW`, code: 409 } as const;
+  // Same rules as the API: the Safeguard is binding (no Override approves a blocked Deck), a Deck without a
+  // verdict can't be approved, and a blocked Deck can still be rejected.
+  if (kind === "approve" && (snap.status === "BLOCKED" || snap.safeguard?.decision === "block"))
+    return { error: `blocked by safeguard, which no Override can approve: ${snap.safeguard?.summary ?? ""}`, code: 409 } as const;
+  if (kind === "approve" && snap.status === "READY_FOR_REVIEW" && !snap.safeguard)
+    return { error: "this job has no safeguard verdict (created before the safeguard existed); regenerate it", code: 409 } as const;
+  const allowed = kind === "reject" ? ["READY_FOR_REVIEW", "BLOCKED"] : ["READY_FOR_REVIEW"];
+  if (!allowed.includes(snap.status)) return { error: `job is ${snap.status}, not ${allowed.join(" or ")}`, code: 409 } as const;
   // Same rule as the API: approving with blocking Issues is an Override and needs a reason.
   if (kind === "approve" && snap.issues.some((i) => i.severity === "block") && !extra.overrideReason?.trim())
     return { error: "this Deck has blocking Issues: approving it is an Override and needs a written reason", code: 422 } as const;
@@ -203,7 +219,7 @@ export function decide(id: string, kind: "approve" | "reject", extra: { caption?
   return { job: snapshot(j) } as const;
 }
 
-export const isTerminal = (s: JobStatus) => ["READY_FOR_REVIEW", "REJECTED", "PUBLISHED", "FAILED"].includes(s);
+export const isTerminal = (s: JobStatus) => ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "PUBLISHED", "FAILED"].includes(s);
 
 // ---------------------------------------------------------------- dashboard & policy
 

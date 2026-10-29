@@ -17,6 +17,7 @@ from app.pipeline import durable, orchestrator
 from app.schemas import (
     TERMINAL,
     ApproveRequest,
+    BlockedEdit,
     Brainstorm,
     BrainstormMessageRequest,
     BrainstormPatch,
@@ -28,6 +29,7 @@ from app.schemas import (
     Metric,
     RejectRequest,
 )
+from app.services import safeguard
 
 
 def recover_interrupted() -> None:
@@ -87,6 +89,11 @@ def _out(org_id: UUID, job: Job) -> Job:
     return assets.for_admin(org_id, job)
 
 
+def _member(ctx: auth.Ctx) -> dict:
+    """Who the host acts for when it writes audit events later, outside this request (pipeline, publishing)."""
+    return {"id": str(ctx.user.id), "email": ctx.user.email}
+
+
 def _brainstorm_or_404(org_id: UUID, brainstorm_id: str) -> Brainstorm:
     if not (d := store.get_brainstorm(org_id, brainstorm_id)):
         raise HTTPException(404, "brainstorm not found")
@@ -105,7 +112,7 @@ def health() -> dict:
 async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
     job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "job.created", job.id)))
-    await orchestrator.start_job(ctx.org_id, job, scenario=req.scenario or "good")
+    await orchestrator.start_job(ctx.org_id, job, scenario=req.scenario or "good", started_by=_member(ctx))
     return _out(ctx.org_id, job)
 
 
@@ -146,13 +153,45 @@ async def job_events(job_id: str, request: Request, ctx: auth.Viewer) -> Streami
 @app.post("/jobs/{job_id}/approve", response_model=Job)
 async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
     """The ONLY publish path: human approves in Admin -> host publishes (sandbox has no token).
-    Approving a Deck with blocking Issues is an Override and needs a written reason (GLOSSARY). Self-approval is
-    allowed: whoever started the Job may approve it if their Role allows."""
+    A Deck the Safeguard blocked can't be approved by anyone, with or without an Override reason (ADR 0004); the
+    refusal is audited. Approving a Deck with blocking Issues is an Override and needs a written reason (GLOSSARY).
+    Self-approval is allowed: whoever started the Job may approve it if their Role allows."""
     job = await asyncio.to_thread(_job_or_404, ctx.org_id, job_id)
+    reason = (req.override_reason or "").strip()
+    mode = req.mode or settings.publish_mode
+    if job.status == JobStatus.BLOCKED or (job.safeguard and job.safeguard.decision == "block"):
+        await asyncio.to_thread(_refuse, ctx, job, "blocked_by_safeguard", reason, mode)
+        raise HTTPException(409, "blocked by safeguard, which no Override can approve: "
+                                 f"{job.safeguard.summary if job.safeguard else ''} Regenerate or reject this Deck.")
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
+    if not job.safeguard or not job.deck:
+        await asyncio.to_thread(_refuse, ctx, job, "no_safeguard_verdict", reason, mode)
+        raise HTTPException(409, "this job has no safeguard verdict (created before the safeguard existed); "
+                                 "regenerate it")
+    # A request may ask for a safer mode than PUBLISH_MODE, never a stronger one (e.g. graph on a mock server).
+    rank = {"mock": 0, "dryrun": 1, "graph": 2}
+    if rank[mode] > rank[settings.publish_mode]:
+        raise HTTPException(403, f"publish mode {mode!r} is not enabled on this server "
+                                 f"(PUBLISH_MODE={settings.publish_mode})")
+    if req.caption and req.caption != job.deck.caption:
+        # A real post of an edit needs the safeguard model, which a fixture server can't run.
+        if mode == "graph" and settings.demo_mode != "live":
+            raise HTTPException(409, "an edited caption can't be posted from a DEMO_MODE=fixture server: the "
+                                     "safeguard model must check it first. Approve without editing, or use a live "
+                                     "server.")
+        # Fast host rules now, so the Approver sees why at once; the full check runs before upload (publish_job).
+        # The edit is checked on a copy: the Deck keeps its allowed caption.
+        edited = job.deck.model_copy(update={"caption": req.caption})
+        if safeguard.rule_findings(edited):
+            paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
+            verdict = await orchestrator.run_safeguard(ctx.org_id, job.id, edited, paths, use_model=False)
+            job.blocked_edit = BlockedEdit(caption=req.caption, verdict=verdict)
+            await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
+                ctx, "safeguard.edit_blocked", job.id, stage="approve", caption=req.caption,
+                **orchestrator.verdict_detail(verdict))))
+            raise HTTPException(422, "edited caption blocked by safeguard: " + verdict.summary)
     blocking = [i for i in job.issues if i.severity == "block"]
-    reason = (req.override_reason or "").strip()
     if blocking and not reason:
         raise HTTPException(422, "this Deck has blocking Issues: approving it is an Override and needs a "
                                  "written reason (override_reason)")
@@ -165,16 +204,16 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
         if len(HASHTAG.findall(req.caption)) > 5 or scan_text(req.caption, "caption",
                                                                secrets=(settings.ig_access_token,)):
             raise HTTPException(422, "edited caption fails checks (PII/credential or more than 5 hashtags)")
-    # A request may ask for a safer mode than PUBLISH_MODE, never a stronger one (e.g. graph on a mock server).
-    rank = {"mock": 0, "dryrun": 1, "graph": 2}
-    mode = req.mode or settings.publish_mode
-    if rank[mode] > rank[settings.publish_mode]:
-        raise HTTPException(403, f"publish mode {mode!r} is not enabled on this server "
-                                 f"(PUBLISH_MODE={settings.publish_mode})")
     await asyncio.to_thread(_audit_approval, ctx, job, req.caption, mode, blocking, reason)
-    orchestrator.spawn(orchestrator.publish_job(ctx.org_id, job_id, req.caption, mode))
+    orchestrator.spawn(orchestrator.publish_job(ctx.org_id, job_id, req.caption, mode, by=_member(ctx)))
     job.status = JobStatus.PUBLISHING
     return _out(ctx.org_id, job)
+
+
+def _refuse(ctx: auth.Ctx, job: Job, why: str, reason: str, mode: str) -> None:
+    """An approval the Safeguard refused, kept in the audit log with any Override reason that was offered."""
+    audit.record(ctx, "deck.approve_refused", job.id, why=why, override_reason=reason or None, mode=mode,
+                 summary=job.safeguard.summary if job.safeguard else None)
 
 
 def _audit_approval(ctx: auth.Ctx, job: Job, caption: str | None, mode: str, blocking: list, reason: str) -> None:
@@ -197,8 +236,8 @@ def _audit_approval(ctx: auth.Ctx, job: Job, caption: str | None, mode: str, blo
 @app.post("/jobs/{job_id}/reject", response_model=Job)
 def reject(job_id: str, req: RejectRequest, ctx: auth.Approver) -> Job:
     job = _job_or_404(ctx.org_id, job_id)
-    if job.status != JobStatus.READY_FOR_REVIEW:
-        raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
+    if job.status not in (JobStatus.READY_FOR_REVIEW, JobStatus.BLOCKED):  # a blocked Deck can still be rejected
+        raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW or BLOCKED")
     job.status, job.error = JobStatus.REJECTED, req.reason or "rejected by operator"
     return _out(ctx.org_id, store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "deck.rejected", job.id, reason=job.error)))
 
@@ -239,7 +278,7 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
         ctx, "job.created", job.id, brainstorm=d.id)))
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))
-    await orchestrator.start_job(ctx.org_id, job, brainstorm=d)
+    await orchestrator.start_job(ctx.org_id, job, brainstorm=d, started_by=_member(ctx))
     return _out(ctx.org_id, job)
 
 

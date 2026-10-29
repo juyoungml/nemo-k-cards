@@ -10,6 +10,6 @@ export const toneOptions = ["Friendly explainer", "Playful", "Calm & practical"]
 
 export const SCENARIO_LABELS = {
   good: "good — passes review",
-  bad: "bad — blocked (REJECTED)",
+  bad: "bad — blocked by safeguard",
   fail: "fail — renderer error",
 } as const;

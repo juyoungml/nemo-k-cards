@@ -1,7 +1,8 @@
 """Golden set formats: the versioned cases and the recorded pipeline outputs they are checked against.
 
 A case is a Prompt plus what a good result looks like. A recording is what one run of the pipeline produced
-for that case (briefs, link checks, Deck, Issues), trimmed to what the checks read. Bump `version` in
+for that case (briefs, link checks, Deck, Issues, Safeguard verdict), trimmed to what the checks read. Safeguard
+cases (`kind: "safeguard"`) are replay-only: a fixed Deck and the Safeguard's expected allow/block. Bump `version` in
 cases.json when a case's prompt or expectations change; recordings made for an older version are reported stale.
 """
 
@@ -28,7 +29,10 @@ AGENT_RUNNER = REPO_ROOT / "backend/app/pipeline/agent_runner.py"
 
 class Expect(BaseModel):
     """What a good result for the case looks like. Empty lists / None mean "not checked"."""
-    outcome: Literal["ready", "no_deck"] = "ready"  # no_deck: the job stops before copy (nothing found / all links dead)
+    # no_deck: the job stops before copy (nothing found / all links dead); blocked: the Safeguard refused the Deck
+    outcome: Literal["ready", "no_deck", "blocked"] = "ready"
+    # The Safeguard's decision on the Deck. None: follows the outcome (ready → allow, blocked → block).
+    safeguard: Literal["allow", "block"] | None = None
     min_events: int = 1
     max_events: int = 6
     categories_any: list[str] = Field(default_factory=list)       # at least one event has one of these categories
@@ -39,7 +43,9 @@ class Expect(BaseModel):
 
 class Case(BaseModel):
     id: str
-    kind: Literal["event", "guide"] = "event"  # guide: Guide Decks (#27), not produced by the pipeline yet
+    # guide: Guide Decks (#27), not produced by the pipeline yet. safeguard: a fixed Deck (replay only) that checks
+    # the Safeguard's verdict; its prompt says what the Deck is.
+    kind: Literal["event", "guide", "safeguard"] = "event"
     prompt: str
     why: str = ""
     expect: Expect = Field(default_factory=Expect)
@@ -70,6 +76,7 @@ class Recording(BaseModel):
     verification: dict | None = None
     deck: dict | None = None
     issues: list[Issue] = Field(default_factory=list)  # host + QA + reviewer, as shown in Review
+    safeguard: dict | None = None   # the SafeguardVerdict as stored on the Job (raw, like the Deck)
     log: list[str] = Field(default_factory=list)
 
 
@@ -95,7 +102,7 @@ def save_recording(rec: Recording, directory: Path = RECORDINGS_DIR) -> Path:
 
 # The order the stage calls are hashed in. Fixed by agent name, so moving a call within the orchestrator (e.g. into
 # its own step function, #17) doesn't change the hash; this is the order the hash has always used.
-STAGE_ORDER = ["copywriter", "reviewer", "researcher"]
+STAGE_ORDER = ["copywriter", "reviewer", "researcher", "safeguard"]
 
 
 def _stage_calls() -> list[ast.Call]:
@@ -145,4 +152,4 @@ def recording_from_job(job: Job, case: Case, set_version: int, today: date, mode
         cli_version=cli_version, runner=runner, agent_sha=agent_sha(), prompt=job.prompt, status=job.status,
         error=job.error, briefs=[b.model_dump(mode="json") for b in job.briefs],
         verification=job.verification.model_dump(mode="json") if job.verification else None, deck=deck,
-        issues=job.issues, log=[f"{line.stage}: {line.message}" for line in job.log])
+        issues=job.issues, safeguard=job.safeguard.model_dump(mode="json") if job.safeguard else None, log=[f"{line.stage}: {line.message}" for line in job.log])

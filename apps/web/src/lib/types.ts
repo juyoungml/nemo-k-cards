@@ -10,6 +10,7 @@ export type JobStatus =
   | "REVIEWING"
   | "READY_FOR_REVIEW"
   | "REJECTED"
+  | "BLOCKED" // the Safeguard refused the Deck: nobody can approve it, only regenerate or reject
   | "PUBLISHING"
   | "PUBLISHED"
   | "FAILED";
@@ -63,6 +64,49 @@ export interface Issue {
   message: string;
 }
 
+export type HarmCategory =
+  | "hate"
+  | "harassment"
+  | "sexual"
+  | "violence"
+  | "self_harm"
+  | "dangerous"
+  | "historical_tragedy"
+  | "political"
+  | "territorial_cultural"
+  | "scam"
+  | "other";
+
+export interface SafeguardFinding {
+  category: HarmCategory;
+  severity: "block" | "warn";
+  location: "slide" | "caption" | "hashtags" | "image";
+  slide_index?: number | null;
+  excerpt: string;
+  rule: string;
+  explanation: string;
+  fix?: string;
+}
+
+/** The Safeguard's verdict, the one binding check. "block" means nobody can approve this Deck. */
+export interface SafeguardVerdict {
+  decision: "allow" | "block";
+  summary: string;
+  findings: SafeguardFinding[];
+  checked_by: ("rules" | "model")[];
+  model_decision?: "allow" | "block" | null; // what the model said on its own; null if it didn't run
+  model_error?: string | null;
+  policy_version: string;
+  content_hash: string;
+  checked_at?: string | null;
+}
+
+/** A caption edit the Safeguard refused. The Deck keeps its last allowed caption. */
+export interface BlockedEdit {
+  caption: string;
+  verdict: SafeguardVerdict;
+}
+
 export interface Job {
   id: string;
   prompt: string;
@@ -72,6 +116,8 @@ export interface Job {
   verification?: VerificationReport | null;
   deck?: CardDeck | null;
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
+  safeguard?: SafeguardVerdict | null;
+  blocked_edit?: BlockedEdit | null;
   published_url?: string | null;
   error?: string | null;
   slide_urls?: string[]; // rendered JPEGs: short-lived signed links relative to API_URL (/assets/{org}/{id}/slide-NN.jpg?exp=…&sig=…)
@@ -111,7 +157,7 @@ export interface Metric {
   delta: string;
 }
 
-export type PipelineStepState = "done" | "running" | "pending" | "failed";
+export type PipelineStepState = "done" | "running" | "pending" | "failed" | "skipped";
 
 export interface PipelineStep {
   name: string;

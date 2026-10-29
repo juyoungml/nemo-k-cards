@@ -84,7 +84,7 @@ async def test_each_stage_is_one_checkpointed_step(org, no_network):
     await orchestrator.run_job(org, job.id)
     assert store.get_job(org, job.id).status == JobStatus.READY_FOR_REVIEW
     names = await asyncio.to_thread(step_names, org, job.id)
-    assert names == ["research", "verify", "photos", "copy", "stock", "render", "qa", "review"]
+    assert names == ["research", "verify", "photos", "copy", "stock", "render", "qa", "review", "safeguard"]
     assert await workflow_done(org, job.id) == "SUCCESS"
     # Checkpoints are plain JSON and small: the Job document holds the large outputs (deck, briefs, log).
     with store.system() as c:
@@ -139,7 +139,7 @@ async def test_restart_resumes_at_the_interrupted_stage_without_redoing_finished
 
     assert done.status == JobStatus.READY_FOR_REVIEW, done.error
     assert calls == {"research": 1, "verify": 1, "photos": 1, "copy": 1, "stock": 1,
-                     "render": 2, "qa": 1, "review": 1}
+                     "render": 2, "qa": 1, "review": 1, "safeguard": 1}
     assert any("cut off by a server restart" in line.message for line in done.log)
     assert len(done.slide_urls) == len(done.deck.slides)
     assert await workflow_done(org, job.id) == "SUCCESS"
@@ -178,7 +178,7 @@ async def test_each_organization_runs_one_job_at_a_time_without_blocking_the_oth
             span = spans.setdefault(s.job.id, [time.monotonic(), 0.0])
             await asyncio.sleep(0.15)
             span[1] = time.monotonic()
-            if name == "review":
+            if name == orchestrator.STAGES[-1][0]:
                 s.job.status = JobStatus.READY_FOR_REVIEW
         return run
     for name in orchestrator.STAGE_FUNCS:

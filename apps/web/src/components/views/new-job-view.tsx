@@ -22,7 +22,7 @@ function StepDot({ step, n }: { step: PipelineStep; n: number }) {
         step.state === "done" && "bg-success text-white",
         step.state === "running" && "animate-pulse bg-primary text-white",
         step.state === "failed" && "bg-destructive text-white",
-        step.state === "pending" && "bg-muted text-muted-foreground",
+        (step.state === "pending" || step.state === "skipped") && "bg-muted text-muted-foreground",
       )}
     >
       {step.state === "done" ? <Check className="size-3.5" strokeWidth={3} /> : step.state === "failed" ? <X className="size-3.5" strokeWidth={3} /> : n}
@@ -157,7 +157,7 @@ export function NewJobView() {
                 <li key={s.name} className="flex gap-3 py-2.5">
                   <StepDot step={s} n={i + 1} />
                   <div className="space-y-0.5">
-                    <p className={cn("text-sm", s.state === "pending" ? "text-muted-foreground" : "font-semibold")}>{s.name}</p>
+                    <p className={cn("text-sm", s.state === "pending" || s.state === "skipped" ? "text-muted-foreground" : "font-semibold")}>{s.name}</p>
                     <p className="text-xs text-muted-foreground">
                       {s.where}
                       {s.note && `  ·  ${s.note}`}
