@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 from dbos import DBOS, SetWorkflowID, WorkflowSerializationFormat
 
-from app import audit, instagram_accounts, posts, store
+from app import assets, audit, deck_versions, instagram_accounts, posts, store
 from app.config import settings
 from app.pipeline import durable, orchestrator
 from app.schemas import Job, JobStatus, LogLine, Post, PostProgress
@@ -198,9 +198,16 @@ async def _prepare(org_id: UUID, p: dict) -> dict:
     if not job or not job.deck:
         return _out(await asyncio.to_thread(_fail, org_id, p, "the Deck is gone", expect={"queued"}))
     mode = p["mode"]
-    paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
+    pinned = p.get("deck_version")
+    if pinned is not None and (job.deck_version != pinned or job.safeguard_pending):
+        # Edited after approval (#19): what was approved is not what would be posted. Nothing was uploaded.
+        return _out(await asyncio.to_thread(
+            _fail, org_id, p, f"version {pinned} was approved, but the Deck is at version {job.deck_version} now "
+                              "(edited after approval); review it and approve again", expect={"queued"},
+            job_status=JobStatus.READY_FOR_REVIEW, label="Edited after approval"))
+    paths = assets.slide_files(job)  # the approved version's own files (#19)
     r = orchestrator.Run(org_id, job)
-    ok, why = await orchestrator.safeguard_before_publish(r, p["caption"], mode, paths, _by(p))
+    ok, why = await orchestrator.safeguard_before_publish(r, mode, paths, _by(p))
     if ok:
         n_block = sum(i.severity == "block" for i in job.issues)
         r.step("publish", "running", f"publishing ({mode})")
@@ -422,15 +429,18 @@ async def _reconcile(org_id: UUID, p: dict) -> dict:
 
 # ---------------------------------------------------------------- starting, restarting
 
-def create(org_id: UUID, job: Job, *, mode: str, by: dict, account: dict | None, caption: str | None,
+def create(org_id: UUID, job: Job, *, mode: str, by: dict, account: dict | None,
            deck_version: int | None = None, audits: list[audit.Entry] = ()) -> Post:
     """Approval: a `queued` Post, the Job moved to PUBLISHING and the approval's audit events, in one transaction.
+    The Post posts exactly the Deck version it pins (#19), caption included: nothing is edited at Approve, so the
+    Post's own `caption` stays NULL (the Deck's). Version 1 is stored here if it never was.
     Raises posts.Taken when a Post of this Job is still open, or this Deck is already on that account."""
     with store.tenant(org_id, user_id=UUID(by["id"])) as c:
+        deck_versions.ensure_initial(c, job)
         post = posts.insert(c, job_id=job.id, mode=mode, approved_by=UUID(by["id"]), approved_by_email=by["email"],
                             account_id=account["id"] if account else None,
                             ig_user_id=account["ig_user_id"] if account else None,
-                            username=account["username"] if account else None, caption=caption,
+                            username=account["username"] if account else None, caption=None,
                             deck_version=deck_version)
         job.status = JobStatus.PUBLISHING
         job.error = None
@@ -458,8 +468,8 @@ async def run(org_id: UUID, post_id: UUID) -> str:
         return await post_workflow(str(org_id), str(post_id))
 
 
-async def publish_now(org_id: UUID, job_id: str, caption: str | None = None, mode: str = "mock",
-                      account: dict | None = None, by: dict | None = None) -> Post | None:
+async def publish_now(org_id: UUID, job_id: str, mode: str = "mock", account: dict | None = None,
+                      by: dict | None = None) -> Post | None:
     """Approve-and-publish without the route (tests, scripts): create the Post and run it to the end. `account`:
     {"id", "ig_user_id", "username"} of a connected account."""
     job = await asyncio.to_thread(store.get_job, org_id, job_id)
@@ -473,8 +483,8 @@ async def publish_now(org_id: UUID, job_id: str, caption: str | None = None, mod
     approved = audit.Entry(actor=UUID(by["id"]), actor_email=by.get("email", ""), action="deck.approved",
                            target=job.id, detail={"mode": mode, "account": f"@{account['username']}" if account
                                                   else None})
-    post = await asyncio.to_thread(lambda: create(org_id, job, mode=mode, by=by, account=account, caption=caption,
-                                                  audits=[approved]))
+    post = await asyncio.to_thread(lambda: create(org_id, job, mode=mode, by=by, account=account,
+                                                  deck_version=job.deck_version, audits=[approved]))
     await run(org_id, post.id)
     return await asyncio.to_thread(posts.get, org_id, post.id)
 

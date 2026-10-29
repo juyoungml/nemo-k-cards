@@ -142,7 +142,7 @@ async def test_dryrun_publish_gives_instagram_links_that_expire_and_die_after(si
         return "17890000000000123"
     monkeypatch.setattr(publisher, "build_carousel", instagram)
 
-    post = await publishing.publish_now(a.org_id, job.id, None, "dryrun", account=connect_account(a.org_id))
+    post = await publishing.publish_now(a.org_id, job.id, "dryrun", account=connect_account(a.org_id))
 
     assert seen["during"] == [200, 200, 200]
     assert (post.state, post.creation_id, post.attempts) == ("container_ready", "17890000000000123", 0)
@@ -159,7 +159,7 @@ async def test_mock_publish_exposes_nothing(client, monkeypatch):
     job = _job_with_slides(client.org_id)
     called = []
     monkeypatch.setattr(image_host, "exposed", lambda *a, **k: called.append(a))
-    await publishing.publish_now(client.org_id, job.id, None, "mock")
+    await publishing.publish_now(client.org_id, job.id, "mock")
     assert called == [] and store.get_job(client.org_id, job.id).status == JobStatus.PUBLISHED
 
 

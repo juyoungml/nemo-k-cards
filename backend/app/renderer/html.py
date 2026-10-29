@@ -71,10 +71,13 @@ MEASURE_JS = """
   const sizes = [...el.querySelectorAll('*'), el]
     .filter(n => [...n.childNodes].some(c => c.nodeType === 3 && c.textContent.trim()))
     .map(n => parseFloat(getComputedStyle(n).fontSize));
+  const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+  const inner = el.scrollHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   return { selector: el.dataset.qa,
            overflow: el.scrollHeight > el.clientHeight + 8 || el.scrollWidth > el.clientWidth + 8
                      || r.bottom > 1350 - 40 || r.right > 1080,
-           font_px: hasText ? Math.min(...sizes) : 999 };
+           font_px: hasText ? Math.min(...sizes) : 999,
+           lines: hasText ? Math.max(1, Math.round(inner / lh)) : 0 };
 })
 """
 
@@ -196,25 +199,37 @@ class HtmlRenderer:
 
     async def render(self, deck: CardDeck, out_dir: Path,
                      briefs: list[EventBrief] | None = None) -> list[RenderedSlide]:
+        by_id = {b.id: b for b in (briefs or [])}
+        pages = [(s.index, f"slide-{s.index:02d}", self.html(deck, s, by_id))
+                 for s in sorted(deck.slides, key=lambda s: s.index)]
+        return await self.render_pages(pages, out_dir)
+
+    async def render_pages(self, pages: list[tuple[int, str, str]], out_dir: Path, *,
+                           screenshot: bool = True) -> list[RenderedSlide]:
+        """Screenshot each (slide index, file stem, HTML) to `<stem>.jpg`, with `<stem>.html` next to it, and measure
+        it for QA. `render` does every slide; a Deck edit (#19) passes only the slides whose HTML changed.
+        `screenshot=False`: measure only (the Deck editor's fit check); `path` is then the HTML file."""
         from playwright.async_api import async_playwright
 
-        by_id = {b.id: b for b in (briefs or [])}
         out_dir = out_dir.resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         rendered: list[RenderedSlide] = []
+        if not pages:
+            return rendered
         async with async_playwright() as p:
             browser = await p.chromium.launch()
             page = await browser.new_page(viewport={"width": 1080, "height": 1350}, device_scale_factor=1)
             await page.route("**/*", offline)
-            for slide in sorted(deck.slides, key=lambda s: s.index):
-                html_path = out_dir / f"slide-{slide.index:02d}.html"
-                html_path.write_text(self.html(deck, slide, by_id), encoding="utf-8")
+            for index, stem, html in pages:
+                html_path = out_dir / f"{stem}.html"
+                html_path.write_text(html, encoding="utf-8")
                 await page.goto(html_path.as_uri())
                 await page.evaluate("document.fonts.ready")
                 await page.evaluate(FIT_JS)
                 measures = [TextMeasure(**m) for m in await page.evaluate(MEASURE_JS)]
-                jpg = out_dir / f"slide-{slide.index:02d}.jpg"
-                await page.screenshot(path=str(jpg), type="jpeg", quality=90)
-                rendered.append(RenderedSlide(index=slide.index, path=jpg, measures=measures))
+                jpg = out_dir / f"{stem}.jpg"
+                if screenshot:
+                    await page.screenshot(path=str(jpg), type="jpeg", quality=90)
+                rendered.append(RenderedSlide(index=index, path=jpg if screenshot else html_path, measures=measures))
             await browser.close()
         return rendered

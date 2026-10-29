@@ -47,7 +47,7 @@ class Taken(Exception):
 
 
 def insert(c: Connection, *, job_id: str, mode: str, approved_by: UUID, approved_by_email: str,
-           account_id: UUID | None, ig_user_id: str | None, username: str | None, caption: str | None,
+           account_id: UUID | None, ig_user_id: str | None, username: str | None, caption: str | None = None,
            deck_version: int | None = None) -> Post:
     """A new `queued` Post, on the caller's open tenant transaction (with the approval's audit event)."""
     try:

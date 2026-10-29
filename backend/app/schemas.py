@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, Field, HttpUrl, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 
 class JobStatus(StrEnum):
@@ -205,6 +205,7 @@ class SlideFact(BaseModel):
     value: str                             # as the slide shows it
     recorded: bool = True                  # False: no per-fact source was recorded; these are the event's sources
     sources: list[SlideFactSource] = Field(default_factory=list)
+    edited: bool = False                   # a person typed this in a Deck edit (#19): its old sources no longer apply
 
 
 class SlideSources(BaseModel):
@@ -217,6 +218,7 @@ class SlideSources(BaseModel):
     links: list[SlideFactSource] = Field(default_factory=list)  # links the copywriter attached to the slide
     unsourced: list[str] = Field(default_factory=list)          # claims in the slide's text no brief supports
     general: bool = False                  # tips: general know-how, not expected to trace to an event
+    edited: list[str] = Field(default_factory=list)  # "heading" / "body" a person changed (#19): re-check sources
     note: str | None = None
 
 
@@ -282,12 +284,7 @@ class SafeguardVerdict(SafeguardModelOutput):
     policy_version: str = ""         # hash of the policy files the Deck was checked against
     content_hash: str = ""           # hash of the slide text, caption and images that were checked
     checked_at: datetime | None = None
-
-
-class BlockedEdit(BaseModel):
-    """A caption edit the Safeguard refused. The Deck keeps its last allowed caption and stays approvable."""
-    caption: str
-    verdict: SafeguardVerdict
+    deck_version: int | None = None  # the Deck version an edit re-check vouches for (#19); None: the pipeline's
 
 
 # ---------------------------------------------------------------- job (view model the Admin reads)
@@ -365,7 +362,6 @@ class Job(BaseModel):
     deck: CardDeck | None = None
     issues: list[Issue] = Field(default_factory=list)   # QA + review merged for display
     safeguard: SafeguardVerdict | None = None            # binding: "block" means nobody can approve it
-    blocked_edit: BlockedEdit | None = None              # last caption edit the Safeguard refused, if any
     slide_urls: list[str] = Field(default_factory=list)  # /assets/{job_id}/slide-NN.jpg
     error: str | None = None
     # Publishing is a Post's (#21): `published_url` and `publish_progress` of older documents are ignored on load
@@ -377,6 +373,13 @@ class Job(BaseModel):
     material: list[MaterialRef] = Field(default_factory=list)  # Source material (#20); empty on older Jobs
     # View only (#25): where each slide's facts came from, computed by the API on the way out, never stored.
     slide_sources: list[SlideSources] = Field(default_factory=list)
+    # Deck versions (#19): the version `deck` and `slide_urls` show (Jobs from before versions are version 1), and
+    # whether the Safeguard is still checking it after an edit (it can't be approved until the check passes).
+    deck_version: int = 1
+    safeguard_pending: bool = False
+    # Which text a person has changed on each slide (current index → "heading" / "body"), so fact sources (#25) say
+    # "edited, re-check sources" instead of vouching for words the research never saw.
+    edited_text: dict[int, list[Literal["heading", "body"]]] = Field(default_factory=dict)
 
 
 Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend
@@ -392,7 +395,13 @@ class CreateJobRequest(BaseModel):
 
 
 class ApproveRequest(BaseModel):
-    caption: str | None = None
+    """Approve one Deck version for posting. Nothing about the Deck is edited here: what is posted is exactly the
+    pinned version (#19). Unknown fields are refused, so a client still sending a caption learns it is not used."""
+    model_config = ConfigDict(extra="forbid")
+
+    # The Deck version being approved: approval pins exactly this one. Refused (409) if the Deck has been edited
+    # since the Approver loaded it.
+    deck_version: int = Field(ge=1)
     mode: Literal["mock", "dryrun", "graph"] | None = None
     # The Instagram account to post to (one of the Organization's connected accounts). May be left out when the
     # Organization has exactly one, or none for a mock post.
@@ -405,6 +414,45 @@ class ResolvePostRequest(BaseModel):
     """A person checked Instagram for an unknown Post."""
     posted: bool
     permalink: str | None = Field(None, max_length=300, pattern=r"^https://(www\.)?instagram\.com/\S+$")
+
+
+class SlideEdit(BaseModel):
+    """One slide in an edited Deck, in its new position. `from_index` is its index in the base version."""
+    from_index: int = Field(ge=0)
+    heading: str = Field(min_length=1, max_length=200)
+    body: str = Field("", max_length=2000)
+
+
+class DeckEdit(BaseModel):
+    """A save in the Deck editor (#19): every slide in its new order, the caption text and the hashtags.
+    `base_version` is the version the editor started from; a save on top of a newer version is refused.
+    Omitted parts stay as they are. `allow_overflow`: save even though text overflows (after the warning)."""
+    base_version: int = Field(ge=1)
+    slides: list[SlideEdit] | None = Field(None, min_length=6, max_length=8)
+    caption: str | None = Field(None, max_length=2200)  # the caption without its hashtags
+    hashtags: list[str] | None = Field(None, max_length=5)
+    allow_overflow: bool = False
+
+
+class FitCheck(BaseModel):
+    """The Deck editor asks whether one slide's text fits, as typed (not saved): `slides` as in `DeckEdit`."""
+    base_version: int = Field(ge=1)
+    slides: list[SlideEdit] = Field(min_length=6, max_length=8)
+    position: int = Field(ge=0)
+
+
+class FitBlock(BaseModel):
+    selector: str   # the template's text block, e.g. "event.heading"
+    lines: int      # lines it takes after auto-fit
+    font_px: float  # smallest font size after auto-fit
+    overflow: bool
+
+
+class FitResult(BaseModel):
+    position: int
+    fits: bool                       # no block overflows (the same rule as visual QA)
+    small_text: bool                 # some text shrank below the 30px floor (QA warns)
+    blocks: list[FitBlock] = Field(default_factory=list)
 
 
 class RejectRequest(BaseModel):

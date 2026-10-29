@@ -21,9 +21,8 @@ Instagram account, and a deleted post is still screenshotted.
   rule hit.
 - Fail closed: if the model errors or times out, the Deck is blocked and the explanation says so.
 - The verdict is tied to a hash of everything that will be posted: slide text, caption, image choices and the
-  rendered slides. If the Approver edits the caption, the edit is checked on a copy (rules at Approve, then the
-  full check before upload). A refused edit is recorded and shown, and the Deck keeps its last allowed caption, so
-  one bad edit never kills a good Deck. A Job without a verdict can't be approved.
+  rendered slides. Anything that differs from what was checked is checked again before upload. A Job without a
+  verdict can't be approved. (Editing at Approve was removed with #19: a change is a Deck edit, see the addendum.)
 - A real post (`graph`) of content the model hasn't checked is refused on a server that can't run the model
   (`DEMO_MODE=fixture`). Mock and dry-run publishes may rely on the phrase rules alone.
 - Every block carries an explanation for the Approver: a summary, plus for each finding the exact excerpt,
@@ -40,3 +39,16 @@ Instagram account, and a deleted post is still screenshotted.
 - The stage list changed, so the pipeline's `WORKFLOW_VERSION` went to 2: a Job still running under version 1 at a
   restart is marked failed (ADR 0002), and Decks that reached review before this change have no verdict and must be
   regenerated before they can be published.
+
+## Addendum: Deck edits (#19, 2026-10-29)
+
+- Editing a Deck in Review (slide text, order, caption, hashtags) makes a new Deck version and drops the old verdict.
+  The phrase rules run on save, so a blocked phrase is never saved, and they explain it the same way. The full check
+  (rules and model) then runs on the new version as a durable workflow. Until it allows exactly that version
+  (`SafeguardVerdict.deck_version` plus the content hash), Approve refuses it.
+- If that check blocks an edited version, no Role can approve it, with or without an Override. The Deck stays in
+  Review instead of ending `BLOCKED`, so an Editor can fix the text and save again, which starts a new check: one bad
+  edit doesn't kill a good Deck. A block from the pipeline still ends the Job `BLOCKED`.
+- Approve edits nothing. It pins a Deck version, and what is posted is exactly that version (slides, caption,
+  hashtags). The caption field at Approve, and the refused-caption record (`blocked_edit`), are gone.
+

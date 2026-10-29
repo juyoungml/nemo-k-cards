@@ -98,7 +98,45 @@ export interface CardDeck {
   job_id: string;
   title: string;
   caption: string;
+  hashtags?: string[];
   slides: Slide[];
+}
+
+/** One saved state of a Deck (GLOSSARY "Deck version"). Every edit makes a new one; approval pins exactly one. */
+export interface DeckVersion {
+  version: number;
+  deck: CardDeck;
+  rerendered: number[]; // slides rendered for this version; the others reuse earlier files
+  changes: DeckChange[];
+  edited_by: string | null; // null: version 1, the pipeline's
+  edited_by_email: string | null;
+  created_at: string;
+  current: boolean;
+}
+
+export interface DeckChange {
+  field: "order" | "slide.heading" | "slide.body" | "caption" | "hashtags";
+  slide?: number;
+  from_slide?: number;
+  before: unknown;
+  after: unknown;
+}
+
+/** Does one slide's text fit, as typed? (POST /jobs/{id}/fit, measured by the renderer after auto-fit.) */
+export interface FitResult {
+  position: number;
+  fits: boolean;
+  small_text: boolean; // some text shrank below the 30px floor
+  blocks: { selector: string; lines: number; font_px: number; overflow: boolean }[];
+}
+
+/** A save in the Deck editor: every slide in its new order (`from_index` = its index in `base_version`). */
+export interface DeckEdit {
+  base_version: number;
+  slides?: { from_index: number; heading: string; body: string }[];
+  caption?: string; // without its hashtags
+  hashtags?: string[];
+  allow_overflow?: boolean;
 }
 
 export interface Issue {
@@ -143,12 +181,7 @@ export interface SafeguardVerdict {
   policy_version: string;
   content_hash: string;
   checked_at?: string | null;
-}
-
-/** A caption edit the Safeguard refused. The Deck keeps its last allowed caption. */
-export interface BlockedEdit {
-  caption: string;
-  verdict: SafeguardVerdict;
+  deck_version?: number | null; // the edited Deck version this verdict vouches for; null: the pipeline's
 }
 
 export interface Job {
@@ -161,7 +194,6 @@ export interface Job {
   deck?: CardDeck | null;
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
   safeguard?: SafeguardVerdict | null;
-  blocked_edit?: BlockedEdit | null;
   error?: string | null;
   slide_urls?: string[]; // rendered JPEGs: short-lived signed links relative to API_URL (/assets/{org}/{id}/slide-NN.jpg?exp=…&sig=…)
   // Publishing lives on Posts (#21): GET /posts?job_id=… (the Job no longer carries published_url / publish_progress).
@@ -171,6 +203,8 @@ export interface Job {
   log?: LogLine[];
   material?: MaterialRef[]; // Source material attached when the Job started (or carried over from its Brainstorm)
   slide_sources?: SlideSources[]; // where each slide's facts came from (#25); GET /jobs/{id} and SSE only, not lists
+  deck_version?: number; // the version `deck` and `slide_urls` show (1 when absent)
+  safeguard_pending?: boolean; // the safeguard is checking an edited version: it can't be approved yet
 }
 
 export type LinkStatus = LinkCheck["status"] | "unchecked";
@@ -195,6 +229,7 @@ export interface SlideFact {
   value: string;
   recorded: boolean; // false: no per-fact source was recorded, these are the event's own sources
   sources: SlideFactSource[];
+  edited?: boolean; // a person typed this in a Deck edit (#19): re-check its sources
 }
 
 /** Where the facts on one slide came from (#25). Computed by the API on the way out. */
@@ -207,6 +242,7 @@ export interface SlideSources {
   links: SlideFactSource[]; // links attached to the slide itself
   unsourced: string[]; // claims in the slide's text that no brief supports
   general: boolean; // tips: general know-how
+  edited?: ("heading" | "body")[]; // text a person changed in a Deck edit (#19): its sources need re-checking
   note?: string | null;
 }
 

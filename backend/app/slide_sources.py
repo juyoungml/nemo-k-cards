@@ -15,6 +15,9 @@ Deterministic and host-side, from what the Job already holds; no agent is asked:
   so the review page and the golden set agree on what counts as unsupported. Tips slides hold general know-how
   (last trains, T-money), so theirs are marked `general` instead of being treated as a problem.
 
+Text a person changed in a Deck edit (#19, `Job.edited_text`) is flagged `edited` (slide) and, for an event
+slide's heading, the title fact loses the research's sources: the reviewer re-checks it.
+
 Computed on the way out of the API, never stored: it always matches the Deck's current text and the latest link
 check, and Jobs stored before #20 or #25 get it too.
 """
@@ -125,6 +128,11 @@ def for_job(job: Job) -> list[SlideSources]:
             s.note = "This slide's event was excluded at Verify: none of its links passed the check."
         if b and slide.layout in SHOWN:
             s.facts = _facts(look, b, slide)
+        # Text a person typed in a Deck edit (#19) has no research behind it: never show the old sources for it.
+        s.edited = list(job.edited_text.get(slide.index, []))
+        if "heading" in s.edited and slide.layout == "event":  # the card shows the slide's heading as its title
+            s.facts = [SlideFact(field="title", value=slide.heading, recorded=False, edited=True) if f.field == "title"
+                       else f for f in s.facts]
         # The same corpus the golden set uses: an event slide answers to its own event, others to every event kept.
         corpus = [b] if b and slide.layout == "event" else included
         fails, _ = unsupported_facts(f"{slide.heading}\n{slide.body}", corpus)

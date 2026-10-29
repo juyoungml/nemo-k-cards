@@ -53,6 +53,9 @@ EXPECTED = {
     ("GET", "/jobs"): "viewer",
     ("GET", "/jobs/{job_id}"): "viewer",
     ("GET", "/jobs/{job_id}/events"): "viewer",
+    ("GET", "/jobs/{job_id}/versions"): "viewer",
+    ("POST", "/jobs/{job_id}/versions"): "editor",
+    ("POST", "/jobs/{job_id}/fit"): "editor",
     ("GET", "/brainstorms/{brainstorm_id}"): "viewer",
     ("GET", "/metrics"): "viewer",
     ("GET", "/instagram-accounts"): "viewer",
@@ -165,12 +168,12 @@ def test_viewer_cannot_edit_editor_cannot_approve_approver_cannot_invite(team, n
     assert team["viewer"].patch(f"/brainstorms/{board['id']}", json={"tones": ["x"]}).status_code == 403
     assert team["viewer"].get(f"/brainstorms/{board['id']}").status_code == 200  # Viewer sees everything
     assert team["editor"].patch(f"/brainstorms/{board['id']}", json={"tones": ["x"]}).status_code == 200
-    assert team["editor"].post(f"/jobs/{job.id}/approve", json={}).status_code == 403
+    assert team["editor"].post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 403
     assert team["editor"].post(f"/jobs/{job.id}/reject", json={"reason": "no"}).status_code == 403
     assert store.get_job(team["admin"].org_id, job.id).status == JobStatus.READY_FOR_REVIEW
     assert team["approver"].post("/orgs/current/members",
                                  json={"email": "x@example.com", "role": "viewer"}).status_code == 403
-    assert team["approver"].post(f"/jobs/{job.id}/approve", json={}).status_code == 200
+    assert team["approver"].post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 200
 
 
 def test_self_approval_is_allowed(team, no_background):
@@ -180,7 +183,7 @@ def test_self_approval_is_allowed(team, no_background):
     job = store.get_job(c.org_id, jid)
     job.status = JobStatus.READY_FOR_REVIEW
     store.save_job(c.org_id, allowed(job))
-    assert c.post(f"/jobs/{jid}/approve", json={}).status_code == 200
+    assert c.post(f"/jobs/{jid}/approve", json={"deck_version": 1}).status_code == 200
 
 
 def test_role_is_read_per_request(team):
@@ -200,11 +203,12 @@ WARN = Issue(severity="warn", category="tone", message="a bit salesy")
 def test_approving_with_blocking_issues_needs_an_override_reason(team, no_background):
     c = team["approver"]
     job = _ready_job(c.org_id, [BLOCK, WARN])
-    for body in ({}, {"override_reason": ""}, {"override_reason": "   "}):
+    for body in ({"deck_version": 1}, {"deck_version": 1, "override_reason": ""},
+                 {"deck_version": 1, "override_reason": "   "}):
         r = c.post(f"/jobs/{job.id}/approve", json=body)
         assert r.status_code == 422 and "Override" in r.json()["detail"]
     assert no_background == [] and store.get_job(c.org_id, job.id).status == JobStatus.READY_FOR_REVIEW
-    r = c.post(f"/jobs/{job.id}/approve", json={"override_reason": "Checked the date with the venue by phone."})
+    r = c.post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "override_reason": "Checked the date with the venue by phone."})
     assert r.status_code == 200 and len(no_background) == 1
     events = [e for e in team["admin"].get("/audit").json() if e["target"] == job.id]
     assert [e["action"] for e in events] == ["deck.overridden"]
@@ -217,13 +221,13 @@ def test_approving_with_blocking_issues_needs_an_override_reason(team, no_backgr
 def test_warnings_alone_need_no_override(team, no_background):
     c = team["approver"]
     job = _ready_job(c.org_id, [WARN])
-    assert c.post(f"/jobs/{job.id}/approve", json={}).status_code == 200
+    assert c.post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 200
     assert [e["action"] for e in team["admin"].get("/audit").json() if e["target"] == job.id] == ["deck.approved"]
 
 
 def test_override_reason_has_a_limit(team, no_background):
     job = _ready_job(team["approver"].org_id, [BLOCK])
-    assert team["approver"].post(f"/jobs/{job.id}/approve", json={"override_reason": "x" * 2001}).status_code == 422
+    assert team["approver"].post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "override_reason": "x" * 2001}).status_code == 422
 
 
 def test_existing_org_creator_still_gets_one_organization(sign_in):

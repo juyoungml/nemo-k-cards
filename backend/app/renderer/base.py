@@ -11,6 +11,7 @@ class TextMeasure(BaseModel):
     overflow: bool
     fallback_fonts: list[str] = []
     font_px: float
+    lines: int = 0  # lines of text the block takes after auto-fit (0: no text)
 
 
 class RenderedSlide(BaseModel):

@@ -132,7 +132,7 @@ QUEUED → RESEARCHING → VERIFYING → WRITING → RENDERING → QA → REVIEW
                                                 ──reject────▶ REJECTED
                                                 ──regenerate▶ WRITING   (keeps briefs + verification)
 PUBLISHING ──safeguard re-check blocks the Deck──▶ BLOCKED
-PUBLISHING ──safeguard re-check blocks a caption edit──▶ READY_FOR_REVIEW (original caption kept, `blocked_edit` set)
+READY_FOR_REVIEW ──Deck edit (#19)──▶ READY_FOR_REVIEW (new Deck version; `safeguard_pending` until its check passes)
 any stage error ─────────────────────▶ FAILED (error message)
 ```
 - The Safeguard stage runs while the status is `REVIEWING`. `BLOCKED` is terminal for approval.
@@ -189,13 +189,12 @@ class QAReport / ReviewVerdict: unchanged
                          + checks: list[CheckResult]       # Review chips
                          + issues: list[Issue]             # QA + review merged (frontend already uses this)
                          + safeguard?: SafeguardVerdict    # binding allow/block; "block" → BLOCKED
-                         + blocked_edit?: BlockedEdit      # last caption edit the Safeguard refused
+                         + deck_version: int = 1 · safeguard_pending: bool   # Deck versions (#19)
 + class SafeguardFinding: category(HarmCategory) · severity("block"|"warn") · location("slide"|"caption"|"hashtags"|"image")
                          slide_index? · excerpt · rule · explanation · fix
 + class SafeguardModelOutput: decision("allow"|"block") · summary · findings   # the safeguard agent's output
 + class SafeguardVerdict(SafeguardModelOutput): checked_by["rules"|"model"] · model_decision? · model_error? · policy_version
                          content_hash (slide text, caption, image choices, rendered slides) · checked_at
-+ class BlockedEdit:     caption · verdict: SafeguardVerdict
 HarmCategory = hate|harassment|sexual|violence|self_harm|dangerous|historical_tragedy|political|territorial_cultural|scam|other
                          + slide_urls: list[str]           # /assets/... for preview
                          + published_at?
@@ -236,7 +235,7 @@ Base `http://localhost:8000` (`NEXT_PUBLIC_API_URL`). JSON. Errors: `{"error": c
 | GET | `/jobs/{id}/events` | SSE of `JobEvent` | replays history, then live; closes on terminal state |
 | POST | `/jobs/{id}/regenerate` | `{instruction?}` → `Job` | from READY_FOR_REVIEW/REJECTED/BLOCKED → WRITING (not built yet: the Admin starts a new Job with the same prompt) |
 | POST | `/jobs/{id}/reject` | `{reason}` → `Job` | from READY_FOR_REVIEW or BLOCKED |
-| POST | `/jobs/{id}/approve` | `{caption, mode?:"mock"\|"dryrun"\|"graph", override_reason?}` → `Job` | **only publish path**, Approver Role; 409 unless READY_FOR_REVIEW, and 409 if the Safeguard blocked or never checked the Deck, even with an `override_reason` and for every Role (refusal audited as `deck.approve_refused`); 409 if a credential leak was found, or for a `graph` post of an edited caption on a `DEMO_MODE=fixture` server; an edited caption that hits a blocked phrase → 422 + `blocked_edit` (audited as `safeguard.edit_blocked`); blocking Issues need `override_reason` (an Override); re-runs PII + secret + hashtag checks on the edited caption. Any content that differs from what the Safeguard checked is checked again before upload |
+| POST | `/jobs/{id}/approve` | `{deck_version, mode?:"mock"\|"dryrun"\|"graph", override_reason?}` → `Job` | **only publish path**, Approver Role; pins `deck_version` and posts exactly that version (no edits at Approve; other fields → 422); 409 unless READY_FOR_REVIEW, if the version is stale, while the Safeguard is still checking an edited version, or if the Safeguard blocked or never checked this version, even with an `override_reason` and for every Role (refusal audited as `deck.approve_refused`); 409 if a credential leak was found; blocking Issues need `override_reason` (an Override). Any content that differs from what the Safeguard checked is checked again before upload |
 | GET | `/assets/{job_id}/slide-NN.jpg` | image/jpeg | exists (StaticFiles); public via tunnel for Graph API |
 | POST | `/brainstorms` | `{}` → `Brainstorm` | |
 | GET | `/brainstorms/{id}` | → `Brainstorm` | |
@@ -338,7 +337,7 @@ brainstorm/  draft.json (Mangwon Night Market) + page.txt + turns.json
 | 11 | Hashtags ≤ 5 (SPEC §6 updated) |
 | 12 | Secrets: used via OpenShell providers, never read by the agent; secret scanner on all outputs |
 | 13 | Policy `binaries`: real paths (`/usr/local/bin/claude` — Claude Code ships a native binary, no Node), `enforcement: enforce` everywhere, `DISABLE_AUTOUPDATER=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` |
-| 14 | Safeguard is a hard gate ([ADR 0004](adr/0004-safeguard-hard-gate.md)): host phrase rules + the `safeguard` agent decide allow/block for harmful content (text, hashtags, images) against `policies/content/safeguard_policy.md` + `sensitive_topics.yaml`. A block has no override; the gate fails closed; the verdict is bound to a hash of the posted content, and a refused caption edit leaves the Deck on its last allowed caption |
+| 14 | Safeguard is a hard gate ([ADR 0004](adr/0004-safeguard-hard-gate.md)): host phrase rules + the `safeguard` agent decide allow/block for harmful content (text, hashtags, images) against `policies/content/safeguard_policy.md` + `sensitive_topics.yaml`. A block has no override; the gate fails closed; the verdict is bound to a hash of the posted content and to the Deck version; Approve edits nothing (edits are Deck versions, #19) |
 
 ## 12. Build order & owners (SPEC §13 roles)
 

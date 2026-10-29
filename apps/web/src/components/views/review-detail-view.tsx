@@ -3,6 +3,7 @@
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
+import { DeckEditor } from "@/components/deck-editor";
 import { LoadState, PageHeader, Panel } from "@/components/page";
 import { PostsList, PublishProgress } from "@/components/publish-progress";
 import { PublishToast } from "@/components/publish-toast";
@@ -146,6 +147,8 @@ export function ReviewDetailView({ id }: { id: string }) {
           <PostsList posts={posts ?? []} />
 
           <SafeguardPanel job={job} onJump={setSlide} />
+
+          <DeckEditor job={job} onChange={setData} onSelect={setSlide} />
 
           <Panel title="Automated checks" description="Advisory: you decide on these. Only the safeguard can block publishing.">
             <div className="flex flex-wrap gap-2">{CHECKS.map((c) => checkBadge(job, c.category, c.label))}</div>

@@ -105,8 +105,10 @@ function FactRow({ f }: { f: SlideFact }) {
         <span className="min-w-0 text-[13px] break-words">{f.value}</span>
       </div>
       <div className="mt-2 space-y-1.5 sm:pl-19">
-        {!f.recorded && <p className="text-[11px] text-muted-foreground">The event&apos;s sources (no source recorded for this fact)</p>}
-        {f.sources.length ? (
+        {!f.recorded && !f.edited && <p className="text-[11px] text-muted-foreground">The event&apos;s sources (no source recorded for this fact)</p>}
+        {f.edited ? (
+          <StatusBadge tone="warning">edited — re-check sources</StatusBadge>
+        ) : f.sources.length ? (
           <ul className="space-y-1.5">
             {f.sources.map((s, i) => (
               <SourceLine key={i} s={s} />
@@ -115,7 +117,7 @@ function FactRow({ f }: { f: SlideFact }) {
         ) : (
           <StatusBadge tone="danger">no source</StatusBadge>
         )}
-        {!backed && f.sources.length > 0 && (
+        {!backed && !f.edited && f.sources.length > 0 && (
           <p className="flex items-center gap-1 font-medium text-warning">
             <TriangleAlert className="size-3.5" /> No working source: check before approving
           </p>
@@ -139,11 +141,10 @@ function summary(s: SlideSources) {
  * Organization's own Source material with the quoted words. Dead, suspicious and unchecked links are marked, and
  * claims in the slide's text that no source supports are listed.
  *
- * Sources describe the text the pipeline wrote. When Deck versions (#19) allow editing slide text, the API
- * recomputes `unsourced` for the new text; facts typed in by a person have no recorded source and should read
- * "edited, re-check sources" rather than inherit the old ones.
+ * Sources describe the text the pipeline wrote. After a Deck edit (#19) the API recomputes `unsourced` for the new
+ * text and flags what a person typed (`edited`): it reads "edited — re-check sources" instead of the old sources.
  */
-export function SlideSourcesPanel({ job, slide }: { job: Job; slide: number }) {
+export function SlideSourcesPanel({ job, slide, embedded = false }: { job: Job; slide: number; embedded?: boolean }) {
   const current = job.deck?.slides[slide];
   const s = current && job.slide_sources?.find((x) => x.slide_index === current.index);
   if (!s) return null;
@@ -152,9 +153,15 @@ export function SlideSourcesPanel({ job, slide }: { job: Job; slide: number }) {
 
   return (
     <Panel
-      title={`Sources · slide ${slide + 1}`}
+      title={embedded ? undefined : `Sources · slide ${slide + 1}`}
       description={s.event_title ? `${s.event_title}: where each fact on this slide came from.` : "Where the facts on this slide came from."}
+      className={embedded ? "border-0 bg-transparent p-0 md:p-0" : undefined}
     >
+      {embedded && (
+        <p className="mb-3 text-xs text-muted-foreground">
+          {s.event_title ? `${s.event_title}: where each fact on this slide came from.` : "Where the facts on this slide came from."}
+        </p>
+      )}
       {!empty && (
         <div className="mb-3 flex flex-wrap gap-2">
           {s.facts.length > 0 && <StatusBadge tone="neutral">{`${s.facts.length} fact${s.facts.length === 1 ? "" : "s"}`}</StatusBadge>}
@@ -169,6 +176,12 @@ export function SlideSourcesPanel({ job, slide }: { job: Job; slide: number }) {
       )}
 
       {s.note && <p className="mb-3 rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">{s.note}</p>}
+      {!!s.edited?.length && (
+        <p className="mb-3 rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
+          Edited — re-check sources: this slide&apos;s {s.edited.join(" and ")} {s.edited.length > 1 ? "were" : "was"} changed by a person after
+          research, so its sources may not cover the new words.
+        </p>
+      )}
 
       {s.facts.length > 0 && (
         <ul className="space-y-2">

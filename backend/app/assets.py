@@ -26,6 +26,7 @@ import math
 import re
 import secrets
 import time
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -37,7 +38,10 @@ from app.schemas import Job, JobStatus
 
 router = APIRouter()
 
-SLIDE = re.compile(r"slide-\d{1,3}\.jpg")  # the only files served; photos and anything else stay host-only
+# The only files served; photos and anything else stay host-only. `slide-NN.jpg` is what the pipeline renders;
+# `slide-NN.<8 hex>.jpg` is a slide re-rendered by a Deck edit (#19), a new name so no version's file is overwritten.
+SLIDE = re.compile(r"slide-\d{1,3}(?:\.[0-9a-f]{8})?\.jpg")
+PIPELINE_SLIDE = re.compile(r"slide-\d{1,3}\.jpg")
 JOB_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 ADMIN_TTL_S = 15 * 60
 # Admin links are rounded to this window so an <img> src stays the same between polls (the browser caches it)
@@ -85,6 +89,16 @@ def for_admin(org_id: UUID, job: Job, now: float | None = None) -> Job:
     exp = admin_exp(now)
     urls = [sign(org_id, job.id, path.rsplit("/", 1)[-1], exp) for path in job.slide_urls]
     return job.model_copy(update={"slide_urls": urls})
+
+
+def slide_files(job: Job) -> list[Path]:
+    """The rendered files of the Job's current Deck version, in slide order: what the Safeguard checks and what is
+    posted. From `slide_urls` (each version names its own files); a Job without them falls back to the pipeline's
+    `slide-NN.jpg` files in its folder."""
+    folder = settings.output_dir / job.id
+    if job.slide_urls:
+        return [folder / u.rsplit("/", 1)[-1] for u in job.slide_urls]
+    return sorted(p for p in folder.glob("slide-*.jpg") if PIPELINE_SLIDE.fullmatch(p.name))
 
 
 @router.get("/assets/{org_id}/{job_id}/{name}", include_in_schema=False)

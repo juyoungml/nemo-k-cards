@@ -25,7 +25,6 @@ const STATUS_NOTE: Partial<Record<Job["status"], string>> = {
 
 export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job) => void }) {
   const router = useRouter();
-  const [caption, setCaption] = useState(job.deck?.caption ?? "");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
@@ -45,14 +44,17 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
   // The Safeguard is binding (ADR 0004): a blocked Deck can't be approved by anyone, Override or not. A Deck
   // without a verdict (made before the Safeguard existed) can't be approved either; the API refuses both.
   const blocked = job.status === "BLOCKED" || job.safeguard?.decision === "block";
-  const unchecked = job.status === "READY_FOR_REVIEW" && !job.safeguard;
+  // An edited version waits for its own safeguard check (#19); it is never approved on an earlier version's verdict.
+  const checking = job.status === "READY_FOR_REVIEW" && !!job.safeguard_pending;
+  const unchecked = job.status === "READY_FOR_REVIEW" && !job.safeguard && !checking;
   const reviewable = job.status === "READY_FOR_REVIEW" || job.status === "BLOCKED";
-  const canDecide = job.status === "READY_FOR_REVIEW" && !blocked && !unchecked && !pending && mayDecide;
+  const canDecide = job.status === "READY_FOR_REVIEW" && !blocked && !unchecked && !checking && !pending && mayDecide;
+  const version = job.deck_version ?? 1;
   const canReject = reviewable && !pending && mayDecide;
   const publishing = job.status === "PUBLISHING" || (pending && !error);
   const blocks = job.issues.filter((i) => i.severity === "block").length;
   // Approving despite blocking Issues is an Override: it needs a written reason, kept in the audit log.
-  const override = blocks > 0 && !blocked && !unchecked;
+  const override = blocks > 0 && !blocked && !unchecked && !checking;
   const reasonMissing = override && !reason.trim();
   const roleNote =
     role && !mayDecide && reviewable
@@ -71,13 +73,6 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
 
   return (
     <>
-      <section className="space-y-2 rounded-xl border bg-card p-5">
-        <label htmlFor="caption" className="text-[13px] font-medium text-muted-foreground">
-          Caption (editable · an edit is checked by the safeguard again before it is posted)
-        </label>
-        <Textarea id="caption" value={caption} onChange={(e) => setCaption(e.target.value)} disabled={!canDecide} className="min-h-28 text-[13px]" />
-      </section>
-
       {override && mayDecide && job.status === "READY_FOR_REVIEW" && (
         <section className="space-y-2 rounded-xl border border-destructive/30 bg-card p-5">
           <label htmlFor="override-reason" className="text-[13px] font-semibold text-destructive">
@@ -148,7 +143,11 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                 STATUS_NOTE[job.status] ??
                 roleNote ??
                 (blocked
-                  ? STATUS_NOTE.BLOCKED
+                  ? job.safeguard?.deck_version != null && job.status === "READY_FOR_REVIEW"
+                    ? `The safeguard blocked version ${version}. Nobody can approve it, not even with an Override. Edit it again, or reject it.`
+                    : STATUS_NOTE.BLOCKED
+                  : checking
+                  ? `The safeguard is checking version ${version}. You can approve it once the check passes.`
                   : unchecked
                   ? "No safeguard verdict: this job was created before the safeguard existed. Regenerate it to publish."
                   : blocks > 0
@@ -187,7 +186,7 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                   : undefined
               }
               onClick={() => {
-                act(() => api.approveJob(job.id, caption, override ? reason.trim() : undefined, accountId));
+                act(() => api.approveJob(job.id, version, override ? reason.trim() : undefined, accountId));
               }}
             >
               {publishing ? (
@@ -196,12 +195,16 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                 </>
               ) : blocked ? (
                 "Blocked by safeguard"
+              ) : checking ? (
+                <>
+                  <Loader2 className="size-4 motion-safe:animate-spin" /> Safeguard checking…
+                </>
               ) : unchecked ? (
                 "Needs safeguard check"
               ) : blocks > 0 ? (
-                "Override & Publish"
+                `Override & Publish${version > 1 ? ` v${version}` : ""}`
               ) : (
-                "Approve & Publish"
+                `Approve & Publish${version > 1 ? ` v${version}` : ""}`
               )}
             </Button>
           </div>

@@ -163,7 +163,7 @@ def _ready(org_id):
 
 
 async def _publish(org_id, job_id, account, **kw):
-    return await publishing.publish_now(org_id, job_id, None, "graph", account=account, **kw)
+    return await publishing.publish_now(org_id, job_id, "graph", account=account, **kw)
 
 
 def audit_actions(org_id, job_id) -> list[str]:
@@ -262,7 +262,7 @@ async def test_a_post_unknown_for_30_minutes_alerts_and_a_person_can_resolve_it(
     post = await _publish(a.org_id, job.id, acct)
     assert post.state == "unknown" and post.next_check_at is None and post.alerted_at is not None
     assert store.get_job(a.org_id, job.id).status == JobStatus.PUBLISHING  # Approve stays locked
-    assert a.post(f"/jobs/{job.id}/approve", json={}).status_code == 409
+    assert a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 409
     assert "post.unknown_alert" in audit_actions(a.org_id, job.id)
     # The person checked Instagram: not posted. Logged under their name; approving again is possible.
     r = a.post(f"/posts/{post.id}/resolve", json={"posted": False})
@@ -278,7 +278,7 @@ async def test_not_posted_cant_be_claimed_while_the_reconciler_is_still_checking
     job = _ready(a.org_id)
     with store.tenant(a.org_id, user_id=a.user_id) as c:
         pid = posts.insert(c, job_id=job.id, mode="graph", approved_by=a.user_id, approved_by_email="", account_id=acct["id"],
-                           ig_user_id=acct["ig_user_id"], username="seoulbrand", caption=None).id
+                           ig_user_id=acct["ig_user_id"], username="seoulbrand").id
         c.execute("update posts set state = 'unknown', creation_id = '1', unknown_since = now(), "
                   "next_check_at = now() + interval '2 minutes' where id = %s", (pid,))
     r = a.post(f"/posts/{pid}/resolve", json={"posted": False})
@@ -316,7 +316,7 @@ async def test_a_revoked_token_fails_before_anything_is_posted_and_marks_the_acc
     with store.system() as c:
         assert c.execute("select status from instagram_accounts where id = %s", (acct["id"],)).fetchone()[0] == "revoked"
     # A revoked account can't be picked any more until it is reconnected.
-    assert a.post(f"/jobs/{job.id}/approve", json={"account_id": str(acct["id"])}).status_code == 422
+    assert a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "account_id": str(acct["id"])}).status_code == 422
 
 
 # ---------------------------------------------------------------- 24 h container expiry
@@ -325,14 +325,13 @@ async def test_a_container_older_than_a_day_is_rebuilt_not_published(sign_in, ig
     a = sign_in(org="A")
     acct = ig.add(connect_account(a.org_id))
     job = _ready(a.org_id)
-    post = await publishing.publish_now(a.org_id, job.id, None, "dryrun", account=acct)  # containers only
+    post = await publishing.publish_now(a.org_id, job.id, "dryrun", account=acct)  # containers only
     old = post.creation_id
     ig.containers[old]["status"] = "EXPIRED"
     # Pretend a real Post sat at container_ready for 25 hours (e.g. scheduled, #26).
     with store.tenant(a.org_id, user_id=a.user_id) as c:
         pid = posts.insert(c, job_id=job.id, mode="graph", approved_by=a.user_id, approved_by_email="",
-                           account_id=acct["id"], ig_user_id=acct["ig_user_id"], username="seoulbrand",
-                           caption=None).id
+                           account_id=acct["id"], ig_user_id=acct["ig_user_id"], username="seoulbrand").id
         c.execute("update posts set state = 'container_ready', creation_id = %s, "
                   "container_created_at = now() - interval '25 hours' where id = %s", (old, pid))
     await publishing.run(a.org_id, pid)
@@ -370,7 +369,7 @@ async def test_a_restart_while_media_publish_is_in_flight_reconciles_instead_of_
     ig.publish_plan = [("crash", True)]  # Instagram posts it; our process dies before the answer arrives
     by = {"id": str(a.user_id), "email": ""}
     post = await asyncio.to_thread(lambda: publishing.create(
-        a.org_id, store.get_job(a.org_id, job.id), mode="graph", by=by, account=acct, caption=None))
+        a.org_id, store.get_job(a.org_id, job.id), mode="graph", by=by, account=acct))
     with pytest.raises(Crash):
         await publishing.run(a.org_id, post.id)
     assert posts.get(a.org_id, post.id).state == "publishing"
@@ -395,7 +394,7 @@ async def test_a_restart_before_anything_was_posted_publishes_once(sign_in, ig):
     ig.publish_plan = [("crash", False)]
     by = {"id": str(a.user_id), "email": ""}
     post = await asyncio.to_thread(lambda: publishing.create(
-        a.org_id, store.get_job(a.org_id, job.id), mode="graph", by=by, account=acct, caption=None))
+        a.org_id, store.get_job(a.org_id, job.id), mode="graph", by=by, account=acct))
     with pytest.raises(Crash):
         await publishing.run(a.org_id, post.id)
     restart_dbos()
@@ -411,7 +410,7 @@ async def test_a_post_without_a_live_workflow_is_driven_again_after_a_restart(si
     job = _ready(a.org_id)
     by = {"id": str(a.user_id), "email": ""}
     post = await asyncio.to_thread(lambda: publishing.create(
-        a.org_id, store.get_job(a.org_id, job.id), mode="graph", by=by, account=acct, caption=None))
+        a.org_id, store.get_job(a.org_id, job.id), mode="graph", by=by, account=acct))
     from app.main import recover_interrupted
     await asyncio.to_thread(recover_interrupted)
     done = await wait_post(a.org_id, post.id)
@@ -432,15 +431,15 @@ def test_the_approver_picks_one_of_the_organizations_accounts(sign_in, ig, monke
     a, b = sign_in(org="A"), sign_in(org="B")
     job = _ready(a.org_id)
     # No account: a dry run or real post is refused; a mock post may go without.
-    assert a.post(f"/jobs/{job.id}/approve", json={}).status_code == 422
+    assert a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 422
     one = connect_account(a.org_id, "first")
     two = connect_account(a.org_id, "second")
     theirs = connect_account(b.org_id, "theirs")
-    r = a.post(f"/jobs/{job.id}/approve", json={})
+    r = a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1})
     assert r.status_code == 422 and "choose one" in r.json()["detail"]
-    r = a.post(f"/jobs/{job.id}/approve", json={"account_id": str(theirs["id"])})  # another Organization's
+    r = a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "account_id": str(theirs["id"])})  # another Organization's
     assert r.status_code == 422
-    r = a.post(f"/jobs/{job.id}/approve", json={"account_id": str(two["id"])})
+    r = a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "account_id": str(two["id"])})
     assert r.status_code == 200 and r.json()["status"] == "PUBLISHING"
     [post] = a.get(f"/posts?job_id={job.id}").json()
     assert (post["handle"], post["instagram_account_id"], post["state"]) == ("@second", str(two["id"]), "queued")
@@ -450,14 +449,14 @@ def test_the_approver_picks_one_of_the_organizations_accounts(sign_in, ig, monke
     with store.system() as c:
         c.execute("update instagram_accounts set status = 'disconnected' where id = %s", (one["id"],))
     job2 = _ready(a.org_id)
-    assert a.post(f"/jobs/{job2.id}/approve", json={}).status_code == 200
+    assert a.post(f"/jobs/{job2.id}/approve", json={"deck_version": 1}).status_code == 200
     assert a.get(f"/posts?job_id={job2.id}").json()[0]["handle"] == "@second"
 
 
 def test_mock_posts_need_no_account(client, monkeypatch, ig):
     monkeypatch.setattr(settings, "publish_mode", "mock")
     job = _ready(client.org_id)
-    assert client.post(f"/jobs/{job.id}/approve", json={}).status_code == 200
+    assert client.post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code == 200
     post = asyncio.run(wait_post(client.org_id, client.get(f"/posts?job_id={job.id}").json()[0]["id"]))
     assert (post.state, post.mode, post.handle) == ("published", "mock", None)
     assert ig.calls == []
@@ -471,7 +470,7 @@ def test_a_double_clicked_approve_makes_one_post(sign_in, ig, monkeypatch):
     connect_account(a.org_id)
     job = _ready(a.org_id)
     with ThreadPoolExecutor(4) as pool:
-        codes = sorted(pool.map(lambda _: a.post(f"/jobs/{job.id}/approve", json={}).status_code, range(4)))
+        codes = sorted(pool.map(lambda _: a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1}).status_code, range(4)))
     assert codes == [200, 409, 409, 409]
     assert len(a.get(f"/posts?job_id={job.id}").json()) == 1
 
@@ -503,7 +502,7 @@ async def test_approve_after_published_is_refused(sign_in, ig):
     acct = ig.add(connect_account(a.org_id))
     job = _ready(a.org_id)
     await _publish(a.org_id, job.id, acct)
-    r = a.post(f"/jobs/{job.id}/approve", json={})
+    r = a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1})
     assert r.status_code == 409 and len(ig.live) == 1
 
 

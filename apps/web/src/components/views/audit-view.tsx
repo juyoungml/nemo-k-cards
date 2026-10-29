@@ -20,7 +20,7 @@ const ACTION: Record<string, [Tone, string]> = {
   "deck.edited": ["info", "Edited"],
   "deck.approve_refused": ["danger", "Approval refused"],
   "safeguard.blocked": ["danger", "Blocked by safeguard"],
-  "safeguard.edit_blocked": ["danger", "Caption edit blocked"],
+  "safeguard.edit_blocked": ["danger", "Edit blocked"],
   "job.created": ["neutral", "Deck started"],
   "material.added": ["neutral", "Source material added"],
   "member.invited": ["neutral", "Invited"],
@@ -46,14 +46,30 @@ function describe(e: AuditEvent): React.ReactNode {
   const d = e.detail;
   switch (e.action) {
     case "deck.overridden":
-      return <>Reason: “{String(d.reason)}” · {(d.issues as unknown[] | undefined)?.length ?? 0} blocking issue(s)</>;
+      return (
+        <>
+          {d.deck_version ? `Version ${String(d.deck_version)} · ` : ""}Reason: “{String(d.reason)}” · {(d.issues as unknown[] | undefined)?.length ?? 0}{" "}
+          blocking issue(s)
+        </>
+      );
+    case "deck.approved":
+      return d.deck_version ? <>Version {String(d.deck_version)}</> : null;
     case "deck.rejected":
       return <>Reason: “{String(d.reason)}”</>;
-    case "deck.edited":
-      return <>Caption changed</>;
+    case "deck.edited": {
+      // A Deck edit (#19) lists what changed; older events are a caption changed at Approve.
+      const changes = (d.changes as { field: string }[] | undefined) ?? [];
+      if (!changes.length) return <>Caption changed</>;
+      const fields = [...new Set(changes.map((c) => c.field.replace("slide.", "")))].join(", ");
+      return <>Version {String(d.version)}: {fields}{d.overflow_accepted ? " · saved with overflowing text" : ""}</>;
+    }
     case "deck.approve_refused":
       return d.why === "no_safeguard_verdict" ? (
         <>No safeguard verdict: regenerate</>
+      ) : d.why === "safeguard_checking" ? (
+        <>Safeguard still checking an edited version</>
+      ) : d.why === "verdict_for_other_content" ? (
+        <>The safeguard verdict was for other content</>
       ) : (
         <>
           Blocked by safeguard{d.override_reason ? <> · Override reason given: “{String(d.override_reason)}”</> : null}
