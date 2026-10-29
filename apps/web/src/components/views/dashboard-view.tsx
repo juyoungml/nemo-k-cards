@@ -25,7 +25,7 @@ export function DashboardView() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>InstagramAccount</TableHead>
+                <TableHead>Account</TableHead>
                 <TableHead>Platform</TableHead>
                 <TableHead className="text-right">Followers</TableHead>
                 <TableHead>Status</TableHead>
