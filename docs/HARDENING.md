@@ -25,7 +25,7 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 | [AGT-3](#agt-3-no-quality-regression-checks-for-prompts-and-models) | P1 | No quality-regression checks for prompts and models |
 | [AGT-4](#agt-4-prompt-injection-is-tested-by-one-demo-not-a-suite) | P1 | Prompt injection is tested by one demo, not a suite |
 | [REL-1](#rel-1-jobs-run-inside-the-api-process) | P1 | Jobs run inside the API process |
-| [REL-2](#rel-2-storage-sqlite-with-one-shared-connection-no-migrations-no-backups) | P1 | SQLite with one shared connection, no migrations, no backups |
+| [REL-2](#rel-2-storage-no-backups-or-retention) | P1 | Storage: no backups or retention |
 | [REL-3](#rel-3-outbound-calls-lack-consistent-timeouts-and-retries) | P2 | Outbound calls lack consistent timeouts and retries |
 | [TEN-1](#ten-1-no-per-user-or-per-org-rate-limits-and-quotas) | P1 | No per-user or per-org rate limits and quotas |
 | [LEG-2](#leg-2-image-licensing-records-and-takedowns) | P1 | Image licensing records and takedowns |
@@ -202,12 +202,12 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 
 **Done when:** killing the worker mid-job and restarting it completes the job without re-running the finished stages.
 
-### REL-2 Storage: SQLite with one shared connection, no migrations, no backups
-**P1** *(verified: `store.py:13,29`)*
+### REL-2 Storage: no backups or retention
+**P1**
 
-**Update (2026-10-29):** storage moved to Postgres (Supabase) with a connection pool and versioned migrations in `supabase/migrations/` (#8). Backups and retention are still open.
+Storage moved from SQLite (one shared connection, no migrations) to Postgres on Supabase with a connection pool and versioned migrations in `supabase/migrations/` (#8, 2026-10-29). Backups and retention are still open.
 
-**Robust fix:** Postgres for production (or, while it's one machine, SQLite in WAL mode with one connection per thread). Schema migrations (Alembic), nightly backups with a tested restore, and a retention policy for job data and rendered assets.
+**Robust fix:** schema changes only through Supabase CLI migrations (`supabase/migrations/`, applied to staging from `main` and then to production), nightly backups with a tested restore, and a retention policy for job data and rendered assets.
 
 ### REL-3 Outbound calls lack consistent timeouts and retries
 **P2**
