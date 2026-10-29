@@ -109,6 +109,8 @@ Items marked *(verified)* were confirmed in the code. The rest are standard gaps
 
 **Done when:** a non-tester org can connect an account and publish.
 
+**Status (#15 Connect an Instagram account):** the OAuth flow, per-account tokens in Supabase Vault and the Pilot gate are in. Publishing to the connected account is #21, token refresh #22, App Review still to do.
+
 ---
 
 ## Security

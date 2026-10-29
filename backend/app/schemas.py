@@ -6,6 +6,7 @@ Mirrors apps/web/src/lib/types.ts (frontend) and docs/BACKEND.md §3 (frozen v1.
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
+from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, HttpUrl
 
@@ -267,10 +268,16 @@ class Metric(BaseModel):
 
 
 class InstagramAccount(BaseModel):
-    handle: str
-    platform: str
-    followers: int
-    live: bool
+    """An Instagram account the Organization has connected (GLOSSARY). Never carries the token."""
+    id: UUID
+    handle: str                     # "@username"
+    platform: Literal["Instagram"] = "Instagram"
+    account_type: Literal["BUSINESS", "MEDIA_CREATOR"]
+    status: Literal["connected", "expiring", "revoked"]
+    token_expires_at: datetime | None
+    connected_at: datetime
+    followers: int | None = None    # not read yet: insights per Organization come later
+    live: bool                      # status is connected (publishing can use it)
 
 
 class PolicyEvent(BaseModel):

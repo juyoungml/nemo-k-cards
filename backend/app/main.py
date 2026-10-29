@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app import assets, audit, auth, brainstorms, members, orgs, seed, store
+from app import assets, audit, auth, brainstorms, instagram_accounts, members, orgs, seed, store
 from app.config import settings
 from app.pipeline import durable, orchestrator
 from app.schemas import (
@@ -23,7 +23,6 @@ from app.schemas import (
     BrainstormPatch,
     CreateBrainstormRequest,
     CreateJobRequest,
-    InstagramAccount,
     Job,
     JobStatus,
     Metric,
@@ -71,6 +70,7 @@ settings.output_dir.mkdir(parents=True, exist_ok=True)
 app.include_router(assets.router)
 app.include_router(orgs.router)
 app.include_router(members.router)
+app.include_router(instagram_accounts.router)
 
 
 # Every Organization-owned read and write below goes through the store with the caller's Organization
@@ -287,11 +287,6 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
 @app.get("/metrics", response_model=list[Metric])
 def metrics(ctx: auth.Viewer) -> list[Metric]:
     return seed.metrics(store.list_jobs(ctx.org_id, 200))
-
-
-@app.get("/instagram-accounts", response_model=list[InstagramAccount])
-def instagram_accounts(_: auth.Viewer) -> list[InstagramAccount]:
-    return seed.instagram_accounts()
 
 
 @app.get("/policy-events")

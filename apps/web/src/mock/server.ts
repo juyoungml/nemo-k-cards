@@ -236,6 +236,15 @@ export function metrics(): Metric[] {
 }
 
 export const instagramAccounts = () => seedInstagramAccounts;
+// Connecting goes through Instagram's sign-in, which only the real API can do.
+export const instagramConnection = () => ({
+  configured: false,
+  pilot: false,
+  limit: 1,
+  connected: seedInstagramAccounts.length,
+  can_connect: false,
+  reason: "Connecting Instagram needs the real API: set NEXT_PUBLIC_API_URL and sign in.",
+});
 
 export function policyEvents(): PolicyEvent[] {
   const now = Date.now();

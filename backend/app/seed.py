@@ -5,7 +5,7 @@ import time
 import httpx
 
 from app.config import settings
-from app.schemas import InstagramAccount, Job, JobStatus, Metric, PolicyEvent
+from app.schemas import Job, JobStatus, Metric, PolicyEvent
 
 _ig_cache: dict = {"at": 0.0, "data": None}
 
@@ -26,12 +26,6 @@ def ig_account() -> dict | None:
     _ig_cache.update(at=time.time(), data=data)
     return data
 
-
-def instagram_accounts() -> list[InstagramAccount]:
-    """Connected Instagram accounts only: no row (and no invented follower count) for an account without a token."""
-    ig = ig_account()
-    return [InstagramAccount(handle=f"@{ig.get('username', 'whatsonkorea')}", platform="Instagram",
-                    followers=int(ig.get("followers_count", 0)), live=True)] if ig else []
 
 # Representative events from a sandbox run (Figma Policy Log), shown only in DEMO_MODE=fixture.
 # Live runs show only the parsed OpenShell logs.

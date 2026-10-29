@@ -144,11 +144,27 @@ export type Scenario = "good" | "bad" | "fail";
 
 // Admin-only view models (no backend schema yet).
 
+/** An Instagram account the Organization connected (GLOSSARY). The API never sends its token. */
 export interface InstagramAccount {
-  handle: string;
-  platform: string;
-  followers: number;
-  live: boolean; // true = IG Insights, false = seed mock
+  id: string;
+  handle: string; // "@username"
+  platform: "Instagram";
+  account_type: "BUSINESS" | "MEDIA_CREATOR";
+  status: "connected" | "expiring" | "revoked";
+  token_expires_at: string | null;
+  connected_at: string;
+  followers: number | null; // not read per Organization yet
+  live: boolean; // connected and usable
+}
+
+/** Whether this Organization can connect another Instagram account, and if not, why. */
+export interface InstagramConnection {
+  configured: boolean;
+  pilot: boolean;
+  limit: number;
+  connected: number;
+  can_connect: boolean;
+  reason: string | null;
 }
 
 export interface Metric {

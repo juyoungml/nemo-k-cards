@@ -28,6 +28,8 @@ const ACTION: Record<string, [Tone, string]> = {
   "member.role_changed": ["info", "Role changed"],
   "member.removed": ["warning", "Removed"],
   "org.created": ["neutral", "Organization created"],
+  "instagram.connected": ["success", "Instagram connected"],
+  "instagram.disconnected": ["warning", "Instagram disconnected"],
 };
 
 const role = (r: unknown) => (typeof r === "string" && r in ROLE_LABEL ? ROLE_LABEL[r as Role] : String(r ?? ""));
@@ -67,6 +69,8 @@ function describe(e: AuditEvent): React.ReactNode {
       return <>was {role(d.role)}</>;
     case "org.created":
       return <>{String(d.name)}</>;
+    case "instagram.connected":
+      return <>{d.account_type === "MEDIA_CREATOR" ? "Creator" : "Business"} account{d.reconnected ? " · reconnected" : ""}</>;
     default:
       return null;
   }
