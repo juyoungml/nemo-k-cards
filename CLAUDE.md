@@ -48,16 +48,15 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `IMAGE_HOST` | `local` \| `supabase` | Instagram needs public URLs; supabase uploads slides to the public `slides` bucket |
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
 | `DATABASE_URL` | `postgresql://…` | default is the local Supabase database (`127.0.0.1:54322/postgres`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL`'s server (default: the same local server) |
+| `JOBS_PER_ORG` / `JOBS_PER_WORKER` | default `2` / `4` | Jobs one Organization runs at once (the rest wait as `QUEUED`) / Jobs one process runs at once |
+| `WORKFLOW_VERSION` | default `1` | bump it when the pipeline's stage list or order changes (`STAGES` in `orchestrator.py`) |
 | `SUPABASE_URL` | e.g. `http://127.0.0.1:54321` | Supabase project for sign-in (and slide hosting with `IMAGE_HOST=supabase`). Every route except `/health` needs a session from it; empty = every route 401 |
 | `ADMIN_URL` | default `http://localhost:3000` | where invitation links point (`/invite?token=…`); must be on the Supabase project's Auth redirect allow list |
 | `SUPABASE_JWT_SECRET` | secret | only for projects still signing with the legacy HS256 secret. The local CLI and new cloud projects use asymmetric keys from `SUPABASE_URL/auth/v1/.well-known/jwks.json` (cached 10 min) |
 
 Always use `--reload`. Without it, a long-running API keeps old Python while Jinja templates load fresh from disk, and renders fail (`'slide_class' is undefined`).
 
-**Before restarting the API**, check that nothing is in flight. Restarting kills running agents and publishes:
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" localhost:8000/jobs | python3 -c "import json,sys;print([(j['id'],j['status']) for j in json.load(sys.stdin) if j['status'] in ('QUEUED','RESEARCHING','VERIFYING','WRITING','RENDERING','QA','REVIEWING','PUBLISHING')])"
-```
+**Restarting is safe for Jobs** (#17). The pipeline runs as a DBOS workflow (`backend/app/pipeline/durable.py`, ADR 0002), with each stage checkpointed in the `dbos` schema of the same Postgres. On a restart, including a `--reload`, a running Job resumes at the stage it was in. Stages that had finished don't run again. A stage that was cut off reruns from its start, so a live agent stage costs one more `claude -p` call. Jobs that were waiting stay `QUEUED` until a slot frees up. A Job that can't resume (it ran out of recovery attempts, or it was started under a different `WORKFLOW_VERSION`) is marked `FAILED` at startup. **Publishing is not durable yet** (#21): a restart during `PUBLISHING` sends the Job back to Review, so avoid restarting mid-publish.
 
 ## Run the Admin UI (port 3000)
 
@@ -141,7 +140,8 @@ Live runs never publish (`PUBLISH_MODE=mock`, publishing credentials blanked) an
 - Never set `PUBLISH_MODE=graph` or approve a job unless a human explicitly asked. It posts publicly.
 - Secrets (`IG_ACCESS_TOKEN`, `SUPABASE_SERVICE_KEY`, Anthropic keys) stay in `backend/.env` on the host and never go into the sandbox, the agent workspace, logs or commits.
 - Data and caches don't live in the repo (`/data` is a gitignored symlink).
-- Organization data goes through `app/store.py` with the caller's Organization (`ctx.org_id`): `store.tenant(org_id)` runs as the `wok_api` role so row-level security applies. `store.system()` bypasses it and is only for work that spans Organizations (creating one, restart recovery). New Organization-owned tables need `org_id`, RLS and a `wok_api` policy (see `supabase/migrations/20261029140000_org_isolation.sql`).
+- Organization data goes through `app/store.py` with the caller's Organization (`ctx.org_id`): `store.tenant(org_id)` runs as the `wok_api` role so row-level security applies. `store.system()` bypasses it and is only for work that spans Organizations (creating one, restart recovery). DBOS's checkpoint tables (schema `dbos`) are system tables of the same kind: `wok_api` and Supabase's API roles can't reach them. New Organization-owned tables need `org_id`, RLS and a `wok_api` policy (see `supabase/migrations/20261029140000_org_isolation.sql`).
+- Pipeline stages run as DBOS steps (`orchestrator.STAGES`). Every side effect (agent call, HTTP, rendering, file or store write) happens inside a stage function, never in `job_workflow` itself, or a resumed Job repeats it. A stage saves the Job before it returns; whatever a later stage needs that isn't on the Job goes in `s.out` as small JSON.
 - Card or UI changes must follow `DESIGN.md`. Re-run the renderer preview after template edits.
 
 ## Agent skills

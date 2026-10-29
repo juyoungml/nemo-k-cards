@@ -93,9 +93,19 @@ def save_recording(rec: Recording, directory: Path = RECORDINGS_DIR) -> Path:
     return p
 
 
+# The order the stage calls are hashed in. Fixed by agent name, so moving a call within the orchestrator (e.g. into
+# its own step function, #17) doesn't change the hash; this is the order the hash has always used.
+STAGE_ORDER = ["copywriter", "reviewer", "researcher"]
+
+
 def _stage_calls() -> list[ast.Call]:
     tree = ast.parse(ORCHESTRATOR.read_text(encoding="utf-8"))
-    return [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "run_stage"]
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "run_stage"]
+
+    def key(call: ast.Call) -> tuple[int, str]:
+        agent = getattr(call.args[0], "value", "")
+        return (STAGE_ORDER.index(agent) if agent in STAGE_ORDER else len(STAGE_ORDER), agent)
+    return sorted(calls, key=key)
 
 
 def agent_sha() -> str:

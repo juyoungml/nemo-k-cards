@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # Staging and production are Supabase Cloud connection strings (host-only secrets).
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
+    # Durable Jobs (#17, ADR 0002): DBOS keeps its checkpoints in the `dbos` schema of this same database.
+    # Empty = DATABASE_URL. Set it only to give DBOS a different connection (e.g. Supabase's session pooler).
+    dbos_database_url: str = ""
+    jobs_per_org: int = 2         # Jobs of one Organization running at once; the rest wait as QUEUED
+    jobs_per_worker: int = 4      # Jobs one API/worker process runs at once (Chromium, agent CLIs)
+    # Bump when the pipeline's stage list or order changes: a Job started under another version is not resumed
+    # (its checkpoints no longer line up with the code) and is marked failed at the next start instead.
+    workflow_version: str = "1"
+
     # Agent runtime
     agent_model: str = ""                 # e.g. "sonnet" to cut cost; empty = CLI default
     agent_timeout_s: int = 300

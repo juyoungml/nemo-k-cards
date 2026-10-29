@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from app import assets, audit, auth, brainstorms, members, orgs, seed, store
 from app.config import settings
-from app.pipeline import orchestrator
+from app.pipeline import durable, orchestrator
 from app.schemas import (
     TERMINAL,
     ApproveRequest,
@@ -31,27 +31,26 @@ from app.schemas import (
 
 
 def recover_interrupted() -> None:
-    """A restart kills in-flight background tasks: never leave jobs stuck in a running state (every
-    Organization's; each job is saved back under its own Organization)."""
-    running = {JobStatus.QUEUED, JobStatus.RESEARCHING, JobStatus.VERIFYING, JobStatus.WRITING,
-               JobStatus.RENDERING, JobStatus.QA, JobStatus.REVIEWING}
-    for org_id, job in store.jobs_in(running | {JobStatus.PUBLISHING}):
-        if job.status == JobStatus.PUBLISHING:
-            job.status = JobStatus.READY_FOR_REVIEW
-            job.error = "Publish interrupted by a server restart. Nothing was posted; approve again."
-            if job.publish_progress:
-                job.publish_progress.step, job.publish_progress.error = "failed", job.error
-                job.publish_progress.label = "Interrupted by a server restart"
-            store.save_job(org_id, job)
-        elif job.status in running:
-            job.status, job.error = JobStatus.FAILED, "Interrupted by a server restart; start the job again."
-            store.save_job(org_id, job)
+    """After a restart (and `durable.launch()`, which resumes interrupted Jobs at their unfinished stage): a publish
+    is not durable yet (#21), so a Job left PUBLISHING goes back to Review; a Job whose pipeline can't resume is
+    marked failed (`orchestrator.reconcile_after_restart`). Every Organization's; each saved under its own."""
+    for org_id, job in store.jobs_in({JobStatus.PUBLISHING}):
+        job.status = JobStatus.READY_FOR_REVIEW
+        job.error = "Publish interrupted by a server restart. Nothing was posted; approve again."
+        if job.publish_progress:
+            job.publish_progress.step, job.publish_progress.error = "failed", job.error
+            job.publish_progress.label = "Interrupted by a server restart"
+        store.save_job(org_id, job)
+    orchestrator.reconcile_after_restart()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # DBOS gets its own event loop thread for the pipeline (launched from a worker thread, not uvicorn's loop).
+    await asyncio.to_thread(durable.launch)
     await asyncio.to_thread(recover_interrupted)
     yield
+    await asyncio.to_thread(durable.shutdown)  # running Jobs stay checkpointed and resume at the next start
     store.close()
 
 
@@ -106,7 +105,7 @@ def health() -> dict:
 async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
     job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "job.created", job.id)))
-    orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, scenario=req.scenario or "good"))
+    await orchestrator.start_job(ctx.org_id, job, scenario=req.scenario or "good")
     return _out(ctx.org_id, job)
 
 
@@ -240,7 +239,7 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
         ctx, "job.created", job.id, brainstorm=d.id)))
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))
-    orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, brainstorm=d))
+    await orchestrator.start_job(ctx.org_id, job, brainstorm=d)
     return _out(ctx.org_id, job)
 
 

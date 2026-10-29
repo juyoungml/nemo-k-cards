@@ -102,7 +102,7 @@ def test_b_does_not_see_a_policy_events_or_counts(two):
 def test_new_work_belongs_to_the_caller(sign_in, monkeypatch):
     async def no_run(*args, **kwargs):
         pass
-    monkeypatch.setattr(orchestrator, "run_job", no_run)
+    monkeypatch.setattr(orchestrator, "start_job", no_run)
     a, b = sign_in(org="A"), sign_in(org="B")
     jid = a.post("/jobs", json={"prompt": "Seongsu pop-ups"}).json()["id"]
     bid = b.post("/brainstorms", json={"sample": False}).json()["id"]
@@ -115,7 +115,7 @@ def test_new_work_belongs_to_the_caller(sign_in, monkeypatch):
 def test_new_ids_are_long_enough_to_be_unique_across_organizations(sign_in, monkeypatch):
     async def no_run(*args, **kwargs):
         pass
-    monkeypatch.setattr(orchestrator, "run_job", no_run)
+    monkeypatch.setattr(orchestrator, "start_job", no_run)
     a = sign_in(org="A")
     jid = a.post("/jobs", json={"prompt": "Seongsu pop-ups"}).json()["id"]
     bid = a.post("/brainstorms", json={"sample": False}).json()["id"]
