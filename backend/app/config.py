@@ -44,10 +44,17 @@ class Settings(BaseSettings):
     # local CLI sign with asymmetric keys published as JWKS at SUPABASE_URL/auth/v1/.well-known/jwks.json.
     supabase_jwt_secret: str = ""
 
-    # Public image hosting for Instagram (host-only secrets)
+    # Slide hosting for Instagram (host-only secrets). Slides are private (#18): the Admin and Instagram only
+    # get signed links that expire. supabase = private bucket + Storage signed URLs; local = this API's
+    # /assets route with HMAC-signed URLs (PUBLIC_ASSET_BASE_URL must reach it, e.g. a tunnel).
     image_host: Literal["supabase", "local"] = "local"
     supabase_service_key: str = ""
     supabase_bucket: str = "slides"
+    # How long Instagram's links work. Instagram copies each image while it builds the container, so minutes
+    # are enough; every Approve uploads and signs again, so a retry never needs an old link.
+    publish_link_ttl_s: int = 15 * 60
+    # Key for signed /assets links. Empty: derived from SUPABASE_SERVICE_KEY, else random per process.
+    asset_signing_key: str = ""
 
 
 settings = Settings()

@@ -1,7 +1,8 @@
 """Instagram carousel publishing via Graph API. Host-only: the sandbox never sees the token.
 
-Instagram fetches images itself, so image_urls must be public JPEG URLs
-(PUBLIC_ASSET_BASE_URL + path under output_dir, served by main.py at /assets).
+Instagram fetches images itself, anonymously, while it builds each container, so image_urls must be JPEG URLs it
+can reach. They are short-lived signed links from image_host.exposed() (#18 Private slides), not public files.
+Never log them: the signature is the credential.
 """
 
 import asyncio

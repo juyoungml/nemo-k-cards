@@ -10,9 +10,8 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
 
-from app import audit, auth, brainstorms, members, orgs, seed, store
+from app import assets, audit, auth, brainstorms, members, orgs, seed, store
 from app.config import settings
 from app.pipeline import orchestrator
 from app.schemas import (
@@ -59,14 +58,16 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="What's On Korea API", lifespan=lifespan)
 
 
-# Sign-in: every route except /health (and the public slide files under /assets) needs a Supabase session.
+# Sign-in: every route except /health (and /assets, whose signed links are their own credential) needs a
+# Supabase session.
 # Registered before CORS so CORS wraps it and a 401 still carries CORS headers.
 app.middleware("http")(auth.require_session)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
-# Rendered slides, publicly reachable via PUBLIC_ASSET_BASE_URL so Instagram can fetch them.
+# Rendered slides are private (#18): served only through short-lived signed links (app/assets.py), which the
+# API hands to the Admin in `slide_urls` and the publisher hands to Instagram.
 settings.output_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/assets", StaticFiles(directory=settings.output_dir), name="assets")
+app.include_router(assets.router)
 app.include_router(orgs.router)
 app.include_router(members.router)
 
@@ -80,6 +81,11 @@ def _job_or_404(org_id: UUID, job_id: str) -> Job:
     if not (job := store.get_job(org_id, job_id)):
         raise HTTPException(404, "job not found")
     return job
+
+
+def _out(org_id: UUID, job: Job) -> Job:
+    """A Job leaving the API: its slide paths become short-lived signed links for this Organization."""
+    return assets.for_admin(org_id, job)
 
 
 def _brainstorm_or_404(org_id: UUID, brainstorm_id: str) -> Brainstorm:
@@ -101,17 +107,17 @@ async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
     job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "job.created", job.id)))
     orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, scenario=req.scenario or "good"))
-    return job
+    return _out(ctx.org_id, job)
 
 
 @app.get("/jobs", response_model=list[Job])
 def list_jobs(ctx: auth.Viewer, limit: int = Query(50, ge=1, le=500)) -> list[Job]:
-    return store.list_jobs(ctx.org_id, limit)
+    return [_out(ctx.org_id, j) for j in store.list_jobs(ctx.org_id, limit)]
 
 
 @app.get("/jobs/{job_id}", response_model=Job)
 def get_job(job_id: str, ctx: auth.Viewer) -> Job:
-    return _job_or_404(ctx.org_id, job_id)
+    return _out(ctx.org_id, _job_or_404(ctx.org_id, job_id))
 
 
 @app.get("/jobs/{job_id}/events")
@@ -127,7 +133,7 @@ async def job_events(job_id: str, request: Request, ctx: auth.Viewer) -> Streami
             job = await asyncio.to_thread(store.get_job, ctx.org_id, job_id)
             if not job:
                 break
-            data = job.model_dump_json()
+            data = _out(ctx.org_id, job).model_dump_json()  # links change at most once per signing window
             if data != last:
                 yield f"data: {data}\n\n"
                 last = data
@@ -169,7 +175,7 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
     await asyncio.to_thread(_audit_approval, ctx, job, req.caption, mode, blocking, reason)
     orchestrator.spawn(orchestrator.publish_job(ctx.org_id, job_id, req.caption, mode))
     job.status = JobStatus.PUBLISHING
-    return job
+    return _out(ctx.org_id, job)
 
 
 def _audit_approval(ctx: auth.Ctx, job: Job, caption: str | None, mode: str, blocking: list, reason: str) -> None:
@@ -195,7 +201,7 @@ def reject(job_id: str, req: RejectRequest, ctx: auth.Approver) -> Job:
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
     job.status, job.error = JobStatus.REJECTED, req.reason or "rejected by operator"
-    return store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "deck.rejected", job.id, reason=job.error))
+    return _out(ctx.org_id, store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "deck.rejected", job.id, reason=job.error)))
 
 
 # ---------------------------------------------------------------- brainstorms
@@ -235,7 +241,7 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
         ctx, "job.created", job.id, brainstorm=d.id)))
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))
     orchestrator.spawn(orchestrator.run_job(ctx.org_id, job.id, brainstorm=d))
-    return job
+    return _out(ctx.org_id, job)
 
 
 # ---------------------------------------------------------------- dashboard & policy

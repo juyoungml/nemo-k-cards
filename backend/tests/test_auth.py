@@ -35,11 +35,12 @@ def test_every_route_but_health_needs_a_session(method, path, auth_keys):
     assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
 
 
-def test_health_and_slide_files_stay_public():
+def test_health_is_public_and_slide_files_need_a_signed_link():
     assert anon.get("/health").status_code == 200
     (settings.output_dir / "pub").mkdir(parents=True, exist_ok=True)
     (settings.output_dir / "pub/slide-00.jpg").write_bytes(b"jpg")
-    assert anon.get("/assets/pub/slide-00.jpg").status_code == 200  # Instagram fetches these anonymously
+    # No sign-in check on /assets (an <img> can't send a token), but no file without a signed link (#18).
+    assert anon.get("/assets/pub/slide-00.jpg").status_code == 404
 
 
 def test_admin_token_is_gone():

@@ -392,10 +392,12 @@ async def _publish_job(r: Run, caption: str | None, mode: str) -> None:
     try:
         paths = sorted((settings.output_dir / job.id).glob("slide-*.jpg"))
         if mode in ("graph", "dryrun"):
-            urls = await image_host.publish_images(job.id, paths, lambda d, t: progress("upload", d, t))
-            r.log("publish", f"{len(urls)} slides public via {settings.image_host} → {urls[0].rsplit('/', 2)[0]}/…")
-            result = await publisher.publish_carousel(urls, job.deck.caption, publish=(mode == "graph"),
-                                                      on_progress=progress)
+            # Private slides (#18): links expire in minutes and uploads are deleted when the block ends.
+            async with image_host.exposed(r.org_id, job.id, paths, lambda d, t: progress("upload", d, t)) as urls:
+                r.log("publish", f"{len(urls)} slides via {settings.image_host} on links that expire in "
+                      f"{settings.publish_link_ttl_s // 60} min")
+                result = await publisher.publish_carousel(urls, job.deck.caption, publish=(mode == "graph"),
+                                                          on_progress=progress)
             if mode == "dryrun":
                 cid = result.split(":", 1)[1]
                 r.log("publish", f"dry run: Instagram carousel container {cid} FINISHED · media_publish skipped "
