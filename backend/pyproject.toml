@@ -14,7 +14,6 @@ dependencies = [
     "httpx-secure>=2.0,<3",
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
-    "yoyo-migrations>=9",
 ]
 
 [dependency-groups]

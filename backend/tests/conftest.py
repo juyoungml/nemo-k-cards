@@ -1,6 +1,7 @@
 import os
 import secrets
 import tempfile
+from pathlib import Path
 
 import psycopg
 
@@ -8,13 +9,16 @@ import psycopg
 os.environ["OUTPUT_DIR"] = os.path.join(tempfile.mkdtemp(prefix="wok-test-"), "out")
 os.environ["DEMO_MODE"] = "fixture"
 
-# A throwaway database per run on a scratch server (never DATABASE_URL, which may be live): created here,
-# dropped in pytest_sessionfinish. The default matches the dev container in CLAUDE.md.
-TEST_SERVER = os.environ.get("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:54320/postgres")
+# A throwaway database per run (never DATABASE_URL, which may be live) with supabase/migrations applied in
+# order; dropped in pytest_sessionfinish. The default server is the local `supabase start` Postgres.
+TEST_SERVER = os.environ.get("TEST_DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:54322/postgres")
 TEST_DB = f"wok_test_{secrets.token_hex(4)}"
 with psycopg.connect(TEST_SERVER, autocommit=True) as _c:
     _c.execute(f"create database {TEST_DB}")
 os.environ["DATABASE_URL"] = TEST_SERVER.rsplit("/", 1)[0] + "/" + TEST_DB
+with psycopg.connect(os.environ["DATABASE_URL"]) as _c:
+    for sql in sorted((Path(__file__).resolve().parents[2] / "supabase/migrations").glob("*.sql")):
+        _c.execute(sql.read_text())
 
 # Tests must never reach real accounts, even on a machine whose backend/.env holds live credentials:
 # explicit env vars win over .env in pydantic-settings, so blank every outward-facing secret and mode.

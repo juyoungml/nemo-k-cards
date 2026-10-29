@@ -1,17 +1,14 @@
-"""Postgres store (BACKEND §8). Models are stored as jsonb documents; one table per kind."""
+"""Postgres store (BACKEND §8). Models are stored as jsonb documents; one table per kind.
+The schema is in supabase/migrations, applied by the Supabase CLI (`supabase start`, `supabase db push`)."""
 
 import logging
 import threading
-from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ValidationError
-from yoyo import get_backend, read_migrations
 
 from app.config import settings
 from app.schemas import Draft, Job, PolicyEvent
-
-MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
 
 _lock = threading.Lock()
 _pool: ConnectionPool | None = None
@@ -27,18 +24,10 @@ def _load[M: BaseModel](model: type[M], raw: str) -> M | None:
         return None
 
 
-def migrate() -> None:
-    """Apply pending migrations in backend/migrations (yoyo locks, so concurrent starts are safe)."""
-    backend = get_backend("postgresql+psycopg://" + settings.database_url.split("://", 1)[1])
-    with backend.lock():
-        backend.apply_migrations(backend.to_apply(read_migrations(str(MIGRATIONS))))
-
-
 def _db() -> ConnectionPool:
     global _pool
     with _lock:
         if _pool is None:
-            migrate()
             # prepare_threshold=None: also works behind Supabase's transaction pooler.
             _pool = ConnectionPool(settings.database_url, min_size=1, max_size=8, open=True,
                                    kwargs={"prepare_threshold": None})
