@@ -30,7 +30,7 @@ PAGE_MAX_BYTES = 2_000_000  # page text for the planner; larger pages are refuse
 
 
 def new_id() -> str:
-    return secrets.token_hex(3)
+    return secrets.token_hex(8)  # 64 bits: ids are unique across every Organization
 
 
 def sample_brainstorm() -> Brainstorm:

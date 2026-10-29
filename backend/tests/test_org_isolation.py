@@ -3,6 +3,7 @@ A's Jobs and Brainstorms, or see A's policy events. Proved twice: through the AP
 the API role (`wok_api`) with `app.org_id` set, where raw SQL tries to get around the policies."""
 
 import json
+import re
 import secrets
 import threading
 import uuid
@@ -109,6 +110,16 @@ def test_new_work_belongs_to_the_caller(sign_in, monkeypatch):
         owners = dict(c.execute("select id, org_id from jobs where id = %s union all "
                                 "select id, org_id from brainstorms where id = %s", (jid, bid)).fetchall())
     assert owners == {jid: a.org_id, bid: b.org_id}
+
+
+def test_new_ids_are_long_enough_to_be_unique_across_organizations(sign_in, monkeypatch):
+    async def no_run(*args, **kwargs):
+        pass
+    monkeypatch.setattr(orchestrator, "run_job", no_run)
+    a = sign_in(org="A")
+    jid = a.post("/jobs", json={"prompt": "Seongsu pop-ups"}).json()["id"]
+    bid = a.post("/brainstorms", json={"sample": False}).json()["id"]
+    assert re.fullmatch(r"[0-9a-f]{16}", jid) and re.fullmatch(r"d-[0-9a-f]{16}", bid)
 
 
 def test_same_id_in_another_organization_cannot_overwrite(two):
