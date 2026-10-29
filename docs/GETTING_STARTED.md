@@ -2,7 +2,7 @@
 
 ## Local sample workflow
 
-Use Python 3.12 or newer, uv, Node.js 22 and pnpm 10.10.0. The backend lockfile is committed. A Chromium installation is required for rendering.
+Use Python 3.12 or newer, uv, Node.js 22, pnpm 10.10.0 and Docker (for a local Postgres). The backend lockfile is committed. A Chromium installation is required for rendering.
 
 From the repository root:
 
@@ -10,6 +10,7 @@ From the repository root:
 cd backend
 uv sync --frozen
 uv run playwright install chromium
+docker run -d --name wok-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=wok -p 54320:5432 postgres:17-alpine
 DEMO_MODE=fixture PUBLISH_MODE=mock uv run uvicorn app.main:app --port 8000 --reload --reload-dir app
 ```
 

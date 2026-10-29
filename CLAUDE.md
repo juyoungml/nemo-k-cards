@@ -15,6 +15,13 @@ A publishing agent finds what's on in Korea, then researches, verifies, writes a
 cd backend && uv sync && uv run playwright install chromium
 ```
 
+Postgres 15+ holds Jobs, Brainstorms and policy events (Supabase in production). For dev, run one in Docker; its data stays in a Docker volume, outside the repo. The API applies pending migrations (`backend/migrations/`, yoyo) on first use, and tests create and drop their own `wok_test_*` database on the same server:
+
+```bash
+docker run -d --name wok-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=wok -p 54320:5432 postgres:17-alpine
+docker start wok-pg   # after a reboot
+```
+
 `backend/.env` is gitignored. Copy `backend/.env.example` and ask the team for real values. Never commit or print secrets.
 
 ## Run the API (port 8000)
@@ -36,6 +43,7 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `PUBLISH_MODE` | `mock` \| `dryrun` \| `graph` | **`graph` posts to the real @whatsonkorea account.** Use `dryrun` unless a human asked to go live |
 | `IMAGE_HOST` | `local` \| `supabase` | Instagram needs public URLs; supabase uploads slides to the public `slides` bucket |
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
+| `DATABASE_URL` | `postgresql://…` | default is the dev container above (`localhost:54320/wok`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL` (default: the dev container) |
 
 Always use `--reload`. Without it, a long-running API keeps old Python while Jinja templates load fresh from disk, and renders fail (`'slide_class' is undefined`).
 
@@ -79,7 +87,7 @@ Agents: `researcher` (WebSearch/WebFetch/Read), `planner`, `copywriter`, `review
 
 ## Checks
 
-Safe to run next to a live server: tests use a temp data dir, fixture mode and blanked credentials (`backend/tests/conftest.py` refuses to start otherwise), run in-process with no ports, and don't trigger `--reload`. Don't run `pnpm build` in `apps/web` while `pnpm dev` is running (they share `.next/`); CI builds it.
+Safe to run next to a live server: tests use a temp data dir, a throwaway Postgres database, fixture mode and blanked credentials (`backend/tests/conftest.py` refuses to start otherwise), run in-process with no ports, and don't trigger `--reload`. Don't run `pnpm build` in `apps/web` while `pnpm dev` is running (they share `.next/`); CI builds it.
 
 ```bash
 cd backend && uv run pytest -q                       # unit + API tests
