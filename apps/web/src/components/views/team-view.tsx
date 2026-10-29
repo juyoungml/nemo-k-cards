@@ -91,7 +91,7 @@ function InviteForm({ onInvited }: { onInvited: () => void }) {
           {busy && <Loader2 className="motion-safe:animate-spin" />} Send invite
         </Button>
       </form>
-      <p className="mt-2 text-xs text-muted-foreground">{ROLE_LABEL[role]}: {ROLE_HINT[role].toLowerCase()}.</p>
+      <p className="mt-2 text-xs text-muted-foreground">{ROLE_LABEL[role]}: {ROLE_HINT[role]}.</p>
       {error && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-destructive">{error}</p>}
       {sent && (
         <div role="status" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm">

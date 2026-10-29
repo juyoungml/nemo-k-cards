@@ -49,6 +49,7 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `AGENT_MODEL` | e.g. `sonnet` | optional model override for agent stages |
 | `DATABASE_URL` | `postgresql://…` | default is the local Supabase database (`127.0.0.1:54322/postgres`). Tests never use it: they create a throwaway database on `TEST_DATABASE_URL`'s server (default: the same local server) |
 | `SUPABASE_URL` | e.g. `http://127.0.0.1:54321` | Supabase project for sign-in (and slide hosting with `IMAGE_HOST=supabase`). Every route except `/health` needs a session from it; empty = every route 401 |
+| `ADMIN_URL` | default `http://localhost:3000` | where invitation links point (`/invite?token=…`); must be on the Supabase project's Auth redirect allow list |
 | `SUPABASE_JWT_SECRET` | secret | only for projects still signing with the legacy HS256 secret. The local CLI and new cloud projects use asymmetric keys from `SUPABASE_URL/auth/v1/.well-known/jwks.json` (cached 10 min) |
 
 Always use `--reload`. Without it, a long-running API keeps old Python while Jinja templates load fresh from disk, and renders fail (`'slide_class' is undefined`).
@@ -85,6 +86,8 @@ TOKEN=$(curl -s "http://127.0.0.1:54321/auth/v1/token?grant_type=password" -H "a
   -H 'content-type: application/json' -d '{"email":"you@example.com","password":"…"}' | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
 curl -H "Authorization: Bearer $TOKEN" localhost:8000/me
 ```
+
+**Members and Roles (#14).** Every route declares its least Role (`auth.Viewer` / `Editor` / `Approver` / `Admin`, or `auth.SignedIn` for `/me`, `POST /orgs`, `POST /invitations/accept`); `backend/tests/test_roles.py` holds the matrix and fails on a route that declares none. A person in several Organizations picks one in the sidebar; the Admin sends it as `X-Org-Id` and the API refuses (403) an Organization the caller isn't a Member of. Admins invite on the Team page: the link is `ADMIN_URL/invite?token=…`, emailed by Supabase Auth when `SUPABASE_SERVICE_KEY` is set (locally it lands in Mailpit) and always shown to the Admin to copy. Approving a Deck with blocking Issues needs `override_reason`. Approvals, Overrides, rejections, caption edits and Member changes go to `audit_events` (append-only; Admins read it at `/audit`).
 
 `/assets/*` (rendered slides) stays public because Instagram fetches it anonymously. Tests sign their own tokens with a throwaway key (`backend/tests/conftest.py`), so they need no Supabase Auth.
 

@@ -12,10 +12,10 @@ import type { Me, Role } from "./types";
 
 export const ROLE_LABEL: Record<Role, string> = { viewer: "Viewer", editor: "Editor", approver: "Approver", admin: "Admin" };
 export const ROLE_HINT: Record<Role, string> = {
-  viewer: "Sees everything",
-  editor: "Also starts Jobs and Brainstorms and edits Decks",
-  approver: "Also approves and rejects Decks",
-  admin: "Also manages Members and reads the audit log",
+  viewer: "sees everything",
+  editor: "also starts decks and Brainstorms and edits decks",
+  approver: "also approves (or overrides) and rejects decks",
+  admin: "also manages the team and reads the audit log",
 };
 export const ROLES: Role[] = ["viewer", "editor", "approver", "admin"];
 const RANK: Record<Role, number> = { viewer: 0, editor: 1, approver: 2, admin: 3 };
