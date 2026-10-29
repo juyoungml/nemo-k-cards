@@ -5,6 +5,7 @@
 import bad from "./scenarios/bad.json";
 import fail from "./scenarios/fail.json";
 import good from "./scenarios/good.json";
+import slideSources from "./scenarios/slide-sources.json";
 import { seedInstagramAccounts, seedBrainstorm, seedPolicyEvents } from "./seed";
 import type {
   CardDeck,
@@ -21,6 +22,7 @@ import type {
   PipelineStep,
   PolicyEvent,
   SafeguardVerdict,
+  SlideSources,
   Scenario,
   VerificationReport,
 } from "@/lib/types";
@@ -188,6 +190,8 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     pipeline,
     log,
     material: job.material ?? [],
+    // Fact sources per slide (#25): fixtures here; the real API computes them (backend/app/slide_sources.py).
+    slide_sources: deck && !job.override && reached("verify") ? ((slideSources as unknown as Record<string, SlideSources[]>)[job.scenario] ?? []) : [],
   };
 }
 

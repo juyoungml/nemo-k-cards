@@ -1,0 +1,97 @@
+{
+  "_comment": "Per-slide fact sources (#25) the mock returns for each scenario's Deck. The real API computes these (backend/app/slide_sources.py).",
+  "good": [
+    { "slide_index": 0, "layout": "cover", "facts": [], "links": [], "unsourced": [], "general": false },
+    {
+      "slide_index": 1, "layout": "event", "event_id": "evt-1", "event_title": "Seongsu Stationery Pop-up",
+      "facts": [
+        { "field": "title", "value": "Seongsu Stationery Pop-up (성수 문구 팝업)", "recorded": true, "sources": [
+          { "origin": "material", "material_id": "m-mock00000000001", "material_name": "seongsu-press-kit.pdf", "quote": "성수 문구 팝업 (Seongsu Stationery Pop-up)", "verified": true }
+        ] },
+        { "field": "dates", "value": "Oct 9–19", "recorded": true, "sources": [
+          { "origin": "material", "material_id": "m-mock00000000001", "material_name": "seongsu-press-kit.pdf", "quote": "Open daily, October 9 to 19, 11:00–20:00", "verified": true },
+          { "origin": "link", "url": "https://english.visitkorea.or.kr/", "status": "ok", "http_code": 200, "verified": true }
+        ] },
+        { "field": "station", "value": "Seongsu Stn. (Line 2) Exit 3", "recorded": true, "sources": [
+          { "origin": "link", "url": "https://english.visitkorea.or.kr/", "status": "ok", "http_code": 200, "verified": true }
+        ] },
+        { "field": "price", "value": "Free", "recorded": true, "sources": [
+          { "origin": "material", "material_id": "m-mock00000000001", "material_name": "seongsu-press-kit.pdf", "quote": "Entry is free for everyone", "verified": true }
+        ] },
+        { "field": "booking", "value": "Walk-in · waitlist kiosk", "recorded": true, "sources": [
+          { "origin": "material", "material_id": "m-mock00000000001", "material_name": "seongsu-press-kit.pdf", "quote": "Walk-ins welcome; a waitlist kiosk at the door", "verified": false, "note": "the quoted words are not in the material" }
+        ] }
+      ],
+      "links": [], "unsourced": [], "general": false
+    },
+    {
+      "slide_index": 2, "layout": "event", "event_id": "evt-2", "event_title": "Seoul Lantern Walk",
+      "facts": [
+        { "field": "title", "value": "Seoul Lantern Walk (청계천)", "recorded": false, "sources": [
+          { "origin": "link", "url": "https://culture.seoul.go.kr/", "status": "ok", "http_code": 200 }
+        ] },
+        { "field": "dates", "value": "Oct 10–12", "recorded": true, "sources": [
+          { "origin": "link", "url": "https://culture.seoul.go.kr/", "status": "ok", "http_code": 200, "verified": true }
+        ] },
+        { "field": "station", "value": "Gwanghwamun Stn. (Line 5) Exit 5", "recorded": true, "sources": [
+          { "origin": "link", "url": "https://popply.co.kr/popup-hongdae", "status": "dead", "http_code": 404, "verified": false, "note": "the link did not pass the check" }
+        ] },
+        { "field": "price", "value": "Free", "recorded": true, "sources": [
+          { "origin": "link", "url": "https://news.example.com/lantern-walk-2026", "status": "unchecked", "verified": false, "note": "not one of the event's sources" }
+        ] }
+      ],
+      "links": [], "unsourced": ["time '7pm' is not in the briefs"], "general": false
+    },
+    {
+      "slide_index": 3, "layout": "event", "event_id": "evt-3", "event_title": "Modern Hanbok",
+      "facts": [
+        { "field": "title", "value": "Modern Hanbok (모던 한복 전시)", "recorded": false, "sources": [
+          { "origin": "link", "url": "https://tickets.interpark.com/", "status": "ok", "http_code": 200 }
+        ] },
+        { "field": "dates", "value": "Oct 1 – Nov 30", "recorded": false, "sources": [
+          { "origin": "link", "url": "https://tickets.interpark.com/", "status": "ok", "http_code": 200 }
+        ] },
+        { "field": "price", "value": "₩10,000", "recorded": false, "sources": [
+          { "origin": "link", "url": "https://tickets.interpark.com/", "status": "ok", "http_code": 200 }
+        ] }
+      ],
+      "links": [], "unsourced": [], "general": false
+    },
+    { "slide_index": 4, "layout": "tips", "facts": [], "links": [], "unsourced": [], "general": true },
+    { "slide_index": 5, "layout": "tips", "facts": [], "links": [], "unsourced": [], "general": true },
+    { "slide_index": 6, "layout": "cta", "facts": [], "links": [], "unsourced": [], "general": false }
+  ],
+  "bad": [
+    { "slide_index": 0, "layout": "cover", "facts": [], "links": [], "unsourced": [], "general": false },
+    {
+      "slide_index": 1, "layout": "event", "event_id": "evt-b1", "event_title": "Tank Day Sale",
+      "facts": [
+        { "field": "title", "value": "Tank Day Sale (탱크데이)", "recorded": false, "sources": [
+          { "origin": "link", "url": "https://culture.seoul.go.kr/", "status": "ok", "http_code": 200 }
+        ] }
+      ],
+      "links": [{ "origin": "link", "url": "https://visitkorea-tickets.xyz/free", "status": "suspicious", "reason": "lookalike" }],
+      "unsourced": ["'51.8%' is not in the briefs"], "general": false
+    },
+    {
+      "slide_index": 2, "layout": "event", "event_id": "evt-b2", "event_title": "Seoul Night Market",
+      "facts": [
+        { "field": "title", "value": "Seoul Night Market (서울 야시장)", "recorded": false, "sources": [
+          { "origin": "link", "url": "https://culture.seoul.go.kr/event/night-market", "status": "ok", "http_code": 200 }
+        ] }
+      ],
+      "links": [], "unsourced": [], "general": false
+    },
+    {
+      "slide_index": 3, "layout": "event", "event_id": "evt-b2", "event_title": "Seoul Night Market",
+      "facts": [
+        { "field": "title", "value": "Seoul Night Market (서울 야시장)", "recorded": false, "sources": [
+          { "origin": "link", "url": "https://culture.seoul.go.kr/event/night-market", "status": "ok", "http_code": 200 }
+        ] }
+      ],
+      "links": [], "unsourced": [], "general": false
+    },
+    { "slide_index": 4, "layout": "tips", "facts": [], "links": [], "unsourced": [], "general": true },
+    { "slide_index": 5, "layout": "cta", "facts": [], "links": [], "unsourced": [], "general": false }
+  ]
+}

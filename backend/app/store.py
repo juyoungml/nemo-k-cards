@@ -115,7 +115,8 @@ def _rows(org_id: UUID, sql: str, params: tuple) -> list[str]:
 
 
 def save_job(org_id: UUID, job: Job, *, audit: "Entry | None" = None) -> Job:
-    _put(org_id, "jobs", job.id, job, {"created_at": job.created_at}, audit)
+    stored = job.model_copy(update={"slide_sources": []}) if job.slide_sources else job  # view only (#25)
+    _put(org_id, "jobs", job.id, stored, {"created_at": job.created_at}, audit)
     return job
 
 
