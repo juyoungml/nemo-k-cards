@@ -3,10 +3,17 @@
 import type { InstagramAccount, Brainstorm, PolicyEvent } from "@/lib/types";
 
 export const seedInstagramAccounts: InstagramAccount[] = [
-  { handle: "@whatsonkorea", platform: "Instagram", followers: 12480, live: true },
-  { handle: "@whatsonkorea.jp", platform: "Instagram", followers: 2104, live: false },
-  { handle: "What's On Korea", platform: "Threads", followers: 860, live: false },
-  { handle: "What's On Korea", platform: "YouTube Shorts", followers: 1320, live: false },
+  {
+    id: "00000000-0000-4000-8000-000000000001",
+    handle: "@whatsonkorea",
+    platform: "Instagram",
+    account_type: "BUSINESS",
+    status: "connected",
+    token_expires_at: "2026-12-28T00:00:00Z",
+    connected_at: "2026-10-29T00:00:00Z",
+    followers: null,
+    live: true,
+  },
 ];
 
 export const seedPolicyEvents: PolicyEvent[] = [

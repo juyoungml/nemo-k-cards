@@ -7,7 +7,8 @@ Actions written today:
   job.created · deck.edited · deck.approved · deck.overridden · deck.rejected ·
   deck.approve_refused (the Safeguard blocked the Deck, or it has no verdict) · safeguard.blocked (written by the
   host for the Member who started the Job, or approved it when the publish-time re-check blocked) ·
-  safeguard.edit_blocked (a caption edit refused at Approve or before upload)"""
+  safeguard.edit_blocked (a caption edit refused at Approve or before upload) ·
+  instagram.connected · instagram.disconnected"""
 
 import json
 from datetime import datetime

@@ -21,29 +21,47 @@ export function DashboardView() {
       <StatRow metrics={metrics.data} />
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <Panel title="Instagram accounts" description="Connected accounts · live from Instagram" className="w-full lg:w-[520px] lg:shrink-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Account</TableHead>
-                <TableHead>Platform</TableHead>
-                <TableHead className="text-right">Followers</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {accounts.data.map((c) => (
-                <TableRow key={`${c.handle}-${c.platform}`}>
-                  <TableCell>{c.handle}</TableCell>
-                  <TableCell>{c.platform}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatNumber(c.followers)}</TableCell>
-                  <TableCell>
-                    <StatusBadge tone={c.live ? "success" : "neutral"}>{c.live ? "Live" : "Mock"}</StatusBadge>
-                  </TableCell>
+        <Panel
+          title="Instagram accounts"
+          description="This Organization's connected accounts"
+          className="w-full lg:w-[520px] lg:shrink-0"
+          action={
+            <Link href="/instagram" className="text-[13px] font-medium text-primary hover:underline">
+              Manage →
+            </Link>
+          }
+        >
+          {accounts.data.length === 0 ? (
+            <p className="py-4 text-sm text-muted-foreground">
+              No Instagram account connected yet.{" "}
+              <Link href="/instagram" className="font-medium text-primary hover:underline">
+                Connect one
+              </Link>
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Platform</TableHead>
+                  <TableHead className="text-right">Followers</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {accounts.data.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell>{c.handle}</TableCell>
+                    <TableCell>{c.platform}</TableCell>
+                    <TableCell className="text-right tabular-nums">{c.followers === null ? "—" : formatNumber(c.followers)}</TableCell>
+                    <TableCell>
+                      <StatusBadge tone={c.live ? "success" : "warning"}>{c.live ? "Connected" : "Reconnect needed"}</StatusBadge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </Panel>
 
         <Panel

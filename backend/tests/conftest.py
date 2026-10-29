@@ -32,6 +32,13 @@ try:
     with psycopg.connect(os.environ["DATABASE_URL"]) as _c:
         for sql in sorted((Path(__file__).resolve().parents[2] / "supabase/migrations").glob("*.sql")):
             _c.execute(sql.read_text())
+        # Instagram tokens (#15) go to Supabase Vault. The migration installs it where Postgres has it (local
+        # Supabase); plain Postgres gets a plain-text stand-in with the same interface, for tests only.
+        if _c.execute("select to_regclass('vault.decrypted_secrets')").fetchone()[0] is None:
+            _c.execute((Path(__file__).parent / "vault_shim.sql").read_text())
+            VAULT = "shim"
+        else:
+            VAULT = "supabase_vault"
 except Exception:
     _drop_test_db()
     raise
@@ -41,6 +48,9 @@ except Exception:
 for key, value in {
     "PUBLISH_MODE": "mock", "IMAGE_HOST": "local", "AGENT_RUNNER": "local", "DBOS_DATABASE_URL": "",
     "IG_USER_ID": "", "IG_ACCESS_TOKEN": "", "PUBLIC_ASSET_BASE_URL": "",
+    # Instagram connect (#15): tests that need it set a fake app on `settings` and fake Meta with MockTransport.
+    "INSTAGRAM_APP_ID": "", "INSTAGRAM_APP_SECRET": "", "INSTAGRAM_REDIRECT_URI": "",
+    "INSTAGRAM_ACCOUNTS_PER_ORG": "1",
     # Sign-in is checked against a fake Supabase whose signing key exists only in this process (see `auth_keys`).
     "SUPABASE_URL": "http://supabase.test", "SUPABASE_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": "",
     "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_OAUTH_TOKEN": "",
@@ -51,7 +61,8 @@ for key, value in {
 def pytest_sessionstart(session):
     """Fail fast if isolation is broken: a test run must never see live credentials or publish for real."""
     from app.config import settings
-    assert settings.publish_mode == "mock" and not settings.ig_access_token and not settings.supabase_service_key, \
+    assert settings.publish_mode == "mock" and not settings.ig_access_token and not settings.supabase_service_key \
+        and not settings.instagram_app_secret, \
         "tests are not isolated from live credentials"
     assert "wok-test-" in str(settings.output_dir), "tests would write into the real data dir"
     assert conninfo_to_dict(settings.database_url).get("dbname") == TEST_DB, \

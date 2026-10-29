@@ -12,7 +12,8 @@ declares none.
 
 Deny by default: a new route is protected without doing anything. Only /health, CORS preflights and the
 rendered-slide files under /assets skip this check; /assets answers only links signed by app/assets.py
-(an <img> tag can't send a Bearer token, and Instagram fetches anonymously).
+(an <img> tag can't send a Bearer token, and Instagram fetches anonymously). The Instagram OAuth callback is
+public too: its signed, single-use `state` is checked by app/instagram_accounts.py.
 
 Token checks: signature, `exp`, `aud == "authenticated"`, `iss == SUPABASE_URL + "/auth/v1"`, `role ==
 "authenticated"`, a UUID `sub`, not anonymous. Supabase signs with an asymmetric key (ES256/RS256, published
@@ -40,7 +41,9 @@ log = logging.getLogger("auth")
 ASYMMETRIC = ("ES256", "RS256", "EdDSA")
 LEEWAY_S = 30  # clock skew between Supabase and this host
 
-PUBLIC_PATHS = {"/health"}
+# /instagram-accounts/callback: Instagram redirects the browser there, so it carries no session; its signed,
+# single-use `state` is the credential (app/instagram_accounts.py).
+PUBLIC_PATHS = {"/health", "/instagram-accounts/callback"}
 PUBLIC_PREFIXES = ("/assets/",)  # rendered slides: the signed link is the credential (app/assets.py)
 # Signed in is enough here: these are how a person without an Organization gets one.
 NO_ORG_ROUTES = {("GET", "/me"), ("POST", "/orgs"), ("POST", "/invitations/accept")}

@@ -72,6 +72,9 @@ EXPECTED = {
     ("GET", "/orgs/current/invitations"): "admin",
     ("DELETE", "/orgs/current/invitations/{invitation_id}"): "admin",
     ("GET", "/audit"): "admin",
+    ("GET", "/instagram-accounts/connection"): "viewer",
+    ("POST", "/instagram-accounts/connect"): "admin",
+    ("DELETE", "/instagram-accounts/{account_id}"): "admin",
 }
 
 
@@ -135,7 +138,7 @@ def test_each_role_is_allowed_exactly_its_routes(team, role, no_background):
     c = team[role]
     other = add_member(c.org_id, "viewer")
     ids = {"job_id": _ready_job(c.org_id).id, "brainstorm_id": "nope", "user_id": str(other),
-           "invitation_id": str(uuid.uuid4())}
+           "invitation_id": str(uuid.uuid4()), "account_id": str(uuid.uuid4())}
     for (method, path), need in EXPECTED.items():
         if need == "signed-in":
             continue

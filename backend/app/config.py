@@ -47,6 +47,18 @@ class Settings(BaseSettings):
     ig_access_token: str = ""
     public_asset_base_url: str = ""
 
+    # Connecting an Organization's own Instagram account (#15): "Instagram API with Instagram Login" on our Meta
+    # app (App Dashboard → Instagram → API setup with Instagram login). Host-only secrets. Connecting is off
+    # (and the Admin says so) until all three are set. The redirect URI is this API's public
+    # `/instagram-accounts/callback` URL and must be listed exactly as "Valid OAuth Redirect URIs" on the app.
+    instagram_app_id: str = ""
+    instagram_app_secret: str = ""
+    instagram_redirect_uri: str = ""
+    instagram_api_version: str = "v24.0"
+    # Instagram accounts an Organization may connect when `orgs.instagram_account_limit` is unset (billing, #29,
+    # will set it from the plan).
+    instagram_accounts_per_org: int = 1
+
     # Supabase project: sign-in (every route except /health needs its access token) and, with
     # IMAGE_HOST=supabase, slide hosting. Local: `supabase start` → http://127.0.0.1:54321. Empty = all 401.
     supabase_url: str = ""

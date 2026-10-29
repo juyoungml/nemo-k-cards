@@ -52,6 +52,7 @@ Check it with `curl localhost:8000/health`, which returns `demo_mode`, `agent_ru
 | `WORKFLOW_VERSION` | default `2` (in code; leave it unset) | bump the default in `config.py` when the pipeline's stage list or order changes (`STAGES` in `orchestrator.py`) |
 | `SUPABASE_URL` | e.g. `http://127.0.0.1:54321` | Supabase project for sign-in (and slide hosting with `IMAGE_HOST=supabase`). Every route except `/health` needs a session from it; empty = every route 401 |
 | `ADMIN_URL` | default `http://localhost:3000` | where invitation links point (`/invite?token=…`); must be on the Supabase project's Auth redirect allow list |
+| `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` / `INSTAGRAM_REDIRECT_URI` | Meta app values; URI = `https://<api>/instagram-accounts/callback` | lets Admins connect the Organization's own Instagram account (#15). Empty = connecting is off. `INSTAGRAM_ACCOUNTS_PER_ORG` (default `1`) is the account limit unless `orgs.instagram_account_limit` is set |
 | `SUPABASE_JWT_SECRET` | secret | only for projects still signing with the legacy HS256 secret. The local CLI and new cloud projects use asymmetric keys from `SUPABASE_URL/auth/v1/.well-known/jwks.json` (cached 10 min) |
 
 Always use `--reload`. Without it, a long-running API keeps old Python while Jinja templates load fresh from disk, and renders fail (`'slide_class' is undefined`).
@@ -87,6 +88,8 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/me
 ```
 
 **Members and Roles (#14).** Every route declares its least Role (`auth.Viewer` / `Editor` / `Approver` / `Admin`, or `auth.SignedIn` for `/me`, `POST /orgs`, `POST /invitations/accept`); `backend/tests/test_roles.py` holds the matrix and fails on a route that declares none. A person in several Organizations picks one in the sidebar; the Admin sends it as `X-Org-Id` and the API refuses (403) an Organization the caller isn't a Member of. Admins invite on the Team page: the link is `ADMIN_URL/invite?token=…`, emailed by Supabase Auth when `SUPABASE_SERVICE_KEY` is set (locally it lands in Mailpit) and always shown to the Admin to copy. Approving a Deck with blocking Issues needs `override_reason`; a Deck the Safeguard blocked can't be approved at all. Approvals, Overrides, rejections, caption edits, Safeguard blocks, refused approvals and Member changes go to `audit_events` (append-only; Admins read it at `/audit`).
+
+**Instagram accounts (#15).** Admins connect the Organization's own Instagram Business or Creator account on the Instagram page (`/instagram`) through Instagram's OAuth (`backend/app/instagram_accounts.py`). The long-lived token goes into Supabase Vault (`app/secret_store.py`); `instagram_accounts` keeps only `token_ref`. Only Pilot Organizations can connect; an operator turns that on after adding the account as a tester on the Meta app: `cd backend && uv run python -m app.pilot on <org-id>` (`list`, `off`, `limit <org-id> <n|default>`). Tests fake Meta with `httpx.MockTransport` (`instagram_api.transport`) and, on plain Postgres, load a plain-text Vault stand-in (`backend/tests/vault_shim.sql`, tests only). **Publishing still uses `IG_ACCESS_TOKEN`** until #21 switches it to the Organization's account.
 
 `/assets/*` (rendered slides) stays public because Instagram fetches it anonymously. Tests sign their own tokens with a throwaway key (`backend/tests/conftest.py`), so they need no Supabase Auth.
 
@@ -138,7 +141,7 @@ Live runs never publish (`PUBLISH_MODE=mock`, publishing credentials blanked) an
 ## Rules
 
 - Never set `PUBLISH_MODE=graph` or approve a job unless a human explicitly asked. It posts publicly.
-- Secrets (`IG_ACCESS_TOKEN`, `SUPABASE_SERVICE_KEY`, Anthropic keys) stay in `backend/.env` on the host and never go into the sandbox, the agent workspace, logs or commits.
+- Secrets (`IG_ACCESS_TOKEN`, `INSTAGRAM_APP_SECRET`, `SUPABASE_SERVICE_KEY`, Anthropic keys) stay in `backend/.env` on the host and never go into the sandbox, the agent workspace, logs or commits. Organizations' Instagram tokens live only in Supabase Vault: never return, log or copy them (`instagram_accounts.access_token` is for the publisher).
 - Data and caches don't live in the repo (`/data` is a gitignored symlink).
 - Organization data goes through `app/store.py` with the caller's Organization (`ctx.org_id`): `store.tenant(org_id)` runs as the `wok_api` role so row-level security applies. `store.system()` bypasses it and is only for work that spans Organizations (creating one, restart recovery). DBOS's checkpoint tables (schema `dbos`) are system tables of the same kind: `wok_api` and Supabase's API roles can't reach them. New Organization-owned tables need `org_id`, RLS and a `wok_api` policy (see `supabase/migrations/20261029140000_org_isolation.sql`).
 - Pipeline stages run as DBOS steps (`orchestrator.STAGES`). Every side effect (agent call, HTTP, rendering, file or store write) happens inside a stage function, never in `job_workflow` itself, or a resumed Job repeats it. A stage saves the Job before it returns; whatever a later stage needs that isn't on the Job goes in `s.out` as small JSON.

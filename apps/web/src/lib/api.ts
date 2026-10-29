@@ -7,7 +7,7 @@ import { EventSource } from "eventsource";
 import { orgHeader, setActiveOrgId } from "./org";
 import { accessToken, isAuthPath, reloadTo } from "./supabase";
 import type {
-  AuditEvent, Brainstorm, Invitation, InvitationCreated, InstagramAccount, Job, Me, Member, Metric, Org, PolicyEvent, Role, Scenario,
+  AuditEvent, Brainstorm, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job, Me, Member, Metric, Org, PolicyEvent, Role, Scenario,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
@@ -94,7 +94,13 @@ export const api = {
   getAudit: (before?: number) => req<AuditEvent[]>(`/audit?limit=100${before ? `&before=${before}` : ""}`),
 
   getMetrics: () => req<Metric[]>("/metrics"),
+  // Instagram accounts of the current Organization (listing: any Member; connect and disconnect: Admins).
+  // Connecting returns Instagram's authorization URL; the browser goes there and Instagram sends it back through
+  // the API's callback to /instagram?connected=… or ?error=….
   getInstagramAccounts: () => req<InstagramAccount[]>("/instagram-accounts"),
+  getInstagramConnection: () => req<InstagramConnection>("/instagram-accounts/connection"),
+  connectInstagram: () => req<{ authorize_url: string }>("/instagram-accounts/connect", { method: "POST" }),
+  disconnectInstagram: (id: string) => req<void>(`/instagram-accounts/${id}`, { method: "DELETE" }),
   getPolicyLog: () => req<{ stats: Metric[]; events: PolicyEvent[] }>("/policy-events"),
 
   createBrainstorm: (sample = true) => req<Brainstorm>("/brainstorms", { method: "POST", json: { sample } }),
