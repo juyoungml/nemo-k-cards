@@ -9,7 +9,7 @@ import httpx
 import pytest
 from httpx_secure import SSRFProtectionError
 
-from app import drafts
+from app import brainstorms
 from app.schemas import CardDeck, ImageAsset
 from app.services import link_checker, photos, safe_fetch
 
@@ -268,7 +268,7 @@ async def test_photo_download_refuses_internal_redirect(tmp_path):
 async def test_brainstorm_page_fetch_refuses_internal(monkeypatch):
     web = Web({})
     monkeypatch.setattr(safe_fetch, "client", web.client)
-    texts, blocked = await drafts.fetch_pages(["https://internal.example/secret"])
+    texts, blocked = await brainstorms.fetch_pages(["https://internal.example/secret"])
     assert texts == [] and "internal.example" in blocked[0] and web.seen == []
 
 

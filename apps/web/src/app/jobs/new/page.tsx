@@ -6,7 +6,7 @@ export default function NewJobPage() {
   return (
     <>
       <PageHeader
-        title="New Job"
+        title="New deck"
         description="Describe what to research. The agent runs in an OpenShell sandbox; you approve before anything is posted."
       />
       <ModeSwitch active="quick" />

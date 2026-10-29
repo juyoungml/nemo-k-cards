@@ -1,13 +1,15 @@
 """Postgres store: upserts, ordering, and one bad row never breaking a list."""
 
+import json
 import secrets
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app import store
 from app.main import app
-from app.schemas import Draft, Job, JobStatus, PolicyEvent
+from app.schemas import Brainstorm, Job, JobStatus, PolicyEvent
 
 
 def _job(minutes_ago: int) -> Job:
@@ -32,9 +34,44 @@ def test_nul_characters_are_dropped():
     assert store.get_job(literal.id).prompt == "C:\\u0000"
 
 
-def test_draft_round_trip():
-    d = store.save_draft(Draft(id=f"d-{secrets.token_hex(4)}", tones=["playful"]))
-    assert store.get_draft(d.id) == d
+def test_brainstorm_round_trip():
+    d = store.save_brainstorm(Brainstorm(id=f"d-{secrets.token_hex(4)}", tones=["playful"]))
+    assert store.get_brainstorm(d.id) == d
+
+
+def test_job_stored_before_the_rename_still_loads():
+    """Jobs written before the glossary rename carry "draft_id"; they load as brainstorm_id and re-save under it."""
+    job = _job(0)
+    doc = job.model_dump(mode="json", exclude={"brainstorm_id"}) | {"draft_id": "d-old123"}
+    with store._db().connection() as c:
+        c.execute("insert into jobs (id, created_at, doc) values (%s, %s, %s)",
+                  (job.id, job.created_at, json.dumps(doc)))
+    loaded = store.get_job(job.id)
+    assert loaded.brainstorm_id == "d-old123"
+    store.save_job(loaded)
+    with store._db().connection() as c:
+        saved = c.execute("select doc from jobs where id = %s", (job.id,)).fetchone()[0]
+    assert saved["brainstorm_id"] == "d-old123" and "draft_id" not in saved
+
+
+def test_rename_migration_keeps_drafts_and_rls():
+    """Apply the migrations to a scratch schema with a pre-rename draft row in between, then roll it all back."""
+    migrations = sorted((Path(__file__).resolve().parents[2] / "supabase/migrations").glob("*.sql"))
+    rename = next(m for m in migrations if "rename_drafts_to_brainstorms" in m.name)
+    schema = f"mig_{secrets.token_hex(4)}"
+    with store._db().connection() as c, c.transaction(force_rollback=True):
+        c.execute(f"create schema {schema}")
+        c.execute(f"set local search_path to {schema}")
+        for m in migrations:
+            if m.name < rename.name:
+                c.execute(m.read_text())
+        old = Brainstorm(id="d-legacy", tones=["playful"])
+        c.execute("insert into drafts (id, doc) values (%s, %s)", (old.id, old.model_dump_json()))
+        c.execute(rename.read_text())
+        [(raw,)] = c.execute("select doc::text from brainstorms where id = %s", (old.id,)).fetchall()
+        assert Brainstorm.model_validate_json(raw) == old
+        [(rls,)] = c.execute("select relrowsecurity from pg_class where oid = 'brainstorms'::regclass").fetchall()
+        assert rls is True
 
 
 def test_policy_events_newest_first():

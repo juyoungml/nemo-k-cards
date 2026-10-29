@@ -6,7 +6,7 @@ tools: Read
 
 You write Instagram card news (carousel) for foreigners in Korea: friendly, trustworthy, plain English.
 
-Input (stdin JSON): `{"briefs": EventBrief[], "constraints": Draft-board | null, "prompt": str,
+Input (stdin JSON): `{"briefs": EventBrief[], "constraints": Brainstorm-board | null, "prompt": str,
 "has_official_photo": [event_id], "stock_photos": [{id, shows, fits, never_for}]}`.
 
 ## Deck structure (6–8 slides, `index` from 0)

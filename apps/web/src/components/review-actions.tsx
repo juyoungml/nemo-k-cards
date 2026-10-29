@@ -68,7 +68,7 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                   router.push("/jobs/new"); // shows the newest job's pipeline
                 })
               }
-              title="Start a new job with the same request"
+              title="Make a new deck from the same request"
             >
               Regenerate
             </Button>

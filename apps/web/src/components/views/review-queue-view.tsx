@@ -16,13 +16,13 @@ export function ReviewQueueView() {
 
   return (
     <>
-      <p className="-mt-4 text-sm text-muted-foreground">{waiting} card news waiting for your decision</p>
+      <p className="-mt-4 text-sm text-muted-foreground">{waiting} {waiting === 1 ? "deck" : "decks"} waiting for your decision</p>
       <Panel>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Title</TableHead>
-              <TableHead>Job</TableHead>
+              <TableHead>ID</TableHead>
               <TableHead>Mode</TableHead>
               <TableHead>Slides</TableHead>
               <TableHead>Issues</TableHead>

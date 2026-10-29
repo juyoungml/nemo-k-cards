@@ -12,13 +12,13 @@ import logging
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from app import drafts, store
+from app import brainstorms, store
 from app.config import settings
 from app.pipeline.agent_runner import run_stage
 from app.renderer.html import HtmlRenderer, weekend_label
 from app.schemas import (
+    Brainstorm,
     CardDeck,
-    Draft,
     EventBrief,
     Issue,
     Job,
@@ -57,12 +57,12 @@ def spawn(coro) -> None:
     t.add_done_callback(_tasks.discard)
 
 
-def new_job(job_id: str, prompt: str, source: str = "quick", draft_id: str | None = None) -> Job:
+def new_job(job_id: str, prompt: str, source: str = "quick", brainstorm_id: str | None = None) -> Job:
     keys = [k for k in STEPS if not (source == "brainstorm" and k == "research")]
     steps = [PipelineStep(name=STEPS[k][0], where=STEPS[k][1]) for k in keys]
     steps[-1].note = "Approve in Review"
     return Job(id=job_id, prompt=prompt, created_at=datetime.now(UTC), source=source,
-               draft_id=draft_id, pipeline=steps)
+               brainstorm_id=brainstorm_id, pipeline=steps)
 
 
 class Run:
@@ -119,19 +119,19 @@ def _scenario(name: str = "good"):
     return load
 
 
-async def run_job(job_id: str, draft: Draft | None = None, scenario: str = "good") -> None:
+async def run_job(job_id: str, brainstorm: Brainstorm | None = None, scenario: str = "good") -> None:
     if not (job := await asyncio.to_thread(store.get_job, job_id)):
         return
     r = Run(job)
     try:
-        await _run_job(r, draft, scenario)
+        await _run_job(r, brainstorm, scenario)
     finally:
         await r.flush()
 
 
-async def _run_job(r: Run, draft: Draft | None, scenario: str) -> None:
+async def _run_job(r: Run, brainstorm: Brainstorm | None, scenario: str) -> None:
     job, job_id = r.job, r.job.id
-    fx = _scenario("brainstorm" if draft else scenario)
+    fx = _scenario("brainstorm" if brainstorm else scenario)
     live = settings.demo_mode == "live"
     fail = None if live else fx("fail.json")
     current = "research"
@@ -175,9 +175,9 @@ async def _run_job(r: Run, draft: Draft | None, scenario: str) -> None:
         r.step("verify", "running")
         fixture_fail("verify")
         host_issues: list[Issue] = []  # board problems found on the host; block approval like QA issues
-        if draft:
+        if brainstorm:
             # Brainstorm skips Research: the board's facts become the brief, so its sources get the same check.
-            brief, problems = drafts.brief_from_draft(draft, datetime.now(KST).date())
+            brief, problems = brainstorms.brief_from_brainstorm(brainstorm, datetime.now(KST).date())
             job.briefs = [brief] if brief else []
             for p in problems:
                 r.log("verify", p, "warn")
@@ -200,8 +200,8 @@ async def _run_job(r: Run, draft: Draft | None, scenario: str) -> None:
                 if str(src.url) in ok_urls:
                     src.fetched_at = datetime.now(UTC)
         included = [b for b in job.briefs if b.id not in report.excluded_event_ids]
-        if draft:
-            draft, demoted = drafts.demote_unverified(draft, ok_urls)
+        if brainstorm:
+            brainstorm, demoted = brainstorms.demote_unverified(brainstorm, ok_urls)
             if demoted:
                 r.log("verify", f"{demoted} board fact(s) marked unverified: source failed the link check", "warn")
             if job.briefs and not included:
@@ -227,8 +227,8 @@ async def _run_job(r: Run, draft: Draft | None, scenario: str) -> None:
         r.step("copy", "running")
         fixture_fail("copy")
         if live:
-            constraints = draft.model_dump(include={"facts", "angles", "selected_angle_id", "targets", "tones",
-                                                    "outline"}) if draft else None
+            constraints = brainstorm.model_dump(include={"facts", "angles", "selected_angle_id", "targets", "tones",
+                                                    "outline"}) if brainstorm else None
             deck = await run_stage(
                 "copywriter",
                 "Use the copywriter subagent. Turn the verified events (and brainstorm constraints, if any) "
@@ -241,7 +241,7 @@ async def _run_job(r: Run, draft: Draft | None, scenario: str) -> None:
                 CardDeck, job_id=job.id)
         else:
             await asyncio.sleep(FIXTURE_DELAY)
-            deck = (_deck_from_draft(draft, included[0].id if included else None) if draft
+            deck = (_deck_from_brainstorm(brainstorm, included[0].id if included else None) if brainstorm
                     else CardDeck.model_validate(fx("deck.json")))
         deck.job_id = job.id
         for line in photos.attach_vetted(deck, vetted):
@@ -287,7 +287,7 @@ async def _run_job(r: Run, draft: Draft | None, scenario: str) -> None:
                 {"deck": deck.model_dump(mode="json"), "briefs": [b.model_dump(mode="json") for b in included],
                  "qa_issues": [i.model_dump() for i in qa.issues],
                  "slide_paths": [str(s.path) for s in rendered],
-                 "board_facts": [f.model_dump() for f in draft.facts] if draft else None,
+                 "board_facts": [f.model_dump() for f in brainstorm.facts] if brainstorm else None,
                  "sensitive_topics_yaml": (settings.agent_dir.parent / "policies/content/sensitive_topics.yaml")
                  .read_text(encoding="utf-8"),
                  "today": datetime.now(KST).date().isoformat(),
@@ -328,15 +328,15 @@ async def _replay_policy_events(r: Run, events: list[dict]) -> None:
               "warn" if e.result.endswith("denied") else "info")
 
 
-def _deck_from_draft(draft: Draft, event_id: str | None = None) -> CardDeck:
+def _deck_from_brainstorm(brainstorm: Brainstorm, event_id: str | None = None) -> CardDeck:
     """Fixture copywriter for Brainstorm: outline headings + verified facts."""
-    angle = next((a for a in draft.angles if a.id == draft.selected_angle_id), None)
-    title = angle.title if angle else (draft.outline[0].heading if draft.outline else "What's on in Korea")
-    facts = "\n".join(f.value for f in draft.facts if f.verified)
+    angle = next((a for a in brainstorm.angles if a.id == brainstorm.selected_angle_id), None)
+    title = angle.title if angle else (brainstorm.outline[0].heading if brainstorm.outline else "What's on in Korea")
+    facts = "\n".join(f.value for f in brainstorm.facts if f.verified)
     slides = [{"index": i, "layout": o.layout, "heading": o.heading,
                "body": facts if o.layout == "event" and i == 1 else "",
                "event_id": event_id if o.layout == "event" and i == 1 else None}
-              for i, o in enumerate(draft.outline[:8])]
+              for i, o in enumerate(brainstorm.outline[:8])]
     while len(slides) < 6:
         slides.insert(-1, {"index": 0, "layout": "tips", "heading": "Good to know", "body": ""})
     for i, s in enumerate(slides):

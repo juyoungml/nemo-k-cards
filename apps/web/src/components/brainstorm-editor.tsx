@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { targetOptions, toneOptions } from "@/lib/constants";
-import type { Draft, Fact } from "@/lib/types";
+import type { Brainstorm, Fact } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const URL_RE = /https?:\/\/\S+/g;
@@ -41,16 +41,16 @@ function Chip({ selected, onClick, children }: { selected: boolean; onClick: () 
 
 const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
-export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
+export function BrainstormEditor({ initialBrainstorm }: { initialBrainstorm: Brainstorm }) {
   const router = useRouter();
-  const [draft, setDraft] = useState(initialDraft);
+  const [brainstorm, setBrainstorm] = useState(initialBrainstorm);
   const [input, setInput] = useState("");
   const [sending, startSending] = useTransition();
   const [generating, startGenerating] = useTransition();
   const [error, setError] = useState<string>();
 
-  // Board edits apply locally right away and are persisted with PATCH /drafts/{id}.
-  const boardOf = (d: Draft) => ({
+  // Board edits apply locally right away and are persisted with PATCH /brainstorms/{id}.
+  const boardOf = (d: Brainstorm) => ({
     facts: d.facts,
     angles: d.angles,
     selected_angle_id: d.selected_angle_id,
@@ -58,9 +58,9 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
     tones: d.tones,
     outline: d.outline,
   });
-  const edit = (next: Draft) => {
-    setDraft(next);
-    api.patchDraft(next.id, boardOf(next)).catch((e: Error) => setError(e.message));
+  const edit = (next: Brainstorm) => {
+    setBrainstorm(next);
+    api.patchBrainstorm(next.id, boardOf(next)).catch((e: Error) => setError(e.message));
   };
 
   const send = () => {
@@ -70,11 +70,11 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
     const message = text.replace(URL_RE, "").trim();
     setInput("");
     setError(undefined);
-    // Optimistic user bubble; the server returns the whole updated draft (reply + board).
-    setDraft((d) => ({ ...d, messages: [...d.messages, { role: "user", text: message, urls }] }));
+    // Optimistic user bubble; the server returns the whole updated brainstorm (reply + board).
+    setBrainstorm((d) => ({ ...d, messages: [...d.messages, { role: "user", text: message, urls }] }));
     startSending(async () => {
       try {
-        setDraft(await api.sendDraftMessage(draft.id, message, urls));
+        setBrainstorm(await api.sendBrainstormMessage(brainstorm.id, message, urls));
       } catch (e) {
         setError((e as Error).message);
       }
@@ -82,12 +82,12 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
   };
 
   const move = (i: number, dir: -1 | 1) => {
-    const outline = [...draft.outline];
+    const outline = [...brainstorm.outline];
     [outline[i], outline[i + dir]] = [outline[i + dir], outline[i]];
-    edit({ ...draft, outline });
+    edit({ ...brainstorm, outline });
   };
 
-  const sourceOk = draft.facts.some((f) => f.verified && f.source_url);
+  const sourceOk = brainstorm.facts.some((f) => f.verified && f.source_url);
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
@@ -99,7 +99,7 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
         </div>
 
         <ol className="flex flex-1 flex-col gap-2.5 overflow-y-auto">
-          {draft.messages.map((m, i) => (
+          {brainstorm.messages.map((m, i) => (
             <li key={i} className={cn("flex flex-col gap-1.5", m.role === "user" ? "items-end" : "items-start")}>
               {m.urls?.map((u) => (
                 <span key={u} className="inline-flex max-w-[330px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
@@ -157,7 +157,7 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
             {sourceOk && <StatusBadge tone="success">Link 200 OK · official</StatusBadge>}
           </div>
           <div className="flex gap-2">
-            {draft.facts.map((f) => (
+            {brainstorm.facts.map((f) => (
               <div
                 key={f.key}
                 title={f.verified ? f.source_url ?? undefined : "Not found in the source — copywriter won't state it as fact"}
@@ -176,14 +176,14 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
         <section className="space-y-2.5 rounded-xl border bg-card px-5 py-3.5">
           <h2 className="text-[15px] font-semibold">② Pick an angle</h2>
           <div className="flex gap-2.5">
-            {draft.angles.map((a, i) => {
-              const selected = a.id === draft.selected_angle_id;
+            {brainstorm.angles.map((a, i) => {
+              const selected = a.id === brainstorm.selected_angle_id;
               return (
                 <button
                   key={a.id}
                   type="button"
                   aria-pressed={selected}
-                  onClick={() => edit({ ...draft, selected_angle_id: a.id })}
+                  onClick={() => edit({ ...brainstorm, selected_angle_id: a.id })}
                   className={cn(
                     "flex-1 space-y-1.5 rounded-[10px] border px-3.5 py-3 text-left transition-colors hover:border-primary/40",
                     selected && "border-2 border-primary bg-brand-soft hover:border-primary",
@@ -207,7 +207,7 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
             <div key={field} className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
               <span className="w-12">{label}</span>
               {options.map((t) => (
-                <Chip key={t} selected={draft[field].includes(t)} onClick={() => edit({ ...draft, [field]: toggle(draft[field], t) })}>
+                <Chip key={t} selected={brainstorm[field].includes(t)} onClick={() => edit({ ...brainstorm, [field]: toggle(brainstorm[field], t) })}>
                   {t}
                 </Chip>
               ))}
@@ -217,11 +217,11 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
 
         <section className="flex-1 rounded-xl border bg-card px-5 py-3.5">
           <div className="flex items-center pb-1.5">
-            <h2 className="flex-1 text-[15px] font-semibold">③ Slide outline · {draft.outline.length} slides</h2>
+            <h2 className="flex-1 text-[15px] font-semibold">③ Slide outline · {brainstorm.outline.length} slides</h2>
             <span className="text-xs text-muted-foreground">click to edit · arrows to reorder</span>
           </div>
           <ol className="space-y-0.5">
-            {draft.outline.map((o, i) => (
+            {brainstorm.outline.map((o, i) => (
               <li
                 key={i}
                 className={cn("group flex items-center gap-2.5 rounded-lg px-2.5 py-1", o.updated_from_chat && "bg-brand-soft")}
@@ -231,7 +231,7 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
                 <input
                   value={o.heading}
                   onChange={(e) =>
-                    edit({ ...draft, outline: draft.outline.map((x, j) => (j === i ? { ...x, heading: e.target.value } : x)) })
+                    edit({ ...brainstorm, outline: brainstorm.outline.map((x, j) => (j === i ? { ...x, heading: e.target.value } : x)) })
                   }
                   aria-label={`Slide ${i + 1} heading`}
                   className={cn(
@@ -244,7 +244,7 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
                   <Button variant="ghost" size="icon-xs" aria-label="Move up" disabled={i === 0} onClick={() => move(i, -1)}>
                     <ArrowUp />
                   </Button>
-                  <Button variant="ghost" size="icon-xs" aria-label="Move down" disabled={i === draft.outline.length - 1} onClick={() => move(i, 1)}>
+                  <Button variant="ghost" size="icon-xs" aria-label="Move down" disabled={i === brainstorm.outline.length - 1} onClick={() => move(i, 1)}>
                     <ArrowDown />
                   </Button>
                 </span>
@@ -258,16 +258,16 @@ export function Brainstorm({ initialDraft }: { initialDraft: Draft }) {
             {error ? `Error: ${error}` : null}
             {!error && "Generate skips Research and starts at Verify → Copy → Render → QA → Review. You still approve before posting."}
           </p>
-          <Button variant="outline" size="lg" onClick={() => edit(draft)}>
-            Save draft
+          <Button variant="outline" size="lg" onClick={() => edit(brainstorm)}>
+            Save brainstorm
           </Button>
           <Button
             size="lg"
-            disabled={generating || !draft.selected_angle_id}
+            disabled={generating || !brainstorm.selected_angle_id}
             onClick={() =>
               startGenerating(async () => {
                 try {
-                  await api.generateFromDraft(draft.id);
+                  await api.generateFromBrainstorm(brainstorm.id);
                   router.push("/jobs/new"); // shows the newest job's pipeline
                 } catch (e) {
                   setError((e as Error).message);

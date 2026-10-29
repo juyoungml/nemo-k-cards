@@ -1,8 +1,8 @@
-// Static seed data for the mock backend (channels, baseline policy log, sample Brainstorm draft).
+// Static seed data for the mock backend (Instagram accounts, baseline policy log, sample Brainstorm).
 
-import type { Channel, Draft, PolicyEvent } from "@/lib/types";
+import type { InstagramAccount, Brainstorm, PolicyEvent } from "@/lib/types";
 
-export const seedChannels: Channel[] = [
+export const seedInstagramAccounts: InstagramAccount[] = [
   { handle: "@whatsonkorea", platform: "Instagram", followers: 12480, live: true },
   { handle: "@whatsonkorea.jp", platform: "Instagram", followers: 2104, live: false },
   { handle: "What's On Korea", platform: "Threads", followers: 860, live: false },
@@ -18,7 +18,7 @@ export const seedPolicyEvents: PolicyEvent[] = [
 
 const SRC = "https://culture.seoul.go.kr/event/mangwon-night-market";
 
-export const seedDraft: Draft = {
+export const seedBrainstorm: Brainstorm = {
   id: "d-sample",
   messages: [
     { role: "user", text: "망원 야시장 홍보하고 싶어요. 외국인 친구들이 망원은 잘 모르는데, 로컬 분위기 + 먹거리 위주로 알리고 싶어요.", urls: [SRC] },

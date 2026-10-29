@@ -2,7 +2,7 @@
 // NEXT_PUBLIC_API_URL unset → the in-app mock backend at /api/mock (src/mock/server.ts).
 // Set it to the FastAPI URL (e.g. http://localhost:8000) to run against the real backend.
 
-import type { Channel, Draft, Job, Metric, PolicyEvent, Scenario } from "./types";
+import type { InstagramAccount, Brainstorm, Job, Metric, PolicyEvent, Scenario } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
 export const IS_MOCK = !process.env.NEXT_PUBLIC_API_URL;
@@ -65,15 +65,15 @@ export const api = {
   },
 
   getMetrics: () => req<Metric[]>("/metrics"),
-  getChannels: () => req<Channel[]>("/channels"),
+  getInstagramAccounts: () => req<InstagramAccount[]>("/instagram-accounts"),
   getPolicyLog: () => req<{ stats: Metric[]; events: PolicyEvent[] }>("/policy-events"),
 
-  createDraft: (sample = true) => req<Draft>("/drafts", { method: "POST", json: { sample } }),
-  getDraft: (id: string) => req<Draft>(`/drafts/${id}`),
-  patchDraft: (id: string, patch: Partial<Draft>) => req<Draft>(`/drafts/${id}`, { method: "PATCH", json: patch }),
-  sendDraftMessage: (id: string, text: string, urls: string[]) =>
-    req<Draft>(`/drafts/${id}/messages`, { method: "POST", json: { text, urls } }),
-  generateFromDraft: (id: string) => req<Job>(`/drafts/${id}/generate`, { method: "POST" }),
+  createBrainstorm: (sample = true) => req<Brainstorm>("/brainstorms", { method: "POST", json: { sample } }),
+  getBrainstorm: (id: string) => req<Brainstorm>(`/brainstorms/${id}`),
+  patchBrainstorm: (id: string, patch: Partial<Brainstorm>) => req<Brainstorm>(`/brainstorms/${id}`, { method: "PATCH", json: patch }),
+  sendBrainstormMessage: (id: string, text: string, urls: string[]) =>
+    req<Brainstorm>(`/brainstorms/${id}/messages`, { method: "POST", json: { text, urls } }),
+  generateFromBrainstorm: (id: string) => req<Job>(`/brainstorms/${id}/generate`, { method: "POST" }),
 
   resetMock: () => req<{ ok: true }>("/reset", { method: "POST" }),
 };
