@@ -21,6 +21,7 @@ from app import (
     members,
     orgs,
     seed,
+    slide_sources,
     store,
 )
 from app.config import settings
@@ -97,9 +98,11 @@ def _job_or_404(org_id: UUID, job_id: str) -> Job:
     return job
 
 
-def _out(org_id: UUID, job: Job) -> Job:
-    """A Job leaving the API: its slide paths become short-lived signed links for this Organization."""
-    return assets.for_admin(org_id, job)
+def _out(org_id: UUID, job: Job, *, sources: bool = True) -> Job:
+    """A Job leaving the API: its slide paths become short-lived signed links for this Organization, and (except in
+    lists) each slide says where its facts came from (#25)."""
+    job = assets.for_admin(org_id, job)
+    return job.model_copy(update={"slide_sources": slide_sources.for_job(job)}) if sources else job
 
 
 def _member(ctx: auth.Ctx) -> dict:
@@ -133,7 +136,7 @@ async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
 
 @app.get("/jobs", response_model=list[Job])
 def list_jobs(ctx: auth.Viewer, limit: int = Query(50, ge=1, le=500)) -> list[Job]:
-    return [_out(ctx.org_id, j) for j in store.list_jobs(ctx.org_id, limit)]
+    return [_out(ctx.org_id, j, sources=False) for j in store.list_jobs(ctx.org_id, limit)]
 
 
 @app.get("/jobs/{job_id}", response_model=Job)

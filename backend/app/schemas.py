@@ -179,6 +179,47 @@ class CardDeck(BaseModel):
     slides: list[Slide] = Field(min_length=6, max_length=8)
 
 
+# ---------------------------------------------------------------- fact sources per slide (#25, story 2)
+
+LinkStatus = Literal["ok", "redirect", "dead", "suspicious", "timeout", "unchecked"]
+
+
+class SlideFactSource(BaseModel):
+    """One source behind a fact on a slide: a link with the host's link-check result, or the Organization's own
+    Source material (named, with the quoted words). Material is named only when it is this Job's own."""
+    origin: Literal["material", "link"]
+    url: str | None = None
+    status: LinkStatus | None = None       # links: the host's check ("unchecked" when it never ran)
+    http_code: int | None = None
+    reason: str | None = None              # why a link is suspicious or dead
+    material_id: str | None = None
+    material_name: str | None = None
+    quote: str | None = None               # the words in the material that state the fact
+    verified: bool | None = None           # the host's verdict at Verify (FactSource.verified); None: not recorded
+    note: str | None = None
+
+
+class SlideFact(BaseModel):
+    """A fact the slide shows (the renderer fills event and map slides from the event's brief) and its sources."""
+    field: str                             # FactSource.field: title, dates, venue, station, price, …
+    value: str                             # as the slide shows it
+    recorded: bool = True                  # False: no per-fact source was recorded; these are the event's sources
+    sources: list[SlideFactSource] = Field(default_factory=list)
+
+
+class SlideSources(BaseModel):
+    """Where the facts on one slide came from. Computed by the API from the Job on the way out; never stored."""
+    slide_index: int
+    layout: Layout
+    event_id: str | None = None
+    event_title: str | None = None
+    facts: list[SlideFact] = Field(default_factory=list)
+    links: list[SlideFactSource] = Field(default_factory=list)  # links the copywriter attached to the slide
+    unsourced: list[str] = Field(default_factory=list)          # claims in the slide's text no brief supports
+    general: bool = False                  # tips: general know-how, not expected to trace to an event
+    note: str | None = None
+
+
 # ---------------------------------------------------------------- checks
 
 class Issue(BaseModel):
@@ -299,6 +340,8 @@ class Job(BaseModel):
     # Stored before the glossary rename as "draft_id"; both keys load, new documents are written as brainstorm_id.
     brainstorm_id: str | None = Field(default=None, validation_alias=AliasChoices("brainstorm_id", "draft_id"))
     material: list[MaterialRef] = Field(default_factory=list)  # Source material (#20); empty on older Jobs
+    # View only (#25): where each slide's facts came from, computed by the API on the way out, never stored.
+    slide_sources: list[SlideSources] = Field(default_factory=list)
 
 
 Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend

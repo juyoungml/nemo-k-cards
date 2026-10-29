@@ -171,6 +171,44 @@ export interface Job {
   pipeline?: PipelineStep[];
   log?: LogLine[];
   material?: MaterialRef[]; // Source material attached when the Job started (or carried over from its Brainstorm)
+  slide_sources?: SlideSources[]; // where each slide's facts came from (#25); GET /jobs/{id} and SSE only, not lists
+}
+
+export type LinkStatus = LinkCheck["status"] | "unchecked";
+
+/** One source behind a fact on a slide: a link with the host's check, or the Organization's own Source material. */
+export interface SlideFactSource {
+  origin: "material" | "link";
+  url?: string | null;
+  status?: LinkStatus | null;
+  http_code?: number | null;
+  reason?: string | null;
+  material_id?: string | null;
+  material_name?: string | null; // only for this Job's own material
+  quote?: string | null;
+  verified?: boolean | null; // the host's verdict at Verify; null when no per-fact source was recorded
+  note?: string | null;
+}
+
+/** A fact a slide shows (event and map slides are filled from the event's brief) and its sources. */
+export interface SlideFact {
+  field: string;
+  value: string;
+  recorded: boolean; // false: no per-fact source was recorded, these are the event's own sources
+  sources: SlideFactSource[];
+}
+
+/** Where the facts on one slide came from (#25). Computed by the API on the way out. */
+export interface SlideSources {
+  slide_index: number;
+  layout: Slide["layout"];
+  event_id?: string | null;
+  event_title?: string | null;
+  facts: SlideFact[];
+  links: SlideFactSource[]; // links attached to the slide itself
+  unsourced: string[]; // claims in the slide's text that no brief supports
+  general: boolean; // tips: general know-how
+  note?: string | null;
 }
 
 export interface PublishProgress {
