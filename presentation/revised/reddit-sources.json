@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-10-30",
+  "presentation_label": "02",
+  "rendering": "User-provided screenshots; source files preserved unchanged. Slide placement crops only bottom reactions and whitespace.",
+  "screenshot_status": "Both screenshot files matched to the images supplied by the user on 2026-10-30.",
+  "sources": [
+    {
+      "url": "https://www.reddit.com/r/koreatravel/comments/1u7molm/pop_ups_in_july_seoul/",
+      "title": "Pop ups in July? (Seoul)",
+      "subreddit": "r/koreatravel",
+      "published_at": "2026-06-16",
+      "evidence": "User asks which site to follow for upcoming pop-ups and events during their trip.",
+      "asset": "assets/reddit-popups-user.png"
+    },
+    {
+      "url": null,
+      "title": "Where to purchase climate card",
+      "subreddit": "r/seoul",
+      "published_at": "2026-08-23",
+      "source": "User-provided screenshot. Subreddit r/seoul and publication date 2026-08-23 supplied by the user; URL not supplied.",
+      "asset": "assets/reddit-climate-purchase-user.png",
+      "evidence": "A first-time traveler asks where to buy a Climate Card in Incheon Airport T1, about cash versus cards, and taxi versus public transport. This is a travel-use question, not evidence of residence in Korea."
+    }
+  ]
+}
