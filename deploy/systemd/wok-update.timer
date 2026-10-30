@@ -1,0 +1,13 @@
+# Installed by deploy/install.sh. How often the server checks whether the staging tag moved.
+# Change the interval with `sudo systemctl edit wok-update.timer`. To freeze updates use `wok pause`, not this.
+[Unit]
+Description=What's On Korea: check the staging image tag every 2 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+RandomizedDelaySec=20s
+Unit=wok-update.service
+
+[Install]
+WantedBy=timers.target

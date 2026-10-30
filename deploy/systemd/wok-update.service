@@ -1,0 +1,16 @@
+# Installed by deploy/install.sh (which replaces User/Group if WOK_USER isn't "wok").
+# One update check: pull the staging tag, restart on a new image, roll back if the new containers don't become
+# healthy. Started by wok-update.timer; `wok update-now` runs the same thing by hand.
+[Unit]
+Description=What's On Korea: follow the staging image tag
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wok
+Group=wok
+EnvironmentFile=-/etc/default/wok
+ExecStart=/usr/local/bin/wok update
+TimeoutStartSec=15min
