@@ -125,6 +125,7 @@ function ReviewDetail({ job, setData, posts, reloadPosts }: { job: Job; setData:
   const checksById = new Map(job.verification?.checks.map((c) => [c.url, c]));
   const latest = posts?.[0];
   const live = posts?.find((p) => p.state === "published");
+  const held = posts?.find((p) => p.state === "on_hold");
 
   return (
     <>
@@ -194,7 +195,8 @@ function ReviewDetail({ job, setData, posts, reloadPosts }: { job: Job; setData:
             </Panel>
           )}
 
-          <ReviewActions job={job} onChange={setData} />
+          {/* Keyed by the held Post so its time prefills once the Posts load. */}
+          <ReviewActions key={held?.id ?? "none"} job={job} onChange={setData} held={held} />
         </div>
       </div>
     </>

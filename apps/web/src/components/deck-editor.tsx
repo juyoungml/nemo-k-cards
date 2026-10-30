@@ -100,7 +100,8 @@ export function useDeckEditor(job: Job, onChange: (job: Job) => void) {
 
   const draft = state?.draft;
   const mayEdit = atLeast(role, "editor");
-  const editable = mayEdit && job.status === "READY_FOR_REVIEW" && !!job.deck;
+  // A scheduled Deck stays editable (#26): saving puts its Post on hold until it is approved again.
+  const editable = mayEdit && (job.status === "READY_FOR_REVIEW" || job.status === "SCHEDULED") && !!job.deck;
   const tags = draft ? tagsOf(draft) : [];
   const count = draft?.slides.length ?? 0;
   const current = Math.min(selected, Math.max(0, count - 1));
@@ -331,6 +332,11 @@ export function SlideWorkspace({ editor }: { editor: DeckEditorState }) {
       {editor.dirty && draft.base !== editor.version && (
         <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
           Someone saved version {editor.version} while you were editing version {draft.base}. Saving will be refused; discard your changes to see it.
+        </p>
+      )}
+      {job.status === "SCHEDULED" && mayEdit && editor.dirty && (
+        <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
+          This Deck is scheduled. Saving puts its Post on hold: nothing is posted until someone approves the new version.
         </p>
       )}
       {job.status === "READY_FOR_REVIEW" && role && !mayEdit && (

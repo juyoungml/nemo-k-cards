@@ -329,6 +329,8 @@ async def save_version(job_id: str, edit: DeckEdit, ctx: auth.Editor) -> Job:
                                    message=f"version {v.version} saved by {ctx.user.email or 'a Member'}: "
                                            f"{_describe(changes)} · {len(rerendered)} slide(s) re-rendered · "
                                            "safeguard checking"))
+            if cur.status == JobStatus.SCHEDULED:
+                _hold(c, ctx, cur, v.version)
             store.write_job(c, cur)
             audit.write(c, ctx.org_id, audit.entry(ctx, "deck.edited", cur.id, version=v.version,
                                                    base_version=edit.base_version, changes=changes,
@@ -363,9 +365,25 @@ async def fit(job_id: str, req: FitCheck, ctx: auth.Editor) -> FitResult:
                      small_text=any(b.font_px < visual_qa.MIN_FONT_PX for b in blocks), blocks=blocks)
 
 
+def _hold(c, ctx: auth.Ctx, job: Job, version: int) -> None:
+    """Edited after approval (#26): the scheduled Post must not go out with what was approved before. Put it on hold,
+    in the edit's own transaction, and hand the Deck back to Review; approving version `version` resumes it."""
+    reason = f"the Deck was edited after approval (now version {version}); approve it again to post it"
+    row = c.execute("update posts set state = 'on_hold', held_at = now(), held_reason = %s, updated_at = now() "
+                    "where job_id = %s and state = 'scheduled' returning id, scheduled_at", (reason, job.id)).fetchone()
+    job.status = JobStatus.READY_FOR_REVIEW
+    for s in job.pipeline:
+        if s.name == orchestrator.STEPS["publish"][0]:
+            s.state, s.note = "pending", "On hold · edited after approval"
+    if row:
+        audit.write(c, ctx.org_id, audit.entry(ctx, "post.held", job.id, post=str(row[0]), reason=reason,
+                                               scheduled_at=row[1].isoformat() if row[1] else None))
+
+
 def _editable(job: Job, base_version: int) -> None:
-    if job.status != JobStatus.READY_FOR_REVIEW or not job.deck:
-        raise HTTPException(409, f"only a Deck in review can be edited; this one is {job.status}")
+    """A Deck in review, or one approved for later (#26: the edit puts its scheduled Post on hold)."""
+    if job.status not in (JobStatus.READY_FOR_REVIEW, JobStatus.SCHEDULED) or not job.deck:
+        raise HTTPException(409, f"only a Deck in review or scheduled can be edited; this one is {job.status}")
     if base_version != job.deck_version:
         raise HTTPException(409, {"code": "stale", "message": f"Not saved: someone saved version "
                                   f"{job.deck_version} while you were editing version {base_version}. "

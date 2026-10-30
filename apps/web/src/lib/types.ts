@@ -11,6 +11,7 @@ export type JobStatus =
   | "READY_FOR_REVIEW"
   | "REJECTED"
   | "BLOCKED" // the Safeguard refused the Deck: nobody can approve it, only regenerate or reject
+  | "SCHEDULED" // approved for a later time (#26): its Post waits; reschedule or cancel it, or edit the Deck to hold it
   | "PUBLISHING"
   | "PUBLISHED"
   | "FAILED";
@@ -254,7 +255,18 @@ export interface PostProgress {
   percent: number;
 }
 
-export type PostState = "queued" | "container_ready" | "publishing" | "published" | "failed" | "unknown";
+/** `scheduled` waits for its time; `on_hold` waits for a person (the Deck was edited, or the time was missed while the
+ * server was down); `cancelled` posted nothing (#26). */
+export type PostState =
+  | "scheduled"
+  | "on_hold"
+  | "queued"
+  | "container_ready"
+  | "publishing"
+  | "published"
+  | "failed"
+  | "unknown"
+  | "cancelled";
 export type PublishMode = "mock" | "dryrun" | "graph";
 
 /**
@@ -287,6 +299,10 @@ export interface Post {
   published_at?: string | null;
   finished_at?: string | null;
   resolved_by?: string | null;
+  scheduled_at?: string | null; // a Timed Post (#26): when it posts; null = posted at approval
+  held_reason?: string | null; // on_hold: why, in words
+  held_at?: string | null;
+  cancelled_by?: string | null;
   legacy?: boolean;
 }
 

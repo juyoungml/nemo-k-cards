@@ -99,7 +99,7 @@ One publication of an approved Deck version to one Instagram account, now or at 
 _Avoid_: publish, upload, media (outside Instagram API code)
 
 **Post on hold**:
-A scheduled Post that will not go out until someone acts: its Deck was edited after approval (needs approving again) or its Organization became read-only.
+A scheduled Post that will not go out until someone acts: its Deck was edited after approval, its time was missed while the server was down, or its Organization became read-only. Approving the Deck again replaces it with a new Post; it can also be cancelled.
 _Avoid_: paused, cancelled (a cancelled Post is gone)
 
 **Photo library**:

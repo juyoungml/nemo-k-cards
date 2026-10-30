@@ -1,7 +1,12 @@
 """The publisher (#21; docs/spec/v1.md "Publish state machine" and pseudocode 4; HARDENING PUB-1): each Post runs as a
 durable DBOS workflow (ADR 0002) that moves it through
 
-    queued → container_ready → publishing → published | failed | unknown,   unknown → reconciler
+    [scheduled →] queued → container_ready → publishing → published | failed | unknown,   unknown → reconciler
+
+A scheduled Post (#26) waits in `scheduled`: the workflow sleeps durably (DBOS) until `scheduled_at`, then moves it
+to `queued` and carries on as below. Rescheduling restarts the workflow so it wakes at the new time; cancelling or an
+edit (→ `on_hold`) ends it. A Post whose time passed more than MISSED_BY ago (the server was down) is held, not
+posted late.
 
 The `posts` row is the source of truth; the workflow only drives it. Its one step, `advance`, reads the Post's
 state and makes exactly one transition, each saved *before* the Instagram call it guards. So whatever point a
@@ -59,6 +64,7 @@ CHECK_FOR = timedelta(hours=25)           # after this an unpublished container 
 RECONCILE_DELAYS_S = [120, 240, 480, 900]  # then every 30 minutes
 RECONCILE_EVERY_S = 1800
 MOCK_STEP_S = 0.15                        # mock publish: how long each simulated sub-step shows
+MISSED_BY = timedelta(hours=6)            # a scheduled Post this late (server was down) is held, not posted late
 
 # Progress bands per sub-step (percent of the bar), so the Admin shows steady, honest progress.
 BANDS = {"upload": (0, 30), "containers": (30, 60), "processing": (60, 85), "publish": (85, 99)}
@@ -133,7 +139,7 @@ def _out(post: Post | None, *, wait: float = 0) -> dict:
     """What a step returns (checkpointed by DBOS: small and token-free)."""
     if post is None:
         return {"state": "gone", "done": True, "wait": 0}
-    person = post.state == "unknown" and post.next_check_at is None
+    person = (post.state == "unknown" and post.next_check_at is None) or post.state == "on_hold"
     return {"state": post.state, "done": bool(post.finished_at) or person, "wait": wait}
 
 
@@ -168,6 +174,10 @@ async def advance(org: str, post_id: str) -> dict:
     if not p or p["finished_at"]:
         return {"state": p["state"] if p else "gone", "done": True, "wait": 0}
     state = p["state"]
+    if state == "on_hold":
+        return {"state": state, "done": True, "wait": 0}  # a person acts (approve again, reschedule or cancel)
+    if state == "scheduled":
+        return await asyncio.to_thread(_due, org_id, p)
     if state == "queued":
         return await _prepare(org_id, p)
     if state == "container_ready":
@@ -177,6 +187,27 @@ async def advance(org: str, post_id: str) -> dict:
         return await asyncio.to_thread(_to_unknown, org_id, p, "The server restarted while Instagram was "
                                        "publishing; checking whether it went live")
     return await _reconcile(org_id, p)
+
+
+def _due(org_id: UUID, p: dict) -> dict:
+    """A scheduled Post: sleep until its time (durably), then start publishing. Too late (the server was down):
+    hold it for a person rather than post it hours after the time they chose."""
+    now = _now()
+    when = p["scheduled_at"]
+    if when > now:
+        return {"state": "scheduled", "done": False, "wait": (when - now).total_seconds()}
+    if now - when > MISSED_BY:
+        late = f"it was due at {posts.kst(when)}, but the server was down then; approve the Deck again to post it"
+        return _out(posts.transition(
+            org_id, p["id"], {"scheduled"}, state="on_hold", held_at=now, held_reason=late,
+            progress=_progress("upload", label="On hold: missed its time"),
+            job_update=_job_log(f"on hold: {late}", "warn", ("pending", "On hold · missed its time")),
+            audit_action="post.held", audit_detail={"reason": late}))
+    return _out(posts.transition(
+        org_id, p["id"], {"scheduled"}, state="queued", progress=_progress("upload", label="Starting"),
+        job_update=_job_log(f"scheduled time {posts.kst(when)} reached → publishing", "info",
+                            ("running", "publishing")),
+        audit_action="post.started", audit_detail={"scheduled_at": when.isoformat()}))
 
 
 def _to_unknown(org_id: UUID, p: dict, error: str) -> dict:
@@ -431,27 +462,64 @@ async def _reconcile(org_id: UUID, p: dict) -> dict:
 # ---------------------------------------------------------------- starting, restarting
 
 def create(org_id: UUID, job: Job, *, mode: str, by: dict, account: dict | None,
-           deck_version: int | None = None, audits: list[audit.Entry] = ()) -> Post:
-    """Approval: a `queued` Post, the Job moved to PUBLISHING and the approval's audit events, in one transaction.
-    The Post posts exactly the Deck version it pins (#19), caption included: nothing is edited at Approve, so the
-    Post's own `caption` stays NULL (the Deck's). Version 1 is stored here if it never was.
+           deck_version: int | None = None, audits: list[audit.Entry] = (),
+           scheduled_at: datetime | None = None) -> Post:
+    """Approval: a `queued` Post (or `scheduled`, #26), the Job moved to PUBLISHING (SCHEDULED) and the approval's
+    audit events, in one transaction. The Post posts exactly the Deck version it pins (#19), caption included:
+    nothing is edited at Approve, so the Post's own `caption` stays NULL (the Deck's). Version 1 is stored here if
+    it never was. A Post on hold for this Job is replaced (cancelled) by this one: re-approval resumes it.
     Raises posts.Taken when a Post of this Job is still open, or this Deck is already on that account."""
     with store.tenant(org_id, user_id=UUID(by["id"])) as c:
         deck_versions.ensure_initial(c, job)
+        held = c.execute("update posts set state = 'cancelled', finished_at = now(), updated_at = now(), "
+                         "last_error = %s where job_id = %s and state = 'on_hold' returning id",
+                         (f"replaced by the approval of version {deck_version or 1}", job.id)).fetchone()
         post = posts.insert(c, job_id=job.id, mode=mode, approved_by=UUID(by["id"]), approved_by_email=by["email"],
                             account_id=account["id"] if account else None,
                             ig_user_id=account["ig_user_id"] if account else None,
                             username=account["username"] if account else None, caption=None,
-                            deck_version=deck_version)
-        job.status = JobStatus.PUBLISHING
+                            deck_version=deck_version, scheduled_at=scheduled_at)
+        job.status = JobStatus.SCHEDULED if scheduled_at else JobStatus.PUBLISHING
         job.error = None
         for s in job.pipeline:
             if s.name == orchestrator.STEPS["publish"][0]:
-                s.state, s.note = "running", f"approved · {mode}"
+                s.state, s.note = (("pending", f"scheduled for {posts.kst(scheduled_at)} · {mode}") if scheduled_at
+                                   else ("running", f"approved · {mode}"))
         c.execute("update jobs set doc = %s where id = %s", (store._json(job), job.id))
         for e in audits:
-            audit.write(c, org_id, e.model_copy(update={"detail": {**e.detail, "post": str(post.id)}}))
+            extra = {"post": str(post.id), **({"scheduled_at": scheduled_at.isoformat()} if scheduled_at else {}),
+                     **({"replaces_held_post": str(held[0])} if held else {})}
+            audit.write(c, org_id, e.model_copy(update={"detail": {**e.detail, **extra}}))
     return post
+
+
+def stop(post: Post) -> None:
+    """End the Post's workflow if it is still waiting (a cancelled or held Post has nothing left to do). Harmless when
+    it already finished."""
+    try:
+        DBOS.cancel_workflow(workflow_id(post.id, _runs(post)))
+    except Exception:  # noqa: BLE001 — no such workflow (never started, or a test drove it inline)
+        log.debug("no workflow to stop for post %s", post.id)
+
+
+def restart(org_id: UUID, post_id: UUID) -> None:
+    """Rescheduled (#26): stop the sleeping workflow and drive the Post with a fresh one, which reads the new time.
+    Every step starts from the saved state, so the swap is safe whenever it happens."""
+    with store.tenant(org_id) as c:
+        (runs,) = c.execute("select runs from posts where id = %s", (post_id,)).fetchone()
+        c.execute("update posts set runs = %s where id = %s", (runs + 1, post_id))
+    try:
+        DBOS.cancel_workflow(workflow_id(post_id, runs))
+    except Exception:  # noqa: BLE001
+        log.debug("no workflow to stop for post %s", post_id)
+    with SetWorkflowID(workflow_id(post_id, runs + 1)):
+        DBOS.retrieve_queue(POST_QUEUE).enqueue(post_workflow, str(org_id), str(post_id))
+
+
+def _runs(post: Post) -> int:
+    with store.system() as c:
+        row = c.execute("select runs from posts where id = %s", (post.id,)).fetchone()
+    return row[0] if row else 1
 
 
 async def start(org_id: UUID, post_id: UUID, runs: int = 1) -> None:
@@ -501,8 +569,8 @@ def recover_after_restart() -> None:
         st = DBOS.get_workflow_status(wid)
         if st is not None and st.status in ("PENDING", "ENQUEUED") and st.app_version == settings.workflow_version:
             continue
-        if st is not None and st.status == "SUCCESS" and state == "unknown":
-            continue  # it stopped on purpose: a person resolves it
+        if state == "on_hold" or (st is not None and st.status == "SUCCESS" and state == "unknown"):
+            continue  # it stopped on purpose: a person resolves it (or approves the held Deck again)
         if st is not None and st.status in ("PENDING", "ENQUEUED"):
             DBOS.cancel_workflow(wid)  # checkpoints from another version: drive it afresh instead
         with store.tenant(org_id) as c:

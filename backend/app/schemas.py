@@ -22,13 +22,14 @@ class JobStatus(StrEnum):
     READY_FOR_REVIEW = "READY_FOR_REVIEW"
     REJECTED = "REJECTED"
     BLOCKED = "BLOCKED"  # the Safeguard refused the Deck: nobody can approve it (regenerate or reject)
+    SCHEDULED = "SCHEDULED"  # approved for a later time (#26): its Post waits; cancel, reschedule or edit (→ hold)
     PUBLISHING = "PUBLISHING"
     PUBLISHED = "PUBLISHED"
     FAILED = "FAILED"
 
 
-TERMINAL = {JobStatus.READY_FOR_REVIEW, JobStatus.REJECTED, JobStatus.BLOCKED, JobStatus.PUBLISHED,
-            JobStatus.FAILED}
+TERMINAL = {JobStatus.READY_FOR_REVIEW, JobStatus.REJECTED, JobStatus.BLOCKED, JobStatus.SCHEDULED,
+            JobStatus.PUBLISHED, JobStatus.FAILED}
 
 
 # ---------------------------------------------------------------- sources & events
@@ -312,7 +313,8 @@ class PostProgress(BaseModel):
     percent: int = 0
 
 
-PostState = Literal["queued", "container_ready", "publishing", "published", "failed", "unknown"]
+PostState = Literal["scheduled", "on_hold", "queued", "container_ready", "publishing", "published", "failed", "unknown",
+                    "cancelled"]
 PublishMode = Literal["mock", "dryrun", "graph"]
 
 
@@ -345,6 +347,11 @@ class Post(BaseModel):
     finished_at: datetime | None = None
     resolved_by: UUID | None = None
     legacy: bool = False                        # published before Posts existed (#21)
+    # Timed Posts (#26): when it goes out (None = right away), and why it is waiting for a person (state on_hold).
+    scheduled_at: datetime | None = None
+    held_reason: str | None = None
+    held_at: datetime | None = None
+    cancelled_by: UUID | None = None
 
     @property
     def open(self) -> bool:
@@ -458,6 +465,13 @@ class ApproveRequest(BaseModel):
     account_id: UUID | None = None
     # Required when the Deck has blocking Issues (an Override, GLOSSARY); recorded in the audit log.
     override_reason: str | None = Field(None, max_length=2000)
+    # Timed Posts (#26): post at this time instead of now. Must carry a timezone (the Admin sends KST, +09:00), be
+    # at least 2 minutes ahead and at most 60 days ahead.
+    scheduled_at: datetime | None = None
+
+
+class RescheduleRequest(BaseModel):
+    scheduled_at: datetime
 
 
 class ResolvePostRequest(BaseModel):

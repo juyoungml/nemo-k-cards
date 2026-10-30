@@ -27,6 +27,7 @@ import type {
   PipelineStep,
   PolicyEvent,
   Post,
+  PostState,
   SafeguardVerdict,
   Scenario,
   SlideSources,
@@ -71,7 +72,17 @@ interface MockJob {
   override?: { briefs: EventBrief[]; deck: Omit<CardDeck, "job_id"> };
   titleOverride?: string;
   material?: MaterialRef[];
-  decision?: { kind: "approve" | "reject"; at: number; reason?: string; accountId?: string; deckVersion?: number };
+  decision?: {
+    kind: "approve" | "reject";
+    at: number;
+    reason?: string;
+    accountId?: string;
+    deckVersion?: number;
+    /** A Timed Post (#26): when it starts; `held` = on hold (edited after approval); `cancelledAt` = cancelled. */
+    scheduledAt?: number;
+    held?: string;
+    cancelledAt?: number;
+  };
   /** Saved edits (#19): version 2, 3, … The safeguard "checks" each for CHECK_MS after it is saved. */
   versions?: { version: number; deck: Omit<CardDeck, "job_id">; at: number; changes: DeckChange[] }[];
 }
@@ -144,9 +155,12 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
   if (finished) status = blockedBySafeguard ? "BLOCKED" : "READY_FOR_REVIEW";
 
   if (job.decision?.kind === "reject" && status === "BLOCKED") status = "REJECTED";
-  if (job.decision && finished && status === "READY_FOR_REVIEW") {
-    if (job.decision.kind === "reject") status = "REJECTED";
-    else status = now - job.decision.at < PUBLISH_MS ? "PUBLISHING" : "PUBLISHED";
+  const d = job.decision;
+  if (d && finished && status === "READY_FOR_REVIEW") {
+    if (d.kind === "reject") status = "REJECTED";
+    else if (d.held || d.cancelledAt) status = "READY_FOR_REVIEW"; // like the API: the Deck is back in review
+    else if (d.scheduledAt && now < d.scheduledAt) status = "SCHEDULED";
+    else status = now - (d.scheduledAt ?? d.at) < PUBLISH_MS ? "PUBLISHING" : "PUBLISHED";
   }
 
   const reached = (key: string) => {
@@ -166,8 +180,16 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     {
       name: "Human publish",
       where: "you",
-      state: status === "PUBLISHED" ? "done" : status === "PUBLISHING" ? "running" : blockedBySafeguard ? "skipped" : "pending",
-      note: status === "PUBLISHED" ? "mock post created" : blockedBySafeguard ? "Blocked by safeguard: regenerate or reject" : "Approve in Review",
+      state: status === "PUBLISHED" ? "done" : status === "PUBLISHING" || status === "SCHEDULED" ? "running" : blockedBySafeguard ? "skipped" : "pending",
+      note: status === "PUBLISHED"
+        ? "mock post created"
+        : status === "SCHEDULED"
+          ? `scheduled for ${fmt(d!.scheduledAt!)} KST`
+          : d?.held
+            ? "On hold · edited after approval"
+            : blockedBySafeguard
+              ? "Blocked by safeguard: regenerate or reject"
+              : "Approve in Review",
     },
   ];
 
@@ -257,9 +279,11 @@ function postOf(job: MockJob, now = Date.now()): Post | null {
   const d = job.decision;
   if (!d || d.kind !== "approve") return null;
   const account = seedInstagramAccounts.find((a) => a.id === d.accountId);
-  const elapsed = now - d.at;
-  const done = elapsed >= PUBLISH_MS;
+  const start = d.scheduledAt ?? d.at;
+  const elapsed = now - start;
+  const done = elapsed >= PUBLISH_MS && !d.held && !d.cancelledAt;
   const at = new Date(d.at).toISOString();
+  const waiting: PostState | null = d.cancelledAt ? "cancelled" : d.held ? "on_hold" : elapsed < 0 ? "scheduled" : null;
   const step = done ? "done" : elapsed < PUBLISH_MS / 3 ? "upload" : elapsed < (2 * PUBLISH_MS) / 3 ? "containers" : "publish";
   return {
     id: `00000000-0000-4000-9000-${job.id.padStart(12, "0")}`,
@@ -267,14 +291,18 @@ function postOf(job: MockJob, now = Date.now()): Post | null {
     instagram_account_id: account?.id ?? null,
     handle: account?.handle ?? null,
     mode: "mock",
-    state: done ? "published" : elapsed < PUBLISH_MS / 2 ? "queued" : "publishing",
+    state: waiting ?? (done ? "published" : elapsed < PUBLISH_MS / 2 ? "queued" : "publishing"),
+    scheduled_at: d.scheduledAt ? new Date(d.scheduledAt).toISOString() : null,
+    held_reason: d.held ?? null,
+    held_at: null,
+    cancelled_by: d.cancelledAt ? "mock-user" : null,
     caption: null, // the Deck version's caption is posted (#19)
-    deck_version: job.versions?.at(-1)?.version ?? 1,
+    deck_version: d.deckVersion ?? job.versions?.at(-1)?.version ?? 1, // the version approved, not the latest
     creation_id: done ? `mock-${job.id}` : null,
     media_id: done ? "MOCK" : null,
     permalink: done ? `https://www.instagram.com/p/MOCK${job.id.toUpperCase()}/` : null,
     attempts: done ? 1 : 0,
-    progress: {
+    progress: waiting ? null : {
       step,
       label: done ? "Mock publish complete (nothing posted)" : "Publishing (mock)",
       done: 0,
@@ -282,23 +310,63 @@ function postOf(job: MockJob, now = Date.now()): Post | null {
       percent: done ? 100 : Math.round((elapsed / PUBLISH_MS) * 99),
     },
     created_at: at,
-    updated_at: new Date(Math.min(now, d.at + PUBLISH_MS)).toISOString(),
-    published_at: done ? new Date(d.at + PUBLISH_MS).toISOString() : null,
-    finished_at: done ? new Date(d.at + PUBLISH_MS).toISOString() : null,
+    updated_at: new Date(Math.max(d.at, Math.min(now, start + PUBLISH_MS))).toISOString(),
+    published_at: done ? new Date(start + PUBLISH_MS).toISOString() : null,
+    finished_at: done ? new Date(start + PUBLISH_MS).toISOString() : d.cancelledAt ? new Date(d.cancelledAt).toISOString() : null,
   };
 }
 
-export const listPosts = (jobId?: string | null) =>
-  [...store().jobs.values()]
+const UPCOMING: PostState[] = ["scheduled", "on_hold"];
+
+/** Like GET /posts: `upcoming` = scheduled and on hold, soonest first; `recent` = the rest, newest first. */
+export function listPosts(jobId?: string | null, when?: string | null) {
+  const all = [...store().jobs.values()]
     .filter((j) => !jobId || j.id === jobId)
     .map((j) => postOf(j))
-    .filter((p): p is Post => p !== null)
+    .filter((p): p is Post => p !== null);
+  if (when === "upcoming")
+    return all.filter((p) => UPCOMING.includes(p.state)).sort((a, b) => (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? ""));
+  return all
+    .filter((p) => when !== "recent" || !UPCOMING.includes(p.state))
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+const jobOfPost = (postId: string) => [...store().jobs.values()].find((j) => postOf(j)?.id === postId);
+
+/** Same bounds as the API's check_time: a timezone, at least 2 minutes ahead, at most 60 days. A number is the time. */
+function checkTime(iso: string): number | string {
+  if (!/(Z|[+-]\d\d:\d\d)$/.test(iso)) return "scheduled_at needs a timezone, e.g. +09:00 for KST";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "scheduled_at isn't a time";
+  if (t < Date.now() + 2 * 60_000) return "schedule it at least 2 minutes from now";
+  if (t > Date.now() + 60 * 86_400_000) return "schedule it at most 60 days ahead";
+  return t;
+}
+
+export function cancelPost(postId: string) {
+  const j = jobOfPost(postId);
+  const p = j && postOf(j);
+  if (!j || !p) return { error: "post not found", code: 404 } as const;
+  if (!UPCOMING.includes(p.state)) return { error: `post is ${p.state}; only a scheduled or held post can be cancelled`, code: 409 } as const;
+  j.decision = { ...j.decision!, cancelledAt: Date.now() };
+  return { post: postOf(j)! } as const;
+}
+
+export function reschedulePost(postId: string, iso: string) {
+  const j = jobOfPost(postId);
+  const p = j && postOf(j);
+  if (!j || !p) return { error: "post not found", code: 404 } as const;
+  if (!UPCOMING.includes(p.state)) return { error: `post is ${p.state}; only a scheduled or held post can be rescheduled`, code: 409 } as const;
+  const t = checkTime(iso);
+  if (typeof t === "string") return { error: t, code: 422 } as const;
+  j.decision = { ...j.decision!, scheduledAt: t };
+  return { post: postOf(j)! } as const;
+}
 
 export function decide(
   id: string,
   kind: "approve" | "reject",
-  extra: { reason?: string; overrideReason?: string; accountId?: string; deckVersion?: number },
+  extra: { reason?: string; overrideReason?: string; accountId?: string; deckVersion?: number; scheduledAt?: string },
 ) {
   const j = store().jobs.get(id);
   if (!j) return { error: "not found", code: 404 } as const;
@@ -313,6 +381,8 @@ export function decide(
     return { error: `the safeguard is still checking version ${snap.deck_version} after an edit`, code: 409 } as const;
   if (kind === "approve" && snap.status === "READY_FOR_REVIEW" && !snap.safeguard)
     return { error: "this job has no safeguard verdict (created before the safeguard existed); regenerate it", code: 409 } as const;
+  if (kind === "approve" && snap.status === "SCHEDULED")
+    return { error: "this Deck is already scheduled: reschedule or cancel its Post instead", code: 409 } as const;
   const allowed = kind === "reject" ? ["READY_FOR_REVIEW", "BLOCKED"] : ["READY_FOR_REVIEW"];
   if (!allowed.includes(snap.status)) return { error: `job is ${snap.status}, not ${allowed.join(" or ")}`, code: 409 } as const;
   // Same rule as the API: approving with blocking Issues is an Override and needs a reason.
@@ -327,7 +397,15 @@ export function decide(
       return { error: "this Organization has several Instagram accounts: choose one (account_id)", code: 422 } as const;
     extra = { ...extra, accountId: extra.accountId ?? live[0]?.id };
   }
-  j.decision = { kind, at: Date.now(), ...extra };
+  const { scheduledAt, ...rest } = extra;
+  let at: number | undefined;
+  if (kind === "approve" && scheduledAt) {
+    const t = checkTime(scheduledAt);
+    if (typeof t === "string") return { error: t, code: 422 } as const;
+    at = t;
+  }
+  // Approving again replaces a held or cancelled Post (the mock keeps only the latest one).
+  j.decision = { kind, at: Date.now(), ...rest, scheduledAt: at };
   return { job: snapshot(j) } as const;
 }
 
@@ -363,7 +441,8 @@ export function saveVersion(id: string, edit: Partial<DeckEdit>) {
   const j = store().jobs.get(id);
   if (!j) return { error: "job not found", code: 404 } as const;
   const snap = snapshot(j);
-  if (snap.status !== "READY_FOR_REVIEW" || !snap.deck) return { error: `only a Deck in review can be edited; this one is ${snap.status}`, code: 409 } as const;
+  if (!["READY_FOR_REVIEW", "SCHEDULED"].includes(snap.status) || !snap.deck)
+    return { error: `only a Deck in review or scheduled can be edited; this one is ${snap.status}`, code: 409 } as const;
   if (edit.base_version !== snap.deck_version)
     return { error: { code: "stale", message: `Not saved: someone saved version ${snap.deck_version} while you were editing version ${edit.base_version}.` }, code: 409 } as const;
   const old = snap.deck;
@@ -407,10 +486,13 @@ export function saveVersion(id: string, edit: Partial<DeckEdit>) {
       code: 422,
     } as const;
   j.versions = [...(j.versions ?? []), { version: snap.deck_version! + 1, deck: { ...old, slides, caption, hashtags: tags }, at: Date.now(), changes }];
+  // Like the API (#26): an edit after a scheduled approval puts its Post on hold until the Deck is approved again.
+  if (snap.status === "SCHEDULED")
+    j.decision = { ...j.decision!, held: `the Deck was edited after approval (now version ${snap.deck_version! + 1}); approve it again to post it` };
   return { job: snapshot(j) } as const;
 }
 
-export const isTerminal = (s: JobStatus) => ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "PUBLISHED", "FAILED"].includes(s);
+export const isTerminal = (s: JobStatus) => ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "SCHEDULED", "PUBLISHED", "FAILED"].includes(s);
 
 // ---------------------------------------------------------------- dashboard & policy
 

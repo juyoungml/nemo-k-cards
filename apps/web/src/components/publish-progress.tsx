@@ -1,11 +1,12 @@
 "use client";
 
-import { AlertCircle, Check, Circle, ExternalLink, HelpCircle, Loader2, MinusCircle } from "lucide-react";
+import { AlertCircle, CalendarClock, Check, Circle, ExternalLink, HelpCircle, Loader2, MinusCircle, PauseCircle } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 
 import { StatusBadge, type Tone } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { formatDateTime, fromKstInput, scheduleBounds, toKstInput } from "@/lib/format";
 import { atLeast, useMe } from "@/lib/roles";
 import type { Post, PostProgress, PostState, PublishMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,9 @@ export const MODE: Record<PublishMode, [Tone, string]> = {
 
 /** What each Post state means, in words an Approver can act on (docs/spec/v1.md "Publish state machine"). */
 export const POST_STATE: Record<PostState, [Tone, string]> = {
+  scheduled: ["info", "Scheduled"],
+  on_hold: ["warning", "On hold"],
+  cancelled: ["neutral", "Cancelled"],
   queued: ["warning", "Queued"],
   container_ready: ["warning", "Carousel ready"],
   publishing: ["warning", "Publishing"],
@@ -62,6 +66,116 @@ function useElapsed(start?: string, end?: string | null) {
  * the outcome, keeps Approve locked, and (once the reconciler has alerted) lets an Approver settle it by hand.
  */
 export function PublishProgress({ post, onChange }: { post?: Post; onChange?: (p: Post) => void }) {
+  if (post?.state === "scheduled" || post?.state === "on_hold") return <UpcomingPost post={post} onChange={onChange} />;
+  if (post?.state === "cancelled") return null; // posted nothing; the Posts list shows it
+  return <RunningPost post={post} onChange={onChange} />;
+}
+
+/** Days, hours and minutes until `iso`, for "in 2d 3h". */
+function until(iso: string) {
+  const m = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60_000));
+  const d = Math.floor(m / 1440);
+  const h = Math.floor((m % 1440) / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m % 60}m` : `${m}m`;
+}
+
+/**
+ * A Timed Post that hasn't started (#26): when it posts, and Reschedule / Cancel for an Approver. On hold, it says
+ * why and how to resume: approve the Deck again (an edit) or pick a new time (a missed time).
+ */
+export function UpcomingPost({ post, onChange }: { post: Post; onChange?: (p: Post) => void }) {
+  const { role } = useMe();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string>();
+  const [editing, setEditing] = useState(false);
+  const [when, setWhen] = useState(() => toKstInput(post.scheduled_at ?? Date.now() + 3_600_000));
+  const [bounds] = useState(scheduleBounds);
+  const may = atLeast(role, "approver");
+  const held = post.state === "on_hold";
+  const where = post.handle ?? (post.mode === "mock" ? "a mock post" : "Instagram");
+
+  const run = (fn: () => Promise<Post>) =>
+    startTransition(async () => {
+      try {
+        setError(undefined);
+        onChange?.(await fn());
+        setEditing(false);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    });
+
+  return (
+    <section
+      id="publish-progress"
+      className={cn("scroll-mt-6 space-y-3 rounded-xl border bg-card p-5", held && "border-warning/40")}
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-2.5">
+        {held ? <PauseCircle className="size-5 text-warning" /> : <CalendarClock className="size-5 text-info" />}
+        <h2 className="flex-1 text-base font-semibold">
+          {held ? "On hold" : `Scheduled for ${post.scheduled_at ? formatDateTime(post.scheduled_at) : "later"} KST`}
+        </h2>
+        <StatusBadge tone={MODE[post.mode][0]}>{MODE[post.mode][1]}</StatusBadge>
+        {!held && post.scheduled_at && (
+          <span className="text-xs text-muted-foreground tabular-nums" title="Time left">
+            in {until(post.scheduled_at)}
+          </span>
+        )}
+      </div>
+      <p className="text-[13px] text-muted-foreground">
+        Version {post.deck_version ?? 1} to {where}
+        {post.approved_by_email ? `, approved by ${post.approved_by_email}` : ""}.
+        {held && post.scheduled_at ? ` It was due ${formatDateTime(post.scheduled_at)} KST.` : ""}
+      </p>
+      {held && (
+        <p className="rounded-lg bg-warning-soft px-3 py-2.5 text-xs text-warning">
+          Nothing will be posted until someone acts. Why: {post.held_reason}.
+          <br />
+          Approve the Deck again below, now or at a new time, and that replaces this Post. Or cancel it.
+        </p>
+      )}
+      {may && (
+        <div className="flex flex-wrap items-center gap-2">
+          {editing ? (
+            <>
+              <input
+                type="datetime-local"
+                aria-label="New time (Korea time)"
+                value={when}
+                min={bounds.min}
+                max={bounds.max}
+                onChange={(e) => setWhen(e.target.value)}
+                className="h-8 rounded-lg border bg-background px-2.5 text-[13px] tabular-nums"
+              />
+              <span className="text-xs text-muted-foreground">KST</span>
+              <Button size="sm" disabled={pending || !when} onClick={() => run(() => api.reschedulePost(post.id, fromKstInput(when)))}>
+                Save time
+              </Button>
+              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEditing(false)}>
+                Keep the time
+              </Button>
+            </>
+          ) : (
+            <>
+              {!held && (
+                <Button size="sm" variant="outline" disabled={pending} onClick={() => setEditing(true)}>
+                  Reschedule
+                </Button>
+              )}
+              <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => api.cancelPost(post.id))}>
+                Cancel post
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </section>
+  );
+}
+
+function RunningPost({ post, onChange }: { post?: Post; onChange?: (p: Post) => void }) {
   const elapsed = useElapsed(post?.created_at, post?.finished_at);
   const { role } = useMe();
   const [pending, startTransition] = useTransition();
@@ -249,7 +363,9 @@ export function PostsList({ posts }: { posts: Post[] }) {
             <StatusBadge tone={MODE[p.mode][0]}>{MODE[p.mode][1]}</StatusBadge>
             <span className="min-w-0 flex-1 truncate">{p.handle ?? "no account"}</span>
             <span className="text-xs text-muted-foreground tabular-nums">
-              {new Date(p.created_at).toLocaleString("en-GB", { timeZone: "Asia/Seoul", dateStyle: "short", timeStyle: "short" })}
+              {p.scheduled_at && ["scheduled", "on_hold"].includes(p.state)
+                ? `for ${formatDateTime(p.scheduled_at)} KST`
+                : new Date(p.created_at).toLocaleString("en-GB", { timeZone: "Asia/Seoul", dateStyle: "short", timeStyle: "short" })}
             </span>
             {p.permalink && p.mode !== "mock" && (
               <a href={p.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
