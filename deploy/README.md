@@ -7,7 +7,7 @@ specific to one server: every server-specific value lives in one env file kept o
 |---|---|
 | `../backend/Dockerfile` | API image: FastAPI + DBOS, the Playwright renderer (headless Chromium) and the `claude` CLI. Built from the repo root. |
 | `../apps/web/Dockerfile` | Admin image: the Next.js standalone server, non-root, no secrets. Built from `apps/web`. |
-| `compose.yml` | `api`, `admin`, `caddy` and, with `--profile tunnel`, `cloudflared`. |
+| `compose.yml` | `api`, `admin`, `caddy` and, with `--profile tunnel`, `cloudflared` (or `quicktunnel` with `--profile quicktunnel`). |
 | `compose.server.yml` | Server override: never build, rotate container logs. Used by `wok`. |
 | `Caddyfile` | The only public entry: `/backend/*` goes to the API (prefix stripped), everything else to the Admin. |
 | `env.example` | Template for the stack env file: names and comments, never values. |
@@ -144,7 +144,7 @@ sudo wok update-now                  # check right away (refused while paused; -
 While paused, the stack keeps running, the deploy button can still move `staging`, and the server ignores it. Pause
 the day before the demo, check `wok status` shows the commit you rehearsed, and resume afterwards.
 
-Other commands: `sudo wok logs [api|admin|caddy|cloudflared|updater]`, `sudo wok up`, `sudo wok down`,
+Other commands: `sudo wok url`, `sudo wok logs [api|admin|caddy|cloudflared|quicktunnel|updater]`, `sudo wok up`, `sudo wok down`,
 `sudo wok config`, `sudo wok rollback`. Everything is logged to `/opt/wok/state/history.log`.
 
 ## HTTPS: domain or tunnel
@@ -155,8 +155,17 @@ Other commands: `sudo wok logs [api|admin|caddy|cloudflared|updater]`, `sudo wok
 - **Cloudflare tunnel** (no inbound ports): keep `SITE_ADDRESS=:80` (or unset). In Cloudflare Zero Trust go to
   *Networks → Tunnels* and create a `cloudflared` tunnel. Copy its token into `TUNNEL_TOKEN`, and add a public
   hostname `staging.<your domain>` → `HTTP` → `caddy:80`. `wok` starts the `cloudflared` service whenever
-  `TUNNEL_TOKEN` is set. Cloudflare terminates TLS. Pin `cloudflared` to a version when it is first used (it is
-  `:latest` today).
+  `TUNNEL_TOKEN` is set. Cloudflare terminates TLS.
+- **Quick tunnel** (no Cloudflare account, no domain, no inbound ports): `WOK_TUNNEL=quick`, `SITE_ADDRESS` unset.
+  `wok` starts the `quicktunnel` service, a [TryCloudflare](https://try.cloudflare.com) tunnel to `caddy:80`, and
+  `sudo wok url` prints its random `https://<words>.trycloudflare.com` address. **The address changes whenever that
+  container restarts** (a reboot, `wok down`/`up`, a new `cloudflared` version; API and Admin deploys don't touch
+  it). After a change: set `ADMIN_URL` and `PUBLIC_ASSET_BASE_URL` to it, `sudo wok up`, and replace the old
+  address on the Supabase Auth redirect allow list (exact address, never a `*.trycloudflare.com` wildcard: anyone
+  can get one of those, and auth emails would then send people there). Cloudflare offers it for testing, with no
+  uptime guarantee: fine for staging and a demo, not for production.
+
+`cloudflared` is pinned (`2026.10.6`); bump it deliberately in `compose.yml`.
 
 Either way, `ADMIN_URL` and `PUBLIC_ASSET_BASE_URL` use the public `https://` host name.
 

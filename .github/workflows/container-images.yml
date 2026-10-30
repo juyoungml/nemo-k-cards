@@ -36,6 +36,7 @@ jobs:
           docker compose version
           docker compose -f deploy/compose.yml --env-file deploy/env.example config --quiet
           docker compose -f deploy/compose.yml --env-file deploy/env.example --profile tunnel config --quiet
+          docker compose -f deploy/compose.yml --env-file deploy/env.example --profile quicktunnel config --quiet
 
   api:
     name: build api image

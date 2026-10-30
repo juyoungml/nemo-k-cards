@@ -284,8 +284,8 @@ EOF
 	done
 	[ -z "$missing" ] || die "$ENV_FILE has no value for:$missing"
 	[ -n "$(env_get ANTHROPIC_API_KEY)" ] || warn "ANTHROPIC_API_KEY is empty: only DEMO_MODE=fixture works"
-	if [ -z "$(env_get SITE_ADDRESS)" ] && [ -z "$(env_get TUNNEL_TOKEN)" ]; then
-		warn "neither SITE_ADDRESS (domain) nor TUNNEL_TOKEN is set: the stack serves plain HTTP on :80"
+	if [ -z "$(env_get SITE_ADDRESS)" ] && [ -z "$(env_get TUNNEL_TOKEN)" ] && [ "$(env_get WOK_TUNNEL)" != quick ]; then
+		warn "none of SITE_ADDRESS (domain), TUNNEL_TOKEN or WOK_TUNNEL=quick is set: the stack serves plain HTTP on :80"
 	fi
 	[ "$(env_get PUBLISH_MODE)" != graph ] || warn "PUBLISH_MODE=graph: approving a Post publishes it on Instagram"
 	say "env file $ENV_FILE: required values present (not shown)"
@@ -395,6 +395,9 @@ main() {
 	registry_login
 	enable_updater
 	start_stack
+	if [ "$START" = 1 ] && [ "${ENV_READABLE:-0}" = 1 ] && [ "$(env_get WOK_TUNNEL)" = quick ]; then
+		say "quick tunnel address: run 'sudo wok url' (it can take ~20 s to appear)"
+	fi
 	say "done. 'sudo wok status' shows what runs; 'sudo wok pause' freezes updates. Then run the smoke checklist in deploy/README.md."
 }
 

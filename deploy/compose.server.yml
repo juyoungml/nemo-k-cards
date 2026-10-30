@@ -22,3 +22,5 @@ services:
     logging: *logging
   cloudflared:
     logging: *logging
+  quicktunnel:
+    logging: *logging

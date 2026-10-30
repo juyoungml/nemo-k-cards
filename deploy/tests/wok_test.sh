@@ -58,7 +58,8 @@ compose)
 		exit $rc
 		;;
 	down) rm -f "$D"/containers/* ;;
-	logs | config) ;;
+	logs) [ ! -f "$D/quicktunnel.log" ] || cat "$D/quicktunnel.log" ;;
+	config) ;;
 	*) echo "fake docker: compose $sub?" >&2; exit 2 ;;
 	esac
 	;;
@@ -262,6 +263,25 @@ wok update-now no-such-branch >/dev/null || rc=$?
 check "unknown ref exits 1" "$rc" 1
 check "unknown ref leaves admin" "$(running admin)" "sha256:admin-$c1"
 check "status names build mode" "$(wok status | grep -c 'build mode')" 1
+
+# --- quick tunnel (WOK_TUNNEL=quick): no token, a random trycloudflare.com address ---------------------------
+sed -i.bak '/^TUNNEL_TOKEN=/d' "$T/home/.env"
+echo "WOK_TUNNEL=quick" >>"$T/home/.env"
+
+# 17. the quicktunnel profile replaces the named tunnel, and `wok url` reads the address from its log
+: >"$T/d/calls.log"
+check "config names the quick tunnel" "$(wok config | grep -c 'tunnel: quicktunnel')" 1
+check "quicktunnel profile passed to compose" "$(grep -c -- '--profile quicktunnel' "$T/d/calls.log" | tr -d ' ' | sed 's/^[1-9][0-9]*$/yes/')" yes
+rc=0
+wok url >/dev/null || rc=$?
+check "url before the tunnel is up exits 1" "$rc" 1
+printf '%s\n' 'INF Requesting new quick Tunnel on trycloudflare.com...' \
+	'INF |  https://midi-don-dates-university.trycloudflare.com  |' >"$T/d/quicktunnel.log"
+check "url prints the address" "$(bash "$WOK" url 2>/dev/null)" https://midi-don-dates-university.trycloudflare.com
+check "url says ADMIN_URL is stale" "$(wok url | grep -c 'Set ADMIN_URL=https://midi-don-dates-university')" 1
+echo "ADMIN_URL=https://midi-don-dates-university.trycloudflare.com" >>"$T/home/.env"
+check "url quiet when ADMIN_URL matches" "$(wok url | grep -c 'Set ADMIN_URL' || true)" 0
+check "status shows the address" "$(wok status | grep -c 'Address:  https://midi-don-dates-university')" 1
 
 echo
 if [ "$fails" -ne 0 ]; then
