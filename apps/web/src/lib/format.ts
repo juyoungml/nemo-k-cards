@@ -28,5 +28,11 @@ export const toKstInput = (iso: string | number) => kstParts.format(new Date(iso
 /** A datetime-local value read as KST → ISO with its offset, which is what the API wants. */
 export const fromKstInput = (value: string) => `${value}:00+09:00`;
 
-/** The datetime-local bounds for a Timed Post, fixed when the form opens: 5 minutes to 60 days from now, in KST. */
-export const scheduleBounds = () => ({ min: toKstInput(Date.now() + 5 * 60_000), max: toKstInput(Date.now() + 60 * 86_400_000) });
+/** The least lead time for a Timed Post: the API's posts.MIN_LEAD (backend/tests/test_timed_posts.py keeps them equal). */
+export const MIN_LEAD_MINUTES = 5;
+
+/** The datetime-local bounds for a Timed Post, fixed when the form opens: MIN_LEAD_MINUTES to 60 days from now, in KST. */
+export const scheduleBounds = () => ({
+  min: toKstInput(Date.now() + MIN_LEAD_MINUTES * 60_000),
+  max: toKstInput(Date.now() + 60 * 86_400_000),
+});
