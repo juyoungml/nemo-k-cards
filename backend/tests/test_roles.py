@@ -84,6 +84,9 @@ EXPECTED = {
     ("GET", "/posts"): "viewer",
     ("GET", "/posts/{post_id}"): "viewer",
     ("POST", "/posts/{post_id}/resolve"): "approver",
+    ("GET", "/jobs/{job_id}/slides/{n}/photos"): "viewer",
+    ("POST", "/jobs/{job_id}/slides/{n}/photo"): "editor",
+    ("POST", "/jobs/{job_id}/slides/{n}/regenerate"): "editor",
     ("POST", "/posts/{post_id}/cancel"): "approver",
     ("POST", "/posts/{post_id}/reschedule"): "approver",
     ("GET", "/orgs/current/profile"): "viewer",
@@ -152,7 +155,7 @@ def test_each_role_is_allowed_exactly_its_routes(team, role, no_background):
     other = add_member(c.org_id, "viewer")
     ids = {"job_id": _ready_job(c.org_id).id, "brainstorm_id": "nope", "user_id": str(other),
            "invitation_id": str(uuid.uuid4()), "account_id": str(uuid.uuid4()), "material_id": "m-0000000000000000",
-           "post_id": str(uuid.uuid4())}
+           "post_id": str(uuid.uuid4()), "n": "1"}
     for (method, path), need in EXPECTED.items():
         if need == "signed-in":
             continue

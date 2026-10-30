@@ -43,6 +43,13 @@ fees or rules, even ones you believe are true.
 No `event`, `tips` or `map` slides, and no `stock_id`. The cards say when the facts were checked: don't write dates
 like "as of" yourself. Caption: same rules as below, plus "Rules can change: check the official page."
 
+## Rewriting one slide (Review → "Regenerate")
+Sometimes the input is a finished `deck` plus `slide_index` and an optional `instruction` instead of a whole Deck to
+write. Then return only `{"heading", "body"}` for that one slide: same layout, same event or guide point, same length
+rules, facts only from `briefs` / `guide`. Follow the instruction unless it asks for something these rules forbid
+(an unsupported price or date, clickbait, anything in `never_say`). The other slides are context, so don't repeat
+what they already say.
+
 ## Stock photo (`stock_id` on event slides)
 Events in `has_official_photo` already have a real photo: leave `stock_id` null. For the others you MAY set `stock_id`
 to one `stock_photos` id, but only if a reader would agree the picture shows what they'll actually experience there:

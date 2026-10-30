@@ -8,7 +8,7 @@ import { orgHeader, setActiveOrgId } from "./org";
 import { accessToken, isAuthPath, reloadTo } from "./supabase";
 import type {
   AuditEvent, Brainstorm, DeckEdit, DeckKind, DeckVersion, FitResult, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job,
-  Material, MaterialRef, Me, Member, Metric, Org, OrgProfile, OrgProfileState, PolicyEvent, Post, PublishMode, Role, Scenario,
+  Material, MaterialRef, Me, Member, Metric, Org, OrgProfile, OrgProfileState, PhotoChoice, PhotoOptions, PolicyEvent, Post, PublishMode, Role, Scenario,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
@@ -114,6 +114,15 @@ export const api = {
   // Deck versions (#19): the history, a save that makes the next version, and the fit check while typing.
   getVersions: (id: string) => req<DeckVersion[]>(`/jobs/${id}/versions`),
   saveVersion: (id: string, edit: DeckEdit) => req<Job>(`/jobs/${id}/versions`, { method: "POST", json: edit }),
+  // #23: swap one slide's photo, or have the copywriter rewrite one slide. Each makes the next Deck version.
+  slidePhotoOptions: (id: string, n: number) => req<PhotoOptions>(`/jobs/${id}/slides/${n}/photos`),
+  swapPhoto: (id: string, n: number, baseVersion: number, choice: PhotoChoice) =>
+    req<Job>(`/jobs/${id}/slides/${n}/photo`, { method: "POST", json: { base_version: baseVersion, ...choice } }),
+  regenerateSlide: (id: string, n: number, baseVersion: number, instruction?: string) =>
+    req<Job>(`/jobs/${id}/slides/${n}/regenerate`, {
+      method: "POST",
+      json: { base_version: baseVersion, instruction: instruction?.trim() || undefined },
+    }),
   fitCheck: (id: string, edit: Required<Pick<DeckEdit, "base_version" | "slides">>, position: number) =>
     req<FitResult>(`/jobs/${id}/fit`, { method: "POST", json: { ...edit, position } }),
   rejectJob: (id: string, reason: string) => req<Job>(`/jobs/${id}/reject`, { method: "POST", json: { reason } }),

@@ -132,6 +132,7 @@ export interface DeckVersion {
   deck: CardDeck;
   rerendered: number[]; // slides rendered for this version; the others reuse earlier files
   changes: DeckChange[];
+  action?: "edit" | "photo" | "regenerate"; // #23: a text edit, a photo swap or an agent rewrite of one slide
   edited_by: string | null; // null: version 1, the pipeline's
   edited_by_email: string | null;
   created_at: string;
@@ -139,12 +140,40 @@ export interface DeckVersion {
 }
 
 export interface DeckChange {
-  field: "order" | "slide.heading" | "slide.body" | "caption" | "hashtags";
+  field: "order" | "slide.heading" | "slide.body" | "slide.photo" | "caption" | "hashtags";
   slide?: number;
   from_slide?: number;
   before: unknown;
   after: unknown;
+  by?: "agent"; // #23: rewritten by the copywriter ("Regenerate")
+  instruction?: string;
 }
+
+/** Swap a slide's photo (#23): what it can be, and why an option isn't allowed. */
+export interface PhotoOption {
+  source: "candidate" | "stock" | "none";
+  candidate?: number | null;
+  stock_id?: string | null;
+  url?: string | null; // relative to the API (signed for vetted photos)
+  label: string;
+  credit: string;
+  license: string;
+  current: boolean;
+  allowed: boolean;
+  why_not?: string | null;
+}
+
+export interface PhotoOptions {
+  slide_index: number;
+  event_id: string;
+  event_title: string;
+  options: PhotoOption[];
+}
+
+export type PhotoChoice =
+  | { source: "candidate"; candidate: number }
+  | { source: "stock"; stock_id: string }
+  | { source: "none" };
 
 /** Does one slide's text fit, as typed? (POST /jobs/{id}/fit, measured by the renderer after auto-fit.) */
 export interface FitResult {

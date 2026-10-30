@@ -73,6 +73,8 @@ class DeckVersion(BaseModel):
     files: list[str] = Field(default_factory=list)       # rendered slide files, in slide order
     rerendered: list[int] = Field(default_factory=list)  # slides rendered for this version (others reuse files)
     changes: list[dict[str, Any]] = Field(default_factory=list)  # what changed from the previous version
+    # What made it (#23): a person's text edit, a photo swap, or an agent rewrite of one slide ("regenerate").
+    action: str = "edit"
     edited_by: UUID | None = None                        # None: version 1, the pipeline's
     edited_by_email: str | None = None
     created_at: datetime
@@ -84,6 +86,7 @@ class DeckVersionOut(BaseModel):
     deck: CardDeck
     rerendered: list[int]
     changes: list[dict[str, Any]]
+    action: str = "edit"
     edited_by: UUID | None
     edited_by_email: str | None
     created_at: datetime
@@ -280,7 +283,16 @@ async def save_version(job_id: str, edit: DeckEdit, ctx: auth.Editor) -> Job:
     deck, order, changes = apply_edit(job.deck, edit)
     if not changes:
         raise HTTPException(422, "nothing changed")
+    return await save(ctx, job, deck, order, changes, edit.base_version, allow_overflow=edit.allow_overflow,
+                      edited_text=edited_fields(job.edited_text, order, changes))
 
+
+async def save(ctx: auth.Ctx, job: Job, deck: CardDeck, order: list[int], changes: list[dict[str, Any]],
+               base_version: int, *, allow_overflow: bool, edited_text: dict[int, list], action: str = "edit",
+               log_note: str = "", extra_issues: list[Issue] = ()) -> Job:
+    """Steps 2–6 of the module docstring for any change to a Deck: a text edit (above), a photo swap or a rewrite of
+    one slide (#23, `app/slide_actions.py`). `order` maps each new position to its base index; `edited_text` is
+    the Job's new record of what a person typed; `extra_issues` are the caller's own findings on the new Deck."""
     # The Safeguard's host rules, now: a blocked phrase is never saved, rendered or sent to the model.
     if findings := safeguard.rule_findings(deck):
         policy = safeguard.load_policy()
@@ -288,7 +300,7 @@ async def save_version(job_id: str, edit: DeckEdit, ctx: auth.Editor) -> Job:
                                    checked_by=["rules"], policy_version=policy.version,
                                    content_hash=safeguard.content_hash(deck), checked_at=datetime.now(UTC))
         await asyncio.to_thread(audit.record, ctx, "safeguard.edit_blocked", job.id, stage="edit",
-                                base_version=edit.base_version, changes=changes,
+                                base_version=base_version, changes=changes, via=action,
                                 **orchestrator.verdict_detail(verdict))
         raise HTTPException(422, {"code": "blocked", "message": "Not saved: " + verdict.summary,
                                   "findings": [f.model_dump() for f in findings]})
@@ -299,7 +311,7 @@ async def save_version(job_id: str, edit: DeckEdit, ctx: auth.Editor) -> Job:
     files, rendered = await render_changed(job, deck)
     qa = visual_qa.run_qa(rendered, deck, _secrets())
     overflow = [i for i in qa.issues if i.category == "visual" and i.severity == "block"]
-    if overflow and not edit.allow_overflow:
+    if overflow and not allow_overflow:
         raise HTTPException(422, {"code": "overflow",
                                   "message": "Text overflows its box on " + ", ".join(
                                       sorted({f"slide {i.slide_index + 1}" for i in overflow})) +
@@ -307,17 +319,16 @@ async def save_version(job_id: str, edit: DeckEdit, ctx: auth.Editor) -> Job:
                                   "issues": [i.model_dump() for i in overflow]})
     rerendered = {r.index for r in rendered}
     issues = remap_issues(job.issues, order, rerendered) + qa.issues + org_profile.never_say_issues(
-        deck, job.org_profile)
-    edited_text = edited_fields(job.edited_text, order, changes)
+        deck, job.org_profile) + list(extra_issues)
 
     def commit() -> Job:
         with store.locked_job(ctx.org_id, job.id, user_id=ctx.user.id) as (c, cur):
             if cur is None:
                 raise HTTPException(404, "job not found")
-            _editable(cur, edit.base_version)  # nobody saved or approved it while this one rendered
+            _editable(cur, base_version)  # nobody saved or approved it while this one rendered
             ensure_initial(c, cur)
             v = DeckVersion(version=cur.deck_version + 1, deck=deck, files=files, rerendered=sorted(rerendered),
-                            changes=changes, edited_by=ctx.user.id, edited_by_email=ctx.user.email or None,
+                            changes=changes, action=action, edited_by=ctx.user.id, edited_by_email=ctx.user.email or None,
                             created_at=datetime.now(UTC))
             _insert(c, cur.id, v)
             cur.deck, cur.deck_version = deck, v.version
@@ -327,13 +338,14 @@ async def save_version(job_id: str, edit: DeckEdit, ctx: auth.Editor) -> Job:
             cur.safeguard, cur.safeguard_pending = None, True
             cur.log.append(LogLine(time=datetime.now(orchestrator.KST).strftime("%H:%M:%S"), stage="edit",
                                    message=f"version {v.version} saved by {ctx.user.email or 'a Member'}: "
-                                           f"{_describe(changes)} · {len(rerendered)} slide(s) re-rendered · "
+                                           f"{_describe(changes)}{log_note} · {len(rerendered)} slide(s) "
+                                           "re-rendered · "
                                            "safeguard checking"))
             if cur.status == JobStatus.SCHEDULED:
                 _hold(c, ctx, cur, v.version)
             store.write_job(c, cur)
             audit.write(c, ctx.org_id, audit.entry(ctx, "deck.edited", cur.id, version=v.version,
-                                                   base_version=edit.base_version, changes=changes,
+                                                   base_version=base_version, changes=changes, via=action,
                                                    rerendered=v.rerendered,
                                                    overflow_accepted=bool(overflow) or None))
             return cur

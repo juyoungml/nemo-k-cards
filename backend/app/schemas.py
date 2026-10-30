@@ -465,7 +465,7 @@ class Job(BaseModel):
     source: Literal["quick", "brainstorm"] = "quick"
     # Deck kind (#27): what was asked for (None = let the researcher decide) and what the Deck is. `kind` is None until
     # research when the request left it open; Jobs from before #27 load as event Decks.
-    requested_kind: DeckKind | None = None
+    requested_kind: DeckKind | None = "event"  # a stored null means "auto"; a missing key is a Job from before #27
     kind: DeckKind | None = "event"
     briefs: list[EventBrief] = Field(default_factory=list)
     guide: GuideBrief | None = None                      # Guide Decks only
@@ -494,6 +494,9 @@ class Job(BaseModel):
     # The Organization profile (#16) as it was when the Job started: every stage of this Job gives the agents the
     # same one, even if an Admin edits the profile meanwhile. None on Jobs from before profiles.
     org_profile: OrgProfile | None = None
+    # Swap a photo (#23): every photo the host vetted for each event (local copies), so Review can offer the others.
+    # Empty on Jobs from before #23 and on Guide Decks.
+    photo_candidates: dict[str, list[ImageAsset]] = Field(default_factory=dict)
 
 
 Scenario = Literal["good", "bad", "fail", "guide"]  # demo/scenarios/<name>/, same names as the Admin mock backend

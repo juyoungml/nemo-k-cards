@@ -44,7 +44,9 @@ LEEWAY_S = 30  # clock skew between Supabase and this host
 # /instagram-accounts/callback: Instagram redirects the browser there, so it carries no session; its signed,
 # single-use `state` is the credential (app/instagram_accounts.py).
 PUBLIC_PATHS = {"/health", "/instagram-accounts/callback"}
-PUBLIC_PREFIXES = ("/assets/",)  # rendered slides: the signed link is the credential (app/assets.py)
+# Rendered slides and vetted photos: the signed link is the credential (app/assets.py). Stock photos: our own
+# AI-generated set, the same for everyone (app/slide_actions.py), so an <img> can load them without a token.
+PUBLIC_PREFIXES = ("/assets/", "/stock/")
 # Signed in is enough here: these are how a person without an Organization gets one.
 NO_ORG_ROUTES = {("GET", "/me"), ("POST", "/orgs"), ("POST", "/invitations/accept")}
 ORG_HEADER = "x-org-id"
