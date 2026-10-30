@@ -1,0 +1,37 @@
+{
+  "checked_at": "2026-10-30",
+  "artifact": "assets/climate-card-guide.png",
+  "status": "Illustrated English guide concept. Imagegen redesign with user-approved copy, including cash-backup note. Not an agent pipeline execution or a published post.",
+  "format_references": [
+    {
+      "title": "JNTO 10 Smart Travel Tips for Japan (2026)",
+      "url": "https://asset.japan.travel/image/upload/v1780970938/pdf/JNTO_10SmartTravelTipsforJapan_2026.pdf",
+      "use": "Short action-led headings and a numbered three-step guide; no images or branding copied."
+    },
+    {
+      "title": "TfL Visitor Oyster card",
+      "url": "https://tfl.gov.uk/travel-information/visiting-london/visitor-oyster-card?intcmp=4043",
+      "use": "Separate purchase, use and journey-specific cautions. No TfL fares, branding or imagery reused."
+    }
+  ],
+  "facts": [
+    {
+      "claim": "Climate Card cannot be used to board at ICN T1/T2; airport alighting is permitted.",
+      "source": "https://news.seoul.go.kr/traffic/archives/510651"
+    },
+    {
+      "claim": "New machines in Seoul Metro stations sell/load Climate Cards; short-term passes are 1/2/3/5/7 days and start on loading day.",
+      "source": "https://news.seoul.go.kr/traffic/archives/510651"
+    },
+    {
+      "claim": "Official purchase/top-up guidance explicitly includes Line 1 Seoul Station in the Cheongnyangni–Seoul Station range.",
+      "source": "https://korean.visitseoul.net/announcements/기후동행카드-해외카드-결제-안내문-/KOB014087"
+    },
+    {
+      "claim": "Seoul Metro lines 1–8 have card machines; Seoul Station subway side uses lines 1 and 4. No exact exit, opening hours, price, stock or ICN sales availability is asserted.",
+      "source": "https://news.seoul.go.kr/traffic/archives/512146"
+    }
+  ],
+  "source_panel": "Two user-provided official Korean/English page screenshots, preserved in assets and cropped only for slide placement.",
+  "illustration": "Conceptual airport-to-city scene, not a geographic map or a photograph."
+}
