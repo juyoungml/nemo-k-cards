@@ -20,6 +20,9 @@ Queues
 - `jobs`, partitioned by Organization: `JOBS_PER_ORG` caps each Organization's running Jobs, `JOBS_PER_WORKER`
   caps one process. A Job waiting for its Organization's slot stays QUEUED.
 - `deck_checks`: the Safeguard re-check of an edited Deck version (#19), one short workflow per version.
+
+Schedules
+- `instagram-token-refresh`: every day at 03:17 KST (#22, app/token_refresh.py).
 """
 
 import logging
@@ -80,7 +83,10 @@ def launch(*, listen: bool = True) -> None:
     Call it from a thread without a running event loop (`asyncio.to_thread`), so workflows get DBOS's own loop.
     The pipeline module must be imported first: its workflow and steps register at import."""
     global _launched
-    from app import deck_versions  # noqa: F401  (registers the Deck re-check workflow, #19)
+    from app import (
+        deck_versions,  # noqa: F401  (registers the Deck re-check workflow, #19)
+        token_refresh,  # registers the daily token refresh workflow (#22)
+    )
     from app.pipeline import (  # noqa: F401  (registers the workflows before launch)
         orchestrator,
         publishing,
@@ -95,6 +101,7 @@ def launch(*, listen: bool = True) -> None:
         DBOS.launch()
         register_queue()
         publishing.register_queue()
+        token_refresh.register_schedule()
         _launched = True
 
 

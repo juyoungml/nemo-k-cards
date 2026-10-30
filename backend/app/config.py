@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # Instagram accounts an Organization may connect when `orgs.instagram_account_limit` is unset (billing, #29,
     # will set it from the plan).
     instagram_accounts_per_org: int = 1
+    # Alert emails (app/notify.py): SMTP_URL like smtps://user:password@smtp.example.com:465 (or smtp://…:587, which
+    # uses STARTTLS). Empty: alerts are only logged. Host-only secret.
+    smtp_url: str = ""
+    mail_from: str = "What's On Korea <alerts@whatsonkorea.app>"
 
     # Supabase project: sign-in (every route except /health needs its access token) and, with
     # IMAGE_HOST=supabase, slide hosting. Local: `supabase start` → http://127.0.0.1:54321. Empty = all 401.

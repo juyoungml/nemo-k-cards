@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 from dbos import DBOS, SetWorkflowID, WorkflowSerializationFormat
 
-from app import assets, audit, deck_versions, instagram_accounts, posts, store
+from app import assets, audit, deck_versions, instagram_accounts, posts, store, token_refresh
 from app.config import settings
 from app.pipeline import durable, orchestrator
 from app.schemas import Job, JobStatus, LogLine, Post, PostProgress
@@ -49,6 +49,9 @@ log = logging.getLogger("publishing")
 KST = ZoneInfo("Asia/Seoul")
 
 POST_QUEUE = "posts"
+# Why a Post to an account without a usable token fails (#22): what to do about it, not just what went wrong.
+RECONNECT = ("the Instagram account @{handle} is disconnected or needs reconnecting: an Admin can reconnect it on "
+             "the Instagram page, then approve the Deck again")
 MAX_PUBLISH_ATTEMPTS = 3                  # media_publish calls per Post, all with the same container
 CONTAINER_MAX_AGE = timedelta(hours=23)   # Instagram expires containers after 24 h; rebuild before that
 ALERT_AFTER = timedelta(minutes=30)       # unknown this long: tell a person
@@ -118,14 +121,12 @@ def _token(org_id: UUID, p: dict) -> str | None:
 
 
 def _revoke(org_id: UUID, p: dict, e: GraphError) -> None:
-    """Instagram says the token is invalid (code 190): the account needs reconnecting (#22 refreshes in time)."""
+    """Instagram says the token is invalid (code 190): the account needs reconnecting, and its Admins are told
+    (token_refresh.revoke, #22)."""
     if not e.token_invalid or not p.get("instagram_account_id"):
         return
-    with store.system() as c:
-        c.execute("update instagram_accounts set status = 'revoked' where id = %s and org_id = %s "
-                  "and status in ('connected', 'expiring')", (p["instagram_account_id"], org_id))
-    log.warning("Instagram rejected the token of account %s (Organization %s): marked revoked",
-                p["instagram_account_id"], org_id)
+    token_refresh.revoke(org_id, p["instagram_account_id"],
+                         "Instagram rejected its token while publishing (it was revoked or expired)")
 
 
 def _out(post: Post | None, *, wait: float = 0) -> dict:
@@ -234,7 +235,7 @@ async def _prepare(org_id: UUID, p: dict) -> dict:
         token = await asyncio.to_thread(_token, org_id, p)
         if not token:
             return _out(await asyncio.to_thread(
-                _fail, org_id, p, f"the Instagram account @{p['username']} is disconnected or needs reconnecting",
+                _fail, org_id, p, RECONNECT.format(handle=p["username"]),
                 expect={"queued"}))
         if visual_qa.scan_text(deck.caption, "caption", secrets=(token,)) or any(
                 visual_qa.scan_text(f"{s.heading}\n{s.body}", "slide", secrets=(token,)) for s in deck.slides):
@@ -284,7 +285,7 @@ async def _publish(org_id: UUID, p: dict) -> dict:
         token = await asyncio.to_thread(_token, org_id, p)
         if not token:
             return _out(await asyncio.to_thread(
-                _fail, org_id, p, f"the Instagram account @{p['username']} is disconnected or needs reconnecting",
+                _fail, org_id, p, RECONNECT.format(handle=p["username"]),
                 expect={"container_ready"}))
     # Saved before the call: if we die during it, the restart finds `publishing` and checks instead of retrying.
     started = await asyncio.to_thread(lambda: posts.transition(

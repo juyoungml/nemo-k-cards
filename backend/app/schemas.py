@@ -525,6 +525,8 @@ class InstagramAccount(BaseModel):
     account_type: Literal["BUSINESS", "MEDIA_CREATOR"]
     status: Literal["connected", "expiring", "revoked"]
     token_expires_at: datetime | None
+    token_refreshed_at: datetime | None = None  # last automatic refresh (#22)
+    revoked_reason: str | None = None           # why it needs reconnecting (status revoked)
     connected_at: datetime
     followers: int | None = None    # not read yet: insights per Organization come later
     live: bool                      # status is connected (publishing can use it)

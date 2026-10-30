@@ -315,8 +315,9 @@ async def test_a_revoked_token_fails_before_anything_is_posted_and_marks_the_acc
     assert post.state == "failed" and "code 190" in post.last_error and ig.live == []
     with store.system() as c:
         assert c.execute("select status from instagram_accounts where id = %s", (acct["id"],)).fetchone()[0] == "revoked"
-    # A revoked account can't be picked any more until it is reconnected.
-    assert a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "account_id": str(acct["id"])}).status_code == 422
+    # A revoked account can't be picked any more until it is reconnected, and Approve says so (#22).
+    r = a.post(f"/jobs/{job.id}/approve", json={"deck_version": 1, "account_id": str(acct["id"])})
+    assert r.status_code == 409 and "needs reconnecting" in r.json()["detail"]
 
 
 # ---------------------------------------------------------------- 24 h container expiry

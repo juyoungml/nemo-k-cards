@@ -156,9 +156,20 @@ export function InstagramView() {
                     <TableCell>{ACCOUNT_TYPE[a.account_type]}</TableCell>
                     <TableCell>
                       <StatusBadge tone={tone}>{label}</StatusBadge>
+                      {a.status === "revoked" && (
+                        <p className="mt-1 max-w-64 text-xs text-destructive">
+                          {a.revoked_reason ? `${a.revoked_reason[0].toUpperCase()}${a.revoked_reason.slice(1)}. ` : ""}
+                          {isAdmin ? "Connect Instagram again with this account to keep posting." : "Ask an Admin to reconnect it."}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground tabular-nums">
                       {a.token_expires_at ? formatDateTime(a.token_expires_at) : "—"}
+                      {a.status !== "revoked" && (
+                        <p className="text-xs">
+                          {a.token_refreshed_at ? `Refreshed ${formatDateTime(a.token_refreshed_at)}` : "Refreshed automatically"}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground tabular-nums">{formatDateTime(a.connected_at)}</TableCell>
                     {isAdmin && (
