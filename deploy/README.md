@@ -82,6 +82,8 @@ restarts only what changed. While updates are paused it starts the images alread
 `wok-update.timer` runs `wok update` every 2 minutes, so a moved tag is live within about 3 minutes:
 
 1. `docker compose pull api admin` for `$API_IMAGE:$IMAGE_TAG` / `$ADMIN_IMAGE:$IMAGE_TAG` (default `staging`).
+   If the API changed, `python -m app.migration_check` runs from the new image first: a database without every
+   migration that image ships with means no restart (the old image goes back under the tag, the next check retries).
 2. If neither image ID changed, it does nothing. Otherwise it tags the running image `:wok-previous` and restarts
    only the changed service with `docker compose up -d --wait`. That waits for the image's own HEALTHCHECK: the
    API's `/health` and the Admin's `/sign-in`.
@@ -121,6 +123,9 @@ sudo wok update-now <commit>
 ```
 
 - The same health check, rollback and skip-bad-image rules apply. A failed build leaves the stack as it is.
+- Before anything restarts, `wok` runs `python -m app.migration_check` from the new API image. If the database lacks
+  a migration that image ships with, the deploy is refused, the stack is untouched, and it says to run
+  `supabase db push`. `sudo wok update-now --skip-migration-check` overrides it (only when you know why).
 - The timer does nothing in build mode: a deploy only happens when someone runs `update-now`, so nothing goes out
   without its migrations. `GHCR_*` aren't needed.
 - The Admin's `NEXT_PUBLIC_SUPABASE_*` come from the env file as build args (public values).
