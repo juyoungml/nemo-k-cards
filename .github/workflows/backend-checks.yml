@@ -1,8 +1,8 @@
 name: Backend checks
+# On main these checks run inside container-images.yml (workflow_call), which pushes the images to GHCR only
+# after they pass. So there is no push trigger here: one run per commit on main, not two.
 on:
-  push:
-    branches: [main]
-    paths: ['backend/**', 'supabase/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
+  workflow_call:
   pull_request:
     paths: ['backend/**', 'supabase/**', 'agent/**', 'policies/**', 'demo/scenarios/**', '.github/workflows/backend-checks.yml']
   workflow_dispatch:
