@@ -1,7 +1,14 @@
 name: Container images
 # Builds the API and Admin images (backend/Dockerfile, apps/web/Dockerfile) and validates deploy/compose.yml.
-# Nothing is pushed: this is the build half of #59. Pushing to GHCR, and deploying, come with #59/#60.
-# Images are built here rather than on a laptop, so a Dockerfile change is proven on every pull request.
+#
+# Pull requests (and Run workflow): build both images and smoke-test them, push nothing, use no secrets and a
+#   read-only token. There is no pull_request_target anywhere, so a fork's code never runs with secrets.
+# Push to main: run the backend and web checks first (the same workflows PRs run, via workflow_call), and only
+#   if both pass, build and push the PRIVATE images to GHCR, tagged by commit:
+#     ghcr.io/<owner>/<repo>-api:sha-<full sha>              (+ sha-<7>)   one image for every environment
+#     ghcr.io/<owner>/<repo>-admin:staging-sha-<full sha>    (+ staging-sha-<7>)   built for staging's Supabase
+#   The deploy button (#60) re-tags one commit's pair as `staging`; servers pull that tag (#61).
+# See deploy/README.md for the variables this needs and how a server gets a read-only pull token.
 on:
   pull_request:
     paths:
@@ -13,13 +20,26 @@ on:
       - 'deploy/**'
       - '.dockerignore'
       - '.github/workflows/container-images.yml'
+  # Every commit on main gets images (no path filter), so the deploy button can deploy any commit of main.
+  push:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: container-images-${{ github.ref }}
-  cancel-in-progress: true
+  # Per commit on main (every commit must get its images; a shared group would drop queued runs),
+  # per branch elsewhere, where a newer push makes the older run pointless.
+  group: container-images-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 jobs:
+  # --- Gate (main only): the same checks pull requests run. Images are pushed only after both pass. ----------
+  backend-checks:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/backend-checks.yml
+  web-checks:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/web-checks.yml
+
   compose:
     name: compose config
     runs-on: ubuntu-latest
@@ -37,8 +57,10 @@ jobs:
           docker compose -f deploy/compose.yml --env-file deploy/env.example config --quiet
           docker compose -f deploy/compose.yml --env-file deploy/env.example --profile tunnel config --quiet
 
+  # --- Pull requests: build and smoke-test, push nothing ----------------------------------------------------
   api:
     name: build api image
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -83,6 +105,7 @@ jobs:
 
   admin:
     name: build admin image
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -90,8 +113,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@v3
-      # Public build args only (they ship to every browser). Per-environment values come from the GitHub
-      # environment's variables in #59; a pull request build uses placeholders, which is enough to compile.
+      # Public build args only (they ship to every browser). A pull request build uses placeholders, which is
+      # enough to compile; the pushed image on main gets staging's values (push-admin below).
       - uses: docker/build-push-action@v6
         with:
           context: apps/web
@@ -107,10 +130,141 @@ jobs:
       - name: start image and load /sign-in
         run: |
           docker run -d --name admin -p 3000:3000 nemo-k-cards-admin:ci
-          for i in $(seq 30); do
+          for _ in $(seq 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/sign-in || true)
             [ "$code" = 200 ] && break; sleep 1
           done
           docker logs admin
           test "$code" = 200 || { echo "/sign-in answered $code"; exit 1; }
           docker exec admin id
+
+  # --- Main: push to GHCR after the checks pass. Only these two jobs can write packages. ---------------------
+  push-api:
+    name: push api image
+    needs: [backend-checks, web-checks, compose]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      # Image names are lowercased by metadata-action. Labels include org.opencontainers.image.revision=<sha>
+      # (the server's status shows it) and .source, which links the package to this repository.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-api
+          tags: |
+            type=sha,format=long
+            type=sha
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Same scope as the PR build: main's cache is readable by every branch, so PR builds start warm.
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      - name: package must be private
+        env:
+          IMAGE: ${{ github.repository }}-api
+        run: .github/scripts/ghcr-assert-private.sh "$IMAGE"
+      - name: summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### API image pushed"
+            echo '```'
+            echo "$TAGS"
+            echo "digest $DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  push-admin:
+    name: push admin image (staging)
+    needs: [backend-checks, web-checks, compose]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # The Admin is built for one Supabase project (Next inlines NEXT_PUBLIC_* at build time). These are
+      # REPOSITORY variables, not `staging` environment variables: a job that names the `staging` environment
+      # waits for its required reviewer, which would gate every merge. Both values are public by design.
+      # Refuse anything that is not a publishable key, so a secret key can never be baked into the bundle.
+      - name: staging's public Supabase settings
+        env:
+          SUPABASE_URL: ${{ vars.STAGING_NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.STAGING_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          case "$SUPABASE_URL" in
+            https://*.supabase.co) ;;
+            *) echo "::error::repository variable STAGING_NEXT_PUBLIC_SUPABASE_URL must be https://<ref>.supabase.co (see deploy/README.md)"; exit 1 ;;
+          esac
+          case "$SUPABASE_KEY" in
+            sb_publishable_*) ;;
+            *) echo "::error::repository variable STAGING_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY must be a publishable key (sb_publishable_...), never a secret key"; exit 1 ;;
+          esac
+          echo "Admin is built for $SUPABASE_URL"
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-admin
+          tags: |
+            type=sha,format=long,prefix=staging-sha-
+            type=sha,prefix=staging-sha-
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ vars.STAGING_NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ vars.STAGING_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          # Own scope, so it doesn't evict the placeholder build's cache (different build args).
+          cache-from: type=gha,scope=admin-staging
+          cache-to: type=gha,scope=admin-staging,mode=max
+      - name: package must be private
+        env:
+          IMAGE: ${{ github.repository }}-admin
+        run: .github/scripts/ghcr-assert-private.sh "$IMAGE"
+      - name: summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Admin image pushed (staging Supabase project)"
+            echo '```'
+            echo "$TAGS"
+            echo "digest $DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

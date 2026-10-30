@@ -12,14 +12,15 @@ specific to one server: every server-specific value lives in one env file kept o
 | `env.example` | Template for the stack env file: names and comments, never values. |
 
 > **Status:** the images are built in CI (`.github/workflows/container-images.yml`) on every pull request that
-> touches them, and `docker compose config` is validated there. The stack has **not yet run against Supabase**.
+> touches them, and `docker compose config` is validated there. Every commit on main pushes private images to GHCR
+> after the backend and web checks pass. The stack has **not yet run against Supabase**.
 > Run the checklist below on the first real host (#61/#63) before anyone relies on it.
 
 ## Where things come from
 
-- **Images**: CI builds them; it does not push them yet. Pushing to GHCR is #59, and the deploy button that moves the
-  `staging` tag is #60. Until then `docker compose ... up --build` builds on the server. Nobody builds images on a
-  laptop.
+- **Images**: CI builds them and pushes every commit of main to GHCR as private packages (see
+  [Images on GHCR](#images-on-ghcr)). The deploy button that moves the `staging` tag is #60. Without a registry
+  login, `docker compose ... up --build` builds on the server instead. Nobody builds images on a laptop.
 - **Secrets and server settings**: the stack env file (template `env.example`), mode 600, outside the repo, for
   example `/srv/nemo/stack.env`. Only the `api` container reads it. Images contain no `.env` and no Claude login.
   CI fails the build if one turns up.
@@ -35,11 +36,62 @@ Next inlines `NEXT_PUBLIC_*` into the browser bundle at **build** time, so they 
   origin and Caddy routes it. No domain is baked into the image, one image works for any host name, and there is
   no CORS (`CORS_ORIGINS` stays unset).
 - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` name the Supabase project, so there is **one
-  Admin image per Supabase project** (staging, later production). In #59, CI passes them from that GitHub
-  environment's variables. Pull request builds use placeholders. Both values are public by design; never pass a
-  secret or service key.
+  Admin image per Supabase project** (staging, later production). On main, CI builds it with the repository
+  variables `STAGING_NEXT_PUBLIC_SUPABASE_URL` / `STAGING_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and tags it
+  `staging-sha-<sha>`. Pull request builds use placeholders. Both values are public by design; CI refuses a key that
+  isn't `sb_publishable_…`, so a secret key can't be baked in.
 
 The API image takes no build args: one image serves every environment.
+
+Why repository variables and not the `staging` environment's: a job that names an environment waits for that
+environment's required reviewers. Reading staging's settings there would put an approval in front of every merge.
+A production Admin later gets its own pair (`PRODUCTION_NEXT_PUBLIC_…`) and its own `production-sha-<sha>` tags.
+
+## Images on GHCR
+
+| Image | Tags pushed for each commit on main | Moving tag (#60) |
+|---|---|---|
+| `ghcr.io/juyoungml/nemo-k-cards-api` | `sha-<full sha>`, `sha-<7>` | `staging` |
+| `ghcr.io/juyoungml/nemo-k-cards-admin` | `staging-sha-<full sha>`, `staging-sha-<7>` | `staging` |
+
+- **When**: `container-images.yml` on every push to main. It runs `backend-checks.yml` and `web-checks.yml` first
+  (as reusable workflows) and pushes only if both pass. There is no `latest`. Pull requests build and smoke-test
+  the same Dockerfiles but push nothing, get a read-only token, and never see a secret. No workflow uses
+  `pull_request_target`.
+- **Labels**: each image carries `org.opencontainers.image.revision=<sha>` and `.source` (the repo), so a running
+  container tells you its commit.
+- **Cache**: BuildKit layers are kept in the GitHub Actions cache (`type=gha`). main's cache is readable from every
+  branch, so PR builds start warm.
+- **Private**: the repo is public, the packages are not. New GHCR packages start private, and CI fails the push job
+  if one turns public (anonymous pull allowed). Making a package public can't be undone, so don't. Only the two
+  push jobs get `packages: write`.
+
+### A read-only pull token for a server
+
+GHCR accepts only a **classic** personal access token. Fine-grained tokens and deploy keys don't work with it, and
+GitHub has no registry deploy tokens.
+
+1. Use an account that can read the repo. A dedicated machine account added as a **read** collaborator is best,
+   because a classic token reaches every package that account can see.
+2. GitHub → Settings → Developer settings → Personal access tokens (classic) → Generate. Select only
+   **`read:packages`** and set an expiry. Name it after the server.
+3. On the server, log in once. Docker keeps the login in `~/.docker/config.json` (mode 600):
+   `echo "$TOKEN" | docker login ghcr.io -u <account> --password-stdin`. Keep the token in the server's env
+   file or password manager, never in the repo, and don't put it on a command line where shell history keeps it.
+4. In the stack env file: `API_IMAGE=ghcr.io/juyoungml/nemo-k-cards-api`,
+   `ADMIN_IMAGE=ghcr.io/juyoungml/nemo-k-cards-admin`, `IMAGE_TAG=staging` (or a fixed `sha-…` pair to pin).
+   Then `docker compose ... pull && docker compose ... up -d` without `--build`. The updater is #61.
+5. Revoke the token when the server goes away. A leaked token only reads images, and the images hold no secrets.
+
+### If an image push fails
+
+- `STAGING_NEXT_PUBLIC_…` error: the repository variables are missing or wrong. A repo admin sets them under
+  Settings → Secrets and variables → Actions → **Variables**, then re-runs the failed jobs.
+- `denied: permission_denied` on push: the package exists but this repository has no write access to it. In the
+  package's settings → Manage Actions access, add `juyoungml/nemo-k-cards` with **Write**.
+- `… is PUBLIC`: GitHub can't make a public package private again. Tell the team, delete the package (package
+  settings → Danger Zone), and re-run the job: the push creates it again, private. The images hold no secrets,
+  but they aren't meant to be distributed.
 
 ## Run it
 
