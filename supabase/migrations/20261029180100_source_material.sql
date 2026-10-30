@@ -34,7 +34,7 @@ begin
 end
 $$;
 
--- The private bucket for files (MATERIAL_STORE=supabase). Like `slides` (20261029150000_private_slides.sql): not
+-- The private bucket for files (MATERIAL_STORE=supabase). Like `slides` (20261029150100_private_slides.sql): not
 -- public, no storage.objects policies, so only the backend's service key (host-only) reads and writes it.
 -- PDFs, re-encoded JPEGs and text files up to 10 MB. Plain Postgres (tests, CI) has no `storage` schema.
 do $$
