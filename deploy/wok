@@ -27,6 +27,7 @@ Usage: sudo wok <command>
   down                Stop the stack (volumes are kept). Pause first, or the next update may start it again
   rollback            Go back to the image before the last update and skip the current one
   config              Validate the compose files with the env file, print the images in use
+  url                 The public address of the quick tunnel (WOK_TUNNEL=quick); it changes when the tunnel restarts
   help                This text
 
 Files (default WOK_HOME=/opt/wok): .env (the one env file, mode 600), stack/ (compose files), state/,
@@ -92,8 +93,12 @@ load_config() {
 	IMAGE_TAG=${IMAGE_TAG:-staging}
 	HEALTH_TIMEOUT=$(env_get WOK_HEALTH_TIMEOUT)
 	HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-240}
-	PROFILE_ARGS=()
-	if [ -n "$(env_get TUNNEL_TOKEN)" ]; then PROFILE_ARGS=(--profile tunnel); fi
+	PROFILE_ARGS=() TUNNEL=""
+	if [ -n "$(env_get TUNNEL_TOKEN)" ]; then
+		PROFILE_ARGS=(--profile tunnel) TUNNEL=cloudflared
+	elif [ "$(env_get WOK_TUNNEL)" = quick ]; then
+		PROFILE_ARGS=(--profile quicktunnel) TUNNEL=quicktunnel
+	fi
 	# The shell environment wins over --env-file, so the defaults above are what compose sees.
 	export API_IMAGE ADMIN_IMAGE IMAGE_TAG
 	export ENV_FILE=$API_ENV
@@ -307,7 +312,7 @@ cmd_up() {
 	elif [ "$SOURCE" = build ]; then
 		# Build only what isn't on the host yet; a new commit goes out with `wok update-now`.
 		local front=(caddy)
-		[ ${#PROFILE_ARGS[@]} -eq 0 ] || front+=(cloudflared)
+		[ -z "$TUNNEL" ] || front+=("$TUNNEL")
 		compose pull --quiet "${front[@]}" || log "pull failed for ${front[*]}; starting with what is on this host"
 		if [ -z "$(image_id "$(ref_of api)")" ] || [ -z "$(image_id "$(ref_of admin)")" ]; then
 			fetch_images || return 1
@@ -370,6 +375,7 @@ cmd_status() {
 	else
 		echo "Updates:  following tag '$IMAGE_TAG'"
 	fi
+	[ "$TUNNEL" != quicktunnel ] || echo "Address:  $(quick_url) (quick tunnel; changes when it restarts)"
 	if command -v systemctl >/dev/null 2>&1; then
 		echo "Timer:    $(systemctl is-active wok-update.timer 2>/dev/null || true), last run $(systemctl show wok-update.service -p Result --value 2>/dev/null || echo '?')"
 	fi
@@ -393,7 +399,7 @@ cmd_logs() {
 		return 0
 	fi
 	local svc=()
-	case ${1:-} in api | admin | caddy | cloudflared)
+	case ${1:-} in api | admin | caddy | cloudflared | quicktunnel)
 		svc=("$1")
 		shift
 		;;
@@ -408,7 +414,24 @@ cmd_config() {
 	echo "compose config ok"
 	echo "api:   $(ref_of api)"
 	echo "admin: $(ref_of admin)"
-	echo "tunnel profile: $([ ${#PROFILE_ARGS[@]} -gt 0 ] && echo on || echo off)"
+	echo "tunnel: ${TUNNEL:-off}"
+}
+
+# The quick tunnel's address is only in its log: cloudflared prints it once the tunnel is up.
+quick_url() {
+	compose logs --no-color quicktunnel 2>/dev/null | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -n 1 || true
+}
+
+cmd_url() {
+	[ "$TUNNEL" = quicktunnel ] || die "no quick tunnel (set WOK_TUNNEL=quick); the address is SITE_ADDRESS or your tunnel's host name"
+	local url
+	url=$(quick_url)
+	[ -n "$url" ] || die "the quick tunnel has no address yet (starting, or not running: \`wok logs quicktunnel\`)"
+	printf '%s\n' "$url"
+	if [ "$(env_get ADMIN_URL)" != "$url" ]; then
+		log "ADMIN_URL in $ENV_SRC is not this address. Set ADMIN_URL=$url and PUBLIC_ASSET_BASE_URL=$url/backend," \
+			"run \`wok up\`, and put $url/** on the Supabase Auth redirect allow list" >&2
+	fi
 }
 
 # --- main -------------------------------------------------------------------------------------------------------
@@ -441,6 +464,7 @@ up) cmd_up ;;
 down) cmd_down ;;
 rollback) cmd_rollback ;;
 config) cmd_config ;;
+url) cmd_url ;;
 *)
 	usage >&2
 	exit 2

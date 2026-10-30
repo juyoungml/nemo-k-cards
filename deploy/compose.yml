@@ -68,10 +68,20 @@ services:
   # http://caddy:80 (keep SITE_ADDRESS=:80). Start with `--profile tunnel`.
   cloudflared:
     profiles: [tunnel]
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.6
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on: [caddy]
+    restart: unless-stopped
+
+  # No Cloudflare account, no domain, no open ports: a TryCloudflare quick tunnel to caddy:80. Cloudflare hands out
+  # a random https://<words>.trycloudflare.com that changes whenever this container restarts (`wok url` prints
+  # it). For staging and demos only: no uptime guarantee. Start with `--profile quicktunnel` (WOK_TUNNEL=quick).
+  quicktunnel:
+    profiles: [quicktunnel]
+    image: cloudflare/cloudflared:2026.10.6
+    command: tunnel --no-autoupdate --url http://caddy:80
     depends_on: [caddy]
     restart: unless-stopped
 
