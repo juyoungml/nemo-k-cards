@@ -1,0 +1,209 @@
+name: Deploy to staging
+# The deploy button (Actions → Deploy to staging → Run workflow). For one commit of main it:
+#   1. checks that CI pushed that commit's images (container-images.yml),
+#   2. applies that commit's Supabase migrations (`supabase db push`, dry run shown in the summary first),
+#   3. only then re-tags the images as `staging` in GHCR. Servers follow that tag (#61). GitHub never reaches
+#      a server.
+# It waits for a required reviewer of the protected `staging` environment, which alone holds the Supabase access
+# token. Rollback = run it again with an older commit. See deploy/README.md, "Deploying to staging".
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit of main to deploy (full or short SHA). Empty = latest main.'
+        type: string
+        required: false
+        default: ''
+      skip_migrations:
+        description: 'Rollback past a migration only: move the tag without `supabase db push` (read deploy/README.md first)'
+        type: boolean
+        required: false
+        default: false
+permissions:
+  contents: read
+concurrency:
+  # One deploy at a time; a second run queues behind the first instead of cancelling it mid-migration.
+  group: deploy-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    name: deploy to staging
+    # The workflow file itself must come from main (the environment's branch rule says the same).
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    permissions:
+      contents: read
+      packages: write   # re-tag in GHCR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # any commit of main can be deployed
+          persist-credentials: false
+
+      - name: resolve commit
+        id: commit
+        env:
+          INPUT: ${{ inputs.commit }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Input goes through env, never into the script text. Only hex is accepted.
+          if [ -z "$INPUT" ]; then
+            ref=HEAD
+          elif printf '%s' "$INPUT" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
+            ref="$INPUT"
+          else
+            echo "::error::commit must be a 7-40 character hex SHA, got something else"; exit 1
+          fi
+          sha=$(git rev-parse --verify --quiet "${ref}^{commit}") || { echo "::error::no such commit: $ref"; exit 1; }
+          git merge-base --is-ancestor "$sha" HEAD || { echo "::error::$sha is not on main"; exit 1; }
+          repo=$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+            echo "api=ghcr.io/${repo}-api"
+            echo "admin=ghcr.io/${repo}-admin"
+          } >> "$GITHUB_OUTPUT"
+          # The migrations to apply are the chosen commit's, not main's.
+          git checkout --quiet --detach "$sha"
+          git log -1 --format='Deploying %H%n  %s (%an, %cs)'
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Before touching the database: both images must exist, or the deploy stops here.
+      - name: images exist for this commit
+        id: images
+        env:
+          SRC_API: ${{ steps.commit.outputs.api }}:sha-${{ steps.commit.outputs.sha }}
+          SRC_ADMIN: ${{ steps.commit.outputs.admin }}:staging-sha-${{ steps.commit.outputs.sha }}
+          API: ${{ steps.commit.outputs.api }}
+        run: |
+          for ref in "$SRC_API" "$SRC_ADMIN"; do
+            docker buildx imagetools inspect "$ref" > /dev/null 2>&1 || {
+              echo "::error::$ref not found. Images exist only for main commits whose 'Container images' run passed; check that run (it may still be going)."
+              exit 1
+            }
+            echo "found $ref"
+          done
+          # What staging runs now, for the summary and for a rollback (best effort: none on the first deploy).
+          prev=$(docker buildx imagetools inspect "$API:staging" --format '{{json .Image}}' 2>/dev/null \
+                 | jq -r 'if has("config") then . else .["linux/amd64"] end | .config.Labels["org.opencontainers.image.revision"] // empty' \
+                 2>/dev/null || true)
+          echo "previous=${prev:-none}" >> "$GITHUB_OUTPUT"
+          echo "staging currently runs: ${prev:-none}"
+
+      - uses: supabase/setup-cli@v1
+        if: ${{ !inputs.skip_migrations }}
+        with:
+          version: 2.72.7
+
+      # Secrets reach only the steps that need them, through env. Nothing here echoes them, and Actions masks
+      # them in the log anyway. SUPABASE_DB_PASSWORD is optional: without it the CLI signs in to Postgres with a
+      # temporary login role obtained with the access token.
+      - name: link the staging project
+        if: ${{ !inputs.skip_migrations }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          [ -n "$SUPABASE_ACCESS_TOKEN" ] || { echo "::error::secret SUPABASE_ACCESS_TOKEN is not set on the staging environment"; exit 1; }
+          printf '%s' "$PROJECT_REF" | grep -Eq '^[a-z]{20}$' || { echo "::error::variable SUPABASE_PROJECT_REF on the staging environment must be a 20-letter project ref"; exit 1; }
+          [ -z "$DB_PASSWORD" ] || export SUPABASE_DB_PASSWORD="$DB_PASSWORD"
+          supabase link --project-ref "$PROJECT_REF" < /dev/null
+
+      - name: migrations (dry run)
+        if: ${{ !inputs.skip_migrations }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          [ -z "$DB_PASSWORD" ] || export SUPABASE_DB_PASSWORD="$DB_PASSWORD"
+          set +e
+          supabase db push --dry-run > "$RUNNER_TEMP/dry-run.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/dry-run.txt"
+          {
+            echo "### Migrations: dry run"
+            echo '```'
+            cat "$RUNNER_TEMP/dry-run.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: migrations (apply)
+        if: ${{ !inputs.skip_migrations }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          [ -z "$DB_PASSWORD" ] || export SUPABASE_DB_PASSWORD="$DB_PASSWORD"
+          supabase db push --yes 2>&1 | tee "$RUNNER_TEMP/push.txt"
+          {
+            echo "### Migrations: applied"
+            echo '```'
+            cat "$RUNNER_TEMP/push.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Only reached when every step above passed: a failed migration never moves the tag.
+      - name: move the staging tag
+        id: tag
+        env:
+          API: ${{ steps.commit.outputs.api }}
+          ADMIN: ${{ steps.commit.outputs.admin }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          docker buildx imagetools create --tag "$API:staging" "$API:sha-$SHA"
+          docker buildx imagetools create --tag "$ADMIN:staging" "$ADMIN:staging-sha-$SHA"
+          {
+            echo "api_digest=$(docker buildx imagetools inspect "$API:staging" --format '{{json .Manifest}}' | jq -r .digest)"
+            echo "admin_digest=$(docker buildx imagetools inspect "$ADMIN:staging" --format '{{json .Manifest}}' | jq -r .digest)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: summary
+        if: always()
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+          SHORT: ${{ steps.commit.outputs.short }}
+          API: ${{ steps.commit.outputs.api }}
+          ADMIN: ${{ steps.commit.outputs.admin }}
+          PREVIOUS: ${{ steps.images.outputs.previous }}
+          API_DIGEST: ${{ steps.tag.outputs.api_digest }}
+          ADMIN_DIGEST: ${{ steps.tag.outputs.admin_digest }}
+          SKIP_MIGRATIONS: ${{ inputs.skip_migrations }}
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          SERVER: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          {
+            if [ "$TAG_OUTCOME" = success ]; then
+              echo "## Deployed \`${SHORT}\` to staging"
+            else
+              echo "## Not deployed: staging still runs \`${PREVIOUS:-unknown}\`"
+              echo "The \`staging\` tag did not move (unless the step 'move the staging tag' itself failed half way:"
+              echo "then re-run this workflow with the same commit)."
+              echo
+              echo "A dry run that fails with *Remote migration versions not found in local migrations directory* means"
+              echo "this commit is older than the database: see deploy/README.md, 'Rolling back'."
+            fi
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            [ -z "$SHA" ] || echo "| Commit | [\`${SHORT}\`](${SERVER}/commit/${SHA}) $(git log -1 --format=%s "$SHA" | sed 's/|/\\|/g') |"
+            echo "| Previously on staging | \`${PREVIOUS:-unknown}\` |"
+            echo "| Migrations | $([ "$SKIP_MIGRATIONS" = true ] && echo 'skipped (skip_migrations)' || echo 'see above') |"
+            [ -z "$API_DIGEST" ]   || echo "| API | \`${API}:staging\` = \`sha-${SHA}\` (\`${API_DIGEST}\`) |"
+            [ -z "$ADMIN_DIGEST" ] || echo "| Admin | \`${ADMIN}:staging\` = \`staging-sha-${SHA}\` (\`${ADMIN_DIGEST}\`) |"
+            echo
+            echo "Servers pick up the new \`staging\` tag on their next update check (#61). To roll back, run this"
+            echo "workflow again with the previous commit."
+          } >> "$GITHUB_STEP_SUMMARY"

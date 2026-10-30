@@ -12,19 +12,22 @@ specific to one server: every server-specific value lives in one env file kept o
 | `env.example` | Template for the stack env file: names and comments, never values. |
 
 > **Status:** the images are built in CI (`.github/workflows/container-images.yml`) on every pull request that
-> touches them, and `docker compose config` is validated there. The stack has **not yet run against Supabase**.
+> touches them, and `docker compose config` is validated there. Every commit on main pushes private images to GHCR
+> after the backend and web checks pass. The stack has **not yet run against Supabase**.
 > Run the checklist below on the first real host (#61/#63) before anyone relies on it.
 
 ## Where things come from
 
-- **Images**: CI builds them; it does not push them yet. Pushing to GHCR is #59, and the deploy button that moves the
-  `staging` tag is #60. Until then `docker compose ... up --build` builds on the server. Nobody builds images on a
-  laptop.
+- **Images**: CI builds them and pushes every commit of main to GHCR as private packages (see
+  [Images on GHCR](#images-on-ghcr)). The deploy button moves the `staging` tag (see
+  [Deploying to staging](#deploying-to-staging)). Without a registry
+  login, `docker compose ... up --build` builds on the server instead. Nobody builds images on a laptop.
 - **Secrets and server settings**: the stack env file (template `env.example`), mode 600, outside the repo, for
   example `/srv/nemo/stack.env`. Only the `api` container reads it. Images contain no `.env` and no Claude login.
   CI fails the build if one turns up.
-- **Database**: Supabase Postgres. Apply `supabase/migrations` with the Supabase CLI (`supabase db push`) before
-  the first start and before each deploy that adds a migration. The API does not migrate the app schema itself;
+- **Database**: Supabase Postgres. On staging, the deploy button applies `supabase/migrations`
+  (`supabase db push`) before it moves the tag. Elsewhere, run `supabase db push` yourself before the first
+  start and before each deploy that adds a migration. The API does not migrate the app schema itself;
   DBOS creates its own tables in the `dbos` schema.
 
 ## The Admin's public settings (`NEXT_PUBLIC_*`)
@@ -35,11 +38,126 @@ Next inlines `NEXT_PUBLIC_*` into the browser bundle at **build** time, so they 
   origin and Caddy routes it. No domain is baked into the image, one image works for any host name, and there is
   no CORS (`CORS_ORIGINS` stays unset).
 - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` name the Supabase project, so there is **one
-  Admin image per Supabase project** (staging, later production). In #59, CI passes them from that GitHub
-  environment's variables. Pull request builds use placeholders. Both values are public by design; never pass a
-  secret or service key.
+  Admin image per Supabase project** (staging, later production). On main, CI builds it with the repository
+  variables `STAGING_NEXT_PUBLIC_SUPABASE_URL` / `STAGING_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and tags it
+  `staging-sha-<sha>`. Pull request builds use placeholders. Both values are public by design; CI refuses a key that
+  isn't `sb_publishable_…`, so a secret key can't be baked in.
 
 The API image takes no build args: one image serves every environment.
+
+Why repository variables and not the `staging` environment's: a job that names an environment waits for that
+environment's required reviewers. Reading staging's settings there would put an approval in front of every merge.
+A production Admin later gets its own pair (`PRODUCTION_NEXT_PUBLIC_…`) and its own `production-sha-<sha>` tags.
+
+## Images on GHCR
+
+| Image | Tags pushed for each commit on main | Moving tag (#60) |
+|---|---|---|
+| `ghcr.io/juyoungml/nemo-k-cards-api` | `sha-<full sha>`, `sha-<7>` | `staging` |
+| `ghcr.io/juyoungml/nemo-k-cards-admin` | `staging-sha-<full sha>`, `staging-sha-<7>` | `staging` |
+
+- **When**: `container-images.yml` on every push to main. It runs `backend-checks.yml` and `web-checks.yml` first
+  (as reusable workflows) and pushes only if both pass. There is no `latest`. Pull requests build and smoke-test
+  the same Dockerfiles but push nothing, get a read-only token, and never see a secret. No workflow uses
+  `pull_request_target`.
+- **Labels**: each image carries `org.opencontainers.image.revision=<sha>` and `.source` (the repo), so a running
+  container tells you its commit.
+- **Cache**: BuildKit layers are kept in the GitHub Actions cache (`type=gha`). main's cache is readable from every
+  branch, so PR builds start warm.
+- **Private**: the repo is public, the packages are not. New GHCR packages start private, and CI fails the push job
+  if one turns public (anonymous pull allowed). Making a package public can't be undone, so don't. Only the two
+  push jobs get `packages: write`.
+
+### A read-only pull token for a server
+
+GHCR accepts only a **classic** personal access token. Fine-grained tokens and deploy keys don't work with it, and
+GitHub has no registry deploy tokens.
+
+1. Use an account that can read the repo. A dedicated machine account added as a **read** collaborator is best,
+   because a classic token reaches every package that account can see.
+2. GitHub → Settings → Developer settings → Personal access tokens (classic) → Generate. Select only
+   **`read:packages`** and set an expiry. Name it after the server.
+3. On the server, log in once. Docker keeps the login in `~/.docker/config.json` (mode 600):
+   `echo "$TOKEN" | docker login ghcr.io -u <account> --password-stdin`. Keep the token in the server's env
+   file or password manager, never in the repo, and don't put it on a command line where shell history keeps it.
+4. In the stack env file: `API_IMAGE=ghcr.io/juyoungml/nemo-k-cards-api`,
+   `ADMIN_IMAGE=ghcr.io/juyoungml/nemo-k-cards-admin`, `IMAGE_TAG=staging` (or a fixed `sha-…` pair to pin).
+   Then `docker compose ... pull && docker compose ... up -d` without `--build`. The updater is #61.
+5. Revoke the token when the server goes away. A leaked token only reads images, and the images hold no secrets.
+
+### If an image push fails
+
+- `STAGING_NEXT_PUBLIC_…` error: the repository variables are missing or wrong. A repo admin sets them under
+  Settings → Secrets and variables → Actions → **Variables**, then re-runs the failed jobs.
+- `denied: permission_denied` on push: the package exists but this repository has no write access to it. In the
+  package's settings → Manage Actions access, add `juyoungml/nemo-k-cards` with **Write**.
+- `… is PUBLIC`: GitHub can't make a public package private again. Tell the team, delete the package (package
+  settings → Danger Zone), and re-run the job: the push creates it again, private. The images hold no secrets,
+  but they aren't meant to be distributed.
+
+## Deploying to staging
+
+Actions → **Deploy to staging** → Run workflow (from `main`). Inputs: `commit` (empty = latest main) and
+`skip_migrations` (rollback only, see below). A required reviewer of the `staging` environment approves, then
+`.github/workflows/deploy-staging.yml`:
+
+1. resolves the commit and refuses anything that isn't on main;
+2. checks that both images exist (`api:sha-<sha>`, `admin:staging-sha-<sha>`). They exist only if that commit's
+   *Container images* run passed. Nothing has been touched yet;
+3. links the staging Supabase project and writes `supabase db push --dry-run` to the job summary;
+4. applies the migrations from **that commit**. If they fail, the run stops here;
+5. re-tags both images as `staging` in GHCR (a registry-side copy, nothing is pulled);
+6. writes a summary: the commit, what staging ran before, and the new digests.
+
+Servers notice the moved tag on their next check and restart (#61). GitHub never connects to a server. One deploy runs
+at a time (`concurrency: deploy-staging`); a second one waits.
+
+The Supabase access token exists only as a secret of the `staging` environment, so only approved runs of this job
+can read it. It is passed to the CLI through env and never echoed (Actions also masks it). Pull request workflows
+can't read it.
+
+### Rolling back
+
+Run the workflow again with the older commit (the summary of each deploy shows what ran before it).
+
+- **No migration between the two commits** (the usual case): the dry run says the database is up to date and only
+  the tag moves.
+- **The newer deploy added a migration**: the dry run fails with *Remote migration versions not found in local
+  migrations directory*, because the database is ahead of the old commit, and nothing changes. Migrations only go
+  forward, so choose one:
+  - If the migration only **added** things (new table, nullable column, new policy), the old code ignores them.
+    Re-run with `skip_migrations` checked. The tag moves and the schema stays as it is.
+  - If it **renamed, dropped or tightened** something the old code needs, don't skip. Fix forward instead: write a
+    new migration that restores what the old code needs (or fix the code) on main, and deploy that. Restoring
+    data comes from the Supabase backup (#28).
+- Keep migrations additive (expand, then contract in a later deploy) so that rollback stays the easy case.
+
+### If a deploy fails
+
+- *not found … Container images*: that commit's image run failed or hasn't finished. Check the Actions tab.
+- *SUPABASE_ACCESS_TOKEN is not set* / *SUPABASE_PROJECT_REF*: environment setup is missing (below).
+- Migration error: nothing was re-tagged. Fix the migration on main and deploy the new commit.
+- Failure in *move the staging tag*: the API tag may have moved without the Admin's. Re-run with the same commit.
+
+### One-time GitHub setup (repo admin)
+
+Names only. The values come from the Supabase dashboard and never go in the repo.
+
+1. Settings → Environments → **New environment** `staging`.
+   - **Required reviewers**: the people allowed to deploy. Optionally tick *Prevent self-review*.
+   - **Deployment branches and tags**: *Selected branches* → `main`.
+   - Environment **secret** `SUPABASE_ACCESS_TOKEN`: a Supabase personal access token (supabase.com → Account →
+     Access Tokens) from an account in the staging project's organization. Name it after this use, and rotate it
+     if someone leaves.
+   - Environment **variable** `SUPABASE_PROJECT_REF`: the staging project ref (Supabase → Project Settings →
+     General).
+   - Optional environment **variable** `STAGING_URL`: the public Admin URL, shown as the deployment link.
+   - Optional environment **secret** `SUPABASE_DB_PASSWORD`: only if the CLI can't connect with the access token
+     alone. Without it, the CLI signs in with a temporary login role.
+2. Settings → Secrets and variables → Actions → **Variables** (repository, not environment):
+   `STAGING_NEXT_PUBLIC_SUPABASE_URL` and `STAGING_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, which the Admin image
+   is built with ([Images on GHCR](#images-on-ghcr)).
+3. Don't add `SUPABASE_ACCESS_TOKEN` as a repository secret. Every workflow can read those.
 
 ## Run it
 
