@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 
+import { OrgProfileForm } from "@/components/org-profile-form";
 import { Brand } from "@/components/sidebar";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -255,12 +256,18 @@ export function ResetPasswordForm() {
 export function WelcomeForm() {
   const [name, setName] = useState("");
   const [ready, setReady] = useState(false);
+  const [step, setStep] = useState<"org" | "profile">("org");
   const f = useForm();
 
   useEffect(() => {
     void (async () => {
       const me = await api.me().catch(() => undefined);
-      if (me?.org) return reloadTo("/");
+      if (me?.org) {
+        // Created it already (this tab or another): an Admin with no profile yet still gets step 2.
+        const state = me.org.role === "admin" ? await api.getOrgProfile().catch(() => undefined) : undefined;
+        if (state && !state.complete) return setStep("profile");
+        return reloadTo("/");
+      }
       const { data } = await supabase().auth.getUser();
       const saved = data.user?.user_metadata?.org_name;
       if (typeof saved === "string") setName(saved);
@@ -274,8 +281,10 @@ export function WelcomeForm() {
     } catch (e) {
       if (!(e as Error).message.startsWith("409")) throw e; // already created (another tab): carry on
     }
-    reloadTo("/");
+    setStep("profile");
   });
+
+  if (step === "profile") return <WelcomeProfile />;
 
   return (
     <AuthScreen
@@ -291,6 +300,35 @@ export function WelcomeForm() {
         </Button>
       </form>
     </AuthScreen>
+  );
+}
+
+/** Step 2 of onboarding (#16): tell the agents who the Organization is. Can be skipped and filled in later on
+ * the Profile page; until then the agents write as a neutral guide. */
+function WelcomeProfile() {
+  return (
+    <div data-auth-screen className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-2xl flex-col justify-center gap-6 py-8">
+      <Brand />
+      <div className="space-y-5 rounded-xl border bg-card p-6">
+        <div className="space-y-1">
+          <h1 className="text-2xl tracking-tight">Tell the agents who you are</h1>
+          <p className="text-sm text-muted-foreground">
+            Every deck and Brainstorm uses this profile: who you are, who you write for, and what never to say. You can
+            change it any time on the Profile page.
+          </p>
+        </div>
+        <OrgProfileForm
+          initial={{ what_it_does: "", audience: "", home_region: "", usual_subjects: [], never_say: [] }}
+          submitLabel="Save and continue"
+          onSaved={() => reloadTo("/")}
+          secondary={
+            <Button type="button" variant="ghost" size="lg" onClick={() => reloadTo("/")}>
+              Skip for now
+            </Button>
+          }
+        />
+      </div>
+    </div>
   );
 }
 

@@ -8,12 +8,12 @@ import good from "./scenarios/good.json";
 import slideSources from "./scenarios/slide-sources.json";
 import { seedInstagramAccounts, seedBrainstorm, seedPolicyEvents } from "./seed";
 import type {
+  Brainstorm,
+  BrainstormUpdate,
   CardDeck,
   DeckChange,
   DeckEdit,
   DeckVersion,
-  Brainstorm,
-  BrainstormUpdate,
   EventBrief,
   Issue,
   Job,
@@ -22,12 +22,14 @@ import type {
   Material,
   MaterialRef,
   Metric,
+  OrgProfile,
+  OrgProfileState,
   PipelineStep,
   PolicyEvent,
   Post,
   SafeguardVerdict,
-  SlideSources,
   Scenario,
+  SlideSources,
   VerificationReport,
 } from "@/lib/types";
 
@@ -77,6 +79,7 @@ interface MockJob {
 const CHECK_MS = 1500;
 
 interface Store {
+  profile?: OrgProfileState;
   jobs: Map<string, MockJob>;
   brainstorms: Map<string, Brainstorm>;
   materials: Map<string, Material>;
@@ -581,4 +584,25 @@ export function generateFromBrainstorm(id: string): { job: Job } | { error: stri
   store().jobs.set(job.id, job);
   store().brainstorms.set(id, { ...d, job_id: job.id });
   return { job: snapshot(job) };
+}
+
+// ---------------------------------------------------------------- Organization profile (#16)
+
+const EMPTY_PROFILE: OrgProfile = { what_it_does: "", audience: "", home_region: "", usual_subjects: [], never_say: [] };
+
+export const orgProfile = (): OrgProfileState => store().profile ?? { profile: EMPTY_PROFILE, complete: false, updated_at: null };
+
+export function saveOrgProfile(p: Partial<OrgProfile>): OrgProfileState {
+  const clean = (xs: unknown) =>
+    [...new Set((Array.isArray(xs) ? xs : []).map((x) => String(x).split(/\s+/).join(" ").trim()).filter(Boolean))];
+  const profile: OrgProfile = {
+    what_it_does: String(p.what_it_does ?? "").trim(),
+    audience: String(p.audience ?? "").trim(),
+    home_region: String(p.home_region ?? "").trim(),
+    usual_subjects: clean(p.usual_subjects),
+    never_say: clean(p.never_say),
+  };
+  const complete = Object.values(profile).some((v) => (Array.isArray(v) ? v.length > 0 : v !== ""));
+  store().profile = { profile, complete, updated_at: new Date().toISOString() };
+  return store().profile!;
 }

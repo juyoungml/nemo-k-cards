@@ -179,7 +179,7 @@ Organization's own account, cached 5 min per account), and "try at HH:MM" messag
   `IMAGE_HOST=supabase`, slides are uploaded to the **private** bucket `slides` under `<org>/<job>/` and signed
   with Storage signed URLs, then deleted when the publish attempt ends. A public bucket is refused. With
   `IMAGE_HOST=local`, the links are signed `/assets` links that work only while the Job is `PUBLISHING`.
-- Bucket and policies: `supabase/migrations/20261029150000_private_slides.sql` makes `slides` private (JPEG only,
+- Bucket and policies: `supabase/migrations/20261029150100_private_slides.sql` makes `slides` private (JPEG only,
   10 MB max) and drops any storage.objects policy that names it. With no policies, `anon` and `authenticated`
   can't list, read or sign objects; only the host's service key can.
 - Leftovers: a crash in the middle of a publish can leave objects in the bucket. They are private and their links

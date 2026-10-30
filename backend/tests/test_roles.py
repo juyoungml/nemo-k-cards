@@ -84,6 +84,8 @@ EXPECTED = {
     ("GET", "/posts"): "viewer",
     ("GET", "/posts/{post_id}"): "viewer",
     ("POST", "/posts/{post_id}/resolve"): "approver",
+    ("GET", "/orgs/current/profile"): "viewer",
+    ("PUT", "/orgs/current/profile"): "admin",
 }
 
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
-import { AtSign, ChevronsUpDown, FileCheck2, LayoutDashboard, LogOut, RotateCcw, ScrollText, ShieldAlert, Sparkles, Users } from "lucide-react";
+import { AtSign, Building2, ChevronsUpDown, FileCheck2, LayoutDashboard, LogOut, RotateCcw, ScrollText, ShieldAlert, Sparkles, Users } from "lucide-react";
 
 import { IS_MOCK, api } from "@/lib/api";
 import { setActiveOrgId } from "@/lib/org";
@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { href: "/review", label: "Review", icon: FileCheck2 },
   { href: "/policy", label: "Policy Log", icon: ShieldAlert },
   { href: "/team", label: "Team", icon: Users, desktopOnly: true },
+  { href: "/profile", label: "Profile", icon: Building2, desktopOnly: true },
   { href: "/instagram", label: "Instagram", icon: AtSign, desktopOnly: true },
   { href: "/audit", label: "Audit log", icon: ScrollText, min: "admin", desktopOnly: true },
 ];
