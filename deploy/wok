@@ -1,0 +1,448 @@
+#!/usr/bin/env bash
+# wok: run and update the What's On Korea stack on a host set up by deploy/install.sh.
+# Installed as /usr/local/bin/wok. Every command runs as the service user (default "wok"); call it with sudo.
+#
+# The updater (wok-update.timer -> `wok update`) follows the image tag the deploy button moves (#60, `staging`):
+# pull it, restart only what changed, wait for the containers' health checks, and roll back to the previous image
+# if they don't pass. Nothing reaches into the server: it pulls.
+#
+# Build mode (WOK_SOURCE=build in the env file): for when the registry pipeline isn't set up. The host clones the
+# repo and builds both images itself, only when someone runs `wok update-now [<git ref>]`; the timer does nothing.
+# The same health check, rollback and skip-bad logic applies to the built images.
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage: sudo wok <command>
+
+  status              What runs (image, commit), whether updates are paused, recent updates
+  pause [reason...]   Freeze updates (e.g. for a demo). The stack keeps running; the timer keeps checking but
+                      changes nothing until `resume`
+  resume              Follow the tag again (the next check is within ~2 minutes; or run update-now)
+  update-now [--force] [ref]  Check the tag now (same as the timer). --force runs it even while paused.
+                      Build mode: build WOK_GIT_REF (or <ref>) from the repo and deploy it
+  logs [service|updater] [compose logs args...]   Container logs (default: all, last 200 lines, follow);
+                      `logs updater` shows the updater's journal
+  up                  Pull the current tag and start the whole stack (waits until healthy)
+  down                Stop the stack (volumes are kept). Pause first, or the next update may start it again
+  rollback            Go back to the image before the last update and skip the current one
+  config              Validate the compose files with the env file, print the images in use
+  help                This text
+
+Files (default WOK_HOME=/opt/wok): .env (the one env file, mode 600), stack/ (compose files), state/,
+src/ (build mode: the repo checkout the images are built from).
+EOF
+}
+
+# --- settings ---------------------------------------------------------------------------------------------------
+_home=${WOK_HOME:-}
+_user=${WOK_USER:-}
+if [ -r /etc/default/wok ]; then
+	# shellcheck source=/dev/null
+	. /etc/default/wok
+fi
+WOK_HOME=${_home:-${WOK_HOME:-/opt/wok}}
+WOK_USER=${_user:-${WOK_USER:-wok}}
+ENV_SRC=$WOK_HOME/.env
+STACK=$WOK_HOME/stack
+STATE=$WOK_HOME/state
+API_ENV=$STACK/api.env
+SRC=$WOK_HOME/src
+SERVICES="api admin" # the two images that follow the tag; caddy/cloudflared change only with `wok up`
+
+log() { printf '%s wok: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+die() {
+	log "error: $*" >&2
+	exit 1
+}
+
+# Read one value from the env file without sourcing it (it is a compose env file, not shell). Never printed.
+env_get() {
+	local key=$1 line val
+	line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ENV_SRC" 2>/dev/null | tail -n 1) || true
+	val=${line#*=}
+	val=${val%$'\r'}
+	case $val in
+	\"*\") val=${val#\"} val=${val%\"} ;;
+	\'*\') val=${val#\'} val=${val%\'} ;;
+	*) val=$(printf '%s' "$val" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//') ;;
+	esac
+	printf '%s' "$val"
+}
+
+load_config() {
+	[ -r "$ENV_SRC" ] || die "no env file at $ENV_SRC (run install.sh)"
+	API_IMAGE=$(env_get API_IMAGE)
+	ADMIN_IMAGE=$(env_get ADMIN_IMAGE)
+	IMAGE_TAG=$(env_get IMAGE_TAG)
+	SOURCE=$(env_get WOK_SOURCE)
+	SOURCE=${SOURCE:-registry}
+	case $SOURCE in registry | build) ;; *) die "WOK_SOURCE must be registry or build, not '$SOURCE'" ;; esac
+	GIT_URL=$(env_get WOK_GIT_URL)
+	GIT_URL=${GIT_URL:-https://github.com/juyoungml/nemo-k-cards.git}
+	GIT_REF=$(env_get WOK_GIT_REF)
+	GIT_REF=${GIT_REF:-main}
+	if [ "$SOURCE" = build ]; then
+		API_IMAGE=${API_IMAGE:-nemo-k-cards-api}
+		ADMIN_IMAGE=${ADMIN_IMAGE:-nemo-k-cards-admin}
+	else
+		API_IMAGE=${API_IMAGE:-ghcr.io/juyoungml/nemo-k-cards-api}
+		ADMIN_IMAGE=${ADMIN_IMAGE:-ghcr.io/juyoungml/nemo-k-cards-admin}
+	fi
+	IMAGE_TAG=${IMAGE_TAG:-staging}
+	HEALTH_TIMEOUT=$(env_get WOK_HEALTH_TIMEOUT)
+	HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-240}
+	PROFILE_ARGS=()
+	if [ -n "$(env_get TUNNEL_TOKEN)" ]; then PROFILE_ARGS=(--profile tunnel); fi
+	# The shell environment wins over --env-file, so the defaults above are what compose sees.
+	export API_IMAGE ADMIN_IMAGE IMAGE_TAG
+	export ENV_FILE=$API_ENV
+	export DOCKER_CONFIG=${DOCKER_CONFIG:-$WOK_HOME/.docker}
+}
+
+compose() {
+	docker compose --project-directory "$STACK" -f "$STACK/compose.yml" -f "$STACK/compose.server.yml" \
+		--env-file "$ENV_SRC" ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} "$@"
+}
+
+# The API container reads api.env: the env file minus what only the host needs (registry login, updater
+# settings, tunnel token), so those never show up inside the container.
+sync_api_env() {
+	local tmp=$API_ENV.tmp
+	(
+		umask 077
+		grep -vE '^[[:space:]]*(export[[:space:]]+)?(GHCR_[A-Z0-9_]*|WOK_[A-Z0-9_]*|TUNNEL_TOKEN)=' "$ENV_SRC" >"$tmp" || true
+	)
+	mv -f "$tmp" "$API_ENV"
+}
+
+repo_of() { if [ "$1" = api ]; then printf '%s' "$API_IMAGE"; else printf '%s' "$ADMIN_IMAGE"; fi; }
+ref_of() { printf '%s:%s' "$(repo_of "$1")" "$IMAGE_TAG"; }
+image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
+running_id() {
+	local cid
+	cid=$(compose ps -q "$1" 2>/dev/null | head -n 1) || true
+	[ -n "$cid" ] || return 0
+	docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true
+}
+revision() {
+	[ -n "$1" ] || { printf -- '-'; return 0; }
+	local rev
+	rev=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1" 2>/dev/null) || true
+	case $rev in '' | '<no value>') printf '%s' "${1#sha256:}" | cut -c1-12 ;; *) printf '%s' "$rev" | cut -c1-12 ;; esac
+}
+short() { if [ -n "$1" ]; then printf '%s' "${1#sha256:}" | cut -c1-12; else printf -- '-'; fi; }
+
+history_add() {
+	printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$STATE/history.log"
+	local tmp=$STATE/history.log.tmp
+	tail -n 500 "$STATE/history.log" >"$tmp" && mv -f "$tmp" "$STATE/history.log"
+}
+is_bad() { [ -n "$1" ] && [ -f "$STATE/bad-images" ] && grep -qxF "$1" "$STATE/bad-images"; }
+mark_bad() { [ -n "$1" ] && ! is_bad "$1" && printf '%s\n' "$1" >>"$STATE/bad-images" || true; }
+
+take_lock() {
+	if command -v flock >/dev/null 2>&1; then
+		exec 9>"$STATE/update.lock"
+		flock -n 9 || {
+			log "another update is running; skipping"
+			exit 0
+		}
+	fi
+}
+
+# Build mode: check out <ref> (default WOK_GIT_REF) in $SRC and build both images under the tag the stack runs.
+# The image we leave keeps existing (untagged) until update tags it wok-previous, as with a pull.
+build_images() {
+	local ref=${1:-$GIT_REF} sha
+	if [ ! -d "$SRC/.git" ]; then
+		log "cloning $GIT_URL into $SRC"
+		git clone --quiet "$GIT_URL" "$SRC" || return 1
+	fi
+	git -C "$SRC" fetch --quiet --force --tags origin "+refs/heads/*:refs/remotes/origin/*" || return 1
+	sha=$(git -C "$SRC" rev-parse --verify --quiet "origin/$ref^{commit}" || git -C "$SRC" rev-parse --verify --quiet "$ref^{commit}") ||
+		{
+			log "no branch, tag or commit '$ref' in $GIT_URL"
+			return 1
+		}
+	git -C "$SRC" checkout --quiet --force --detach "$sha" || return 1
+	log "building $(printf '%s' "$sha" | cut -c1-12) ($ref): api, then admin"
+	docker build --quiet -f "$SRC/backend/Dockerfile" -t "$(ref_of api)" \
+		--label "org.opencontainers.image.revision=$sha" "$SRC" >/dev/null || return 1
+	local api_url
+	api_url=$(env_get NEXT_PUBLIC_API_URL)
+	# NEXT_PUBLIC_* are public by design (inlined into the browser bundle); never a secret.
+	docker build --quiet -t "$(ref_of admin)" --label "org.opencontainers.image.revision=$sha" \
+		--build-arg "NEXT_PUBLIC_API_URL=${api_url:-/backend}" \
+		--build-arg "NEXT_PUBLIC_SUPABASE_URL=$(env_get NEXT_PUBLIC_SUPABASE_URL)" \
+		--build-arg "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(env_get NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)" \
+		"$SRC/apps/web" >/dev/null || return 1
+}
+
+# Get the newest images under the tag: pull them (registry) or build them (build mode).
+fetch_images() {
+	if [ "$SOURCE" = build ]; then
+		build_images "$@" || {
+			log "build failed (see the output above); the stack is untouched"
+			history_add "build-failed ${1:-$GIT_REF}"
+			return 1
+		}
+	elif ! compose pull --quiet api admin; then
+		log "pull failed (registry login, network, or the tag doesn't exist yet)"
+		history_add "pull-failed"
+		return 1
+	fi
+}
+
+paused_line() { [ -f "$STATE/paused" ] && tr '\n' ' ' <"$STATE/paused"; }
+
+# --- commands ---------------------------------------------------------------------------------------------------
+cmd_update() {
+	local trigger=$1 force="" git_ref=""
+	shift
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--force) force=--force ;;
+		-*) die "unknown option $1" ;;
+		*) git_ref=$1 ;;
+		esac
+		shift
+	done
+	if [ -n "$git_ref" ] && [ "$SOURCE" != build ]; then die "a git ref only applies in build mode (WOK_SOURCE=build)"; fi
+	if [ "$SOURCE" = build ] && [ "$trigger" = timer ]; then
+		log "build mode: nothing to follow. Deploy with \`sudo wok update-now [<git ref>]\`"
+		return 0
+	fi
+	if [ -f "$STATE/paused" ] && [ "$force" != --force ]; then
+		log "updates paused ($(paused_line)); nothing to do. \`wok resume\` to follow $IMAGE_TAG again"
+		return 0
+	fi
+	take_lock
+	sync_api_env
+
+	# shellcheck disable=SC2034 # new_* are read through ${!var}
+	local svc ref old new changed="" var old_api="" old_admin="" new_api="" new_admin=""
+	for svc in $SERVICES; do
+		ref=$(ref_of "$svc")
+		old=$(running_id "$svc")
+		[ -n "$old" ] || old=$(image_id "$ref")
+		printf -v "old_$svc" '%s' "$old"
+	done
+
+	fetch_images ${git_ref:+"$git_ref"} || return 1
+
+	for svc in $SERVICES; do
+		ref=$(ref_of "$svc")
+		var=old_$svc
+		old=${!var}
+		new=$(image_id "$ref")
+		printf -v "new_$svc" '%s' "$new"
+		if [ -n "$new" ] && [ "$new" != "$old" ] && is_bad "$new"; then
+			# Rolled back before: keep the old image until the tag moves to something else.
+			log "$svc: $ref is $(short "$new"), which failed its health check before; staying on $(short "$old")"
+			[ -z "$old" ] || docker tag "$old" "$ref"
+			continue
+		fi
+		[ "$new" = "$old" ] || changed="$changed $svc"
+	done
+
+	if [ -z "$changed" ]; then
+		log "up to date ($IMAGE_TAG: api $(revision "$old_api"), admin $(revision "$old_admin"))"
+		return 0
+	fi
+
+	local summary=""
+	for svc in $changed; do
+		var=old_$svc
+		old=${!var}
+		var=new_$svc
+		new=${!var}
+		# Keep the image we are leaving under a tag, so it is never pruned and `wok rollback` can return to it.
+		[ -z "$old" ] || docker tag "$old" "$(repo_of "$svc"):wok-previous"
+		summary="$summary $svc $(revision "$old")->$(revision "$new")"
+	done
+	log "updating:$summary"
+
+	# shellcheck disable=SC2086 # $changed is a list of service names
+	if compose up -d --no-build --wait --wait-timeout "$HEALTH_TIMEOUT" $changed; then
+		log "updated:$summary"
+		history_add "updated$summary"
+		docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true
+		[ "$SOURCE" != build ] || docker builder prune -f --filter "until=168h" >/dev/null 2>&1 || true
+		return 0
+	fi
+
+	log "new containers not healthy within ${HEALTH_TIMEOUT}s; rolling back:$summary"
+	# shellcheck disable=SC2086
+	compose logs --no-color --tail 40 $changed || true
+	local missing=""
+	for svc in $changed; do
+		var=new_$svc
+		mark_bad "${!var}"
+		var=old_$svc
+		old=${!var}
+		if [ -n "$old" ]; then docker tag "$old" "$(ref_of "$svc")"; else missing="$missing $svc"; fi
+	done
+	if [ -n "$missing" ]; then
+		log "no previous image for:$missing (first start?). Left as is; see \`wok logs\`"
+		history_add "unhealthy, no previous image:$summary"
+		return 1
+	fi
+	# shellcheck disable=SC2086
+	if compose up -d --no-build --wait --wait-timeout "$HEALTH_TIMEOUT" $changed; then
+		log "rolled back; skipping these images until the tag moves again"
+		history_add "rolled-back$summary"
+	else
+		log "rolled back, but the previous images are not healthy either. Check \`wok logs\`"
+		history_add "rolled-back-unhealthy$summary"
+	fi
+	return 1
+}
+
+cmd_up() {
+	take_lock
+	sync_api_env
+	if [ -f "$STATE/paused" ]; then
+		log "updates paused: starting the images already on this host, not pulling $IMAGE_TAG"
+	elif [ "$SOURCE" = build ]; then
+		# Build only what isn't on the host yet; a new commit goes out with `wok update-now`.
+		local front=(caddy)
+		[ ${#PROFILE_ARGS[@]} -eq 0 ] || front+=(cloudflared)
+		compose pull --quiet "${front[@]}" || log "pull failed for ${front[*]}; starting with what is on this host"
+		if [ -z "$(image_id "$(ref_of api)")" ] || [ -z "$(image_id "$(ref_of admin)")" ]; then
+			fetch_images || return 1
+		fi
+	else
+		compose pull --quiet || log "pull failed; starting with the images already on this host"
+	fi
+	compose up -d --no-build --remove-orphans --wait --wait-timeout "$HEALTH_TIMEOUT"
+	history_add "up api $(revision "$(running_id api)") admin $(revision "$(running_id admin)")"
+	log "stack is up"
+}
+
+cmd_down() {
+	take_lock
+	compose down
+	history_add "down"
+}
+
+cmd_rollback() {
+	take_lock
+	sync_api_env
+	local svc prev cur did=""
+	for svc in $SERVICES; do
+		prev=$(image_id "$(repo_of "$svc"):wok-previous")
+		cur=$(running_id "$svc")
+		if [ -n "$prev" ] && [ "$prev" != "$cur" ]; then
+			mark_bad "$cur"
+			docker tag "$prev" "$(ref_of "$svc")"
+			did="$did $svc $(revision "$cur")->$(revision "$prev")"
+		fi
+	done
+	[ -n "$did" ] || die "no previous image to roll back to"
+	# shellcheck disable=SC2086
+	compose up -d --no-build --wait --wait-timeout "$HEALTH_TIMEOUT" api admin
+	history_add "manual-rollback$did"
+	log "rolled back:$did. The current $IMAGE_TAG images are skipped until the tag moves."
+}
+
+cmd_pause() {
+	{
+		printf 'since=%s by=%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SUDO_USER:-$(id -un)}"
+		[ $# -eq 0 ] || printf ' reason=%s' "$*"
+		printf '\n'
+	} >"$STATE/paused"
+	history_add "paused $*"
+	log "updates paused. The stack keeps running as is. \`wok resume\` to follow $IMAGE_TAG again."
+}
+
+cmd_resume() {
+	rm -f "$STATE/paused"
+	history_add "resumed"
+	log "updates resumed: following $IMAGE_TAG (next check within ~2 minutes, or \`wok update-now\`)"
+}
+
+cmd_status() {
+	if [ -f "$STATE/paused" ]; then
+		echo "Updates:  PAUSED ($(paused_line))"
+	elif [ "$SOURCE" = build ]; then
+		echo "Updates:  build mode: built on this host from $GIT_URL ($GIT_REF) by \`wok update-now\`"
+	else
+		echo "Updates:  following tag '$IMAGE_TAG'"
+	fi
+	if command -v systemctl >/dev/null 2>&1; then
+		echo "Timer:    $(systemctl is-active wok-update.timer 2>/dev/null || true), last run $(systemctl show wok-update.service -p Result --value 2>/dev/null || echo '?')"
+	fi
+	local svc
+	for svc in $SERVICES; do
+		printf 'Image:    %-6s %s  running %s (commit %s)\n' "$svc" "$(ref_of "$svc")" "$(short "$(running_id "$svc")")" "$(revision "$(running_id "$svc")")"
+	done
+	echo
+	compose ps || true
+	if [ -s "$STATE/history.log" ]; then
+		echo
+		echo "Recent:"
+		tail -n 8 "$STATE/history.log" | sed 's/^/  /'
+	fi
+}
+
+cmd_logs() {
+	if [ "${1:-}" = updater ]; then
+		shift
+		journalctl -u wok-update.service -n 200 --no-pager "$@" 2>/dev/null || tail -n 50 "$STATE/history.log"
+		return 0
+	fi
+	local svc=()
+	case ${1:-} in api | admin | caddy | cloudflared)
+		svc=("$1")
+		shift
+		;;
+	esac
+	if [ $# -eq 0 ]; then set -- --tail 200 -f; fi
+	compose logs "$@" ${svc[@]+"${svc[@]}"}
+}
+
+cmd_config() {
+	sync_api_env
+	compose config --quiet
+	echo "compose config ok"
+	echo "api:   $(ref_of api)"
+	echo "admin: $(ref_of admin)"
+	echo "tunnel profile: $([ ${#PROFILE_ARGS[@]} -gt 0 ] && echo on || echo off)"
+}
+
+# --- main -------------------------------------------------------------------------------------------------------
+cmd=${1:-help}
+[ $# -eq 0 ] || shift
+case $cmd in help | -h | --help)
+	usage
+	exit 0
+	;;
+esac
+
+# Everything else runs as the service user, which owns the state and the registry login.
+if [ "$(id -un)" != "$WOK_USER" ] && [ "${WOK_NO_SWITCH:-}" != 1 ]; then
+	self=$(command -v "$0" 2>/dev/null || printf '%s' "$0")
+	if [ "$(id -u)" -eq 0 ]; then exec runuser -u "$WOK_USER" -- "$self" "$cmd" "$@"; fi
+	exec sudo -u "$WOK_USER" -- "$self" "$cmd" "$@"
+fi
+export HOME=$WOK_HOME
+cd "$WOK_HOME"
+load_config
+
+case $cmd in
+status) cmd_status ;;
+pause) cmd_pause "$@" ;;
+resume) cmd_resume ;;
+update) cmd_update timer "$@" ;;
+update-now) cmd_update manual "$@" ;;
+logs) cmd_logs "$@" ;;
+up) cmd_up ;;
+down) cmd_down ;;
+rollback) cmd_rollback ;;
+config) cmd_config ;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

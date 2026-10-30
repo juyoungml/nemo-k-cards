@@ -1,0 +1,24 @@
+# Server override for compose.yml, used by `wok` (deploy/wok) on a host set up by deploy/install.sh.
+# Compose never builds on a server: `wok` pulls the CI images (#59) at the tag the deploy button moves (#60),
+# or, in build mode (WOK_SOURCE=build), builds them with `docker build` from a checkout before starting.
+#   docker compose -f compose.yml -f compose.server.yml ...
+# Needs Docker Compose >= 2.24.4 (`!reset`; install.sh checks it).
+
+x-logging: &logging
+  # Rotated container logs, so a long-running host never fills its disk with them.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  api:
+    build: !reset null
+    logging: *logging
+  admin:
+    build: !reset null
+    logging: *logging
+  caddy:
+    logging: *logging
+  cloudflared:
+    logging: *logging
