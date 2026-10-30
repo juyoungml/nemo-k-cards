@@ -444,3 +444,18 @@ export interface AuditEvent {
   detail: Record<string, unknown>;
   at: string;
 }
+
+// Organization profile (#16): what the agents know about the Organization. Admins edit it; every Member reads it.
+export interface OrgProfile {
+  what_it_does: string;
+  audience: string;
+  home_region: string;
+  usual_subjects: string[];
+  never_say: string[];
+}
+
+export interface OrgProfileState {
+  profile: OrgProfile;
+  complete: boolean; // false until an Admin saved something
+  updated_at?: string | null;
+}
