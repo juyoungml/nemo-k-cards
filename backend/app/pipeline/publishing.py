@@ -6,7 +6,10 @@ durable DBOS workflow (ADR 0002) that moves it through
 A scheduled Post (#26) waits in `scheduled`: the workflow sleeps durably (DBOS) until `scheduled_at`, then moves it
 to `queued` and carries on as below. Rescheduling restarts the workflow so it wakes at the new time; cancelling or an
 edit (→ `on_hold`) ends it. A Post whose time passed more than MISSED_BY ago (the server was down) is held, not
-posted late.
+posted late. Two guards keep the row, not the workflow, in charge of the time (#66): it sleeps at most MAX_SLEEP at
+a time and re-reads the row on waking (so a reschedule whose restart was lost to a crash is followed within the
+hour), and it moves the Post to `queued` only if `scheduled_at` is still due in that same conditional UPDATE (so a
+reschedule that lands as the old time arrives wins).
 
 The `posts` row is the source of truth; the workflow only drives it. Its one step, `advance`, reads the Post's
 state and makes exactly one transition, each saved *before* the Instagram call it guards. So whatever point a
@@ -65,6 +68,7 @@ RECONCILE_DELAYS_S = [120, 240, 480, 900]  # then every 30 minutes
 RECONCILE_EVERY_S = 1800
 MOCK_STEP_S = 0.15                        # mock publish: how long each simulated sub-step shows
 MISSED_BY = timedelta(hours=6)            # a scheduled Post this late (server was down) is held, not posted late
+MAX_SLEEP = timedelta(hours=1)            # a scheduled Post's workflow re-reads the row at least this often
 
 # Progress bands per sub-step (percent of the bar), so the Admin shows steady, honest progress.
 BANDS = {"upload": (0, 30), "containers": (30, 60), "processing": (60, 85), "publish": (85, 99)}
@@ -195,19 +199,23 @@ def _due(org_id: UUID, p: dict) -> dict:
     now = _now()
     when = p["scheduled_at"]
     if when > now:
-        return {"state": "scheduled", "done": False, "wait": (when - now).total_seconds()}
+        return {"state": "scheduled", "done": False, "wait": min(when - now, MAX_SLEEP).total_seconds()}
+    # Both writes below hold only if the time read above is still the row's (`due_by`): a reschedule that landed
+    # since then wins, and the next step re-reads the row (wait 0) and sleeps toward the new time.
     if now - when > MISSED_BY:
         late = f"it was due at {posts.kst(when)}, but the server was down then; approve the Deck again to post it"
-        return _out(posts.transition(
-            org_id, p["id"], {"scheduled"}, state="on_hold", held_at=now, held_reason=late,
+        post = posts.transition(
+            org_id, p["id"], {"scheduled"}, due_by=now, state="on_hold", held_at=now, held_reason=late,
             progress=_progress("upload", label="On hold: missed its time"),
             job_update=_job_log(f"on hold: {late}", "warn", ("pending", "On hold · missed its time")),
-            audit_action="post.held", audit_detail={"reason": late}))
-    return _out(posts.transition(
-        org_id, p["id"], {"scheduled"}, state="queued", progress=_progress("upload", label="Starting"),
-        job_update=_job_log(f"scheduled time {posts.kst(when)} reached → publishing", "info",
-                            ("running", "publishing")),
-        audit_action="post.started", audit_detail={"scheduled_at": when.isoformat()}))
+            audit_action="post.held", audit_detail={"reason": late})
+    else:
+        post = posts.transition(
+            org_id, p["id"], {"scheduled"}, due_by=now, state="queued", progress=_progress("upload", label="Starting"),
+            job_update=_job_log(f"scheduled time {posts.kst(when)} reached → publishing", "info",
+                                ("running", "publishing")),
+            audit_action="post.started", audit_detail={"scheduled_at": when.isoformat()})
+    return _out(post) if post else {"state": "scheduled", "done": False, "wait": 0}
 
 
 def _to_unknown(org_id: UUID, p: dict, error: str) -> dict:
@@ -467,13 +475,17 @@ def create(org_id: UUID, job: Job, *, mode: str, by: dict, account: dict | None,
     """Approval: a `queued` Post (or `scheduled`, #26), the Job moved to PUBLISHING (SCHEDULED) and the approval's
     audit events, in one transaction. The Post posts exactly the Deck version it pins (#19), caption included:
     nothing is edited at Approve, so the Post's own `caption` stays NULL (the Deck's). Version 1 is stored here if
-    it never was. A Post on hold for this Job is replaced (cancelled) by this one: re-approval resumes it.
+    it never was. A Post on hold for this Job is replaced (cancelled) by this one: re-approval resumes it, at
+    `scheduled_at` or, without one, now (the Admin sends the held Post's time while it is still ahead).
+    Audit (#66): `post.scheduled` for a Post for later; when a held Post is replaced, `post.cancelled` for it and
+    `post.resumed` for the new one, each naming the other.
     Raises posts.Taken when a Post of this Job is still open, or this Deck is already on that account."""
-    with store.tenant(org_id, user_id=UUID(by["id"])) as c:
+    actor = UUID(by["id"])
+    with store.tenant(org_id, user_id=actor) as c:
+        c.execute("select 1 from jobs where id = %s for update", (job.id,))  # the Job row first (posts.py)
         deck_versions.ensure_initial(c, job)
-        held = c.execute("update posts set state = 'cancelled', finished_at = now(), updated_at = now(), "
-                         "last_error = %s where job_id = %s and state = 'on_hold' returning id",
-                         (f"replaced by the approval of version {deck_version or 1}", job.id)).fetchone()
+        held = posts.cancel_held(c, job.id, why=f"replaced by the approval of version {deck_version or 1}",
+                                 cancelled_by=None)
         post = posts.insert(c, job_id=job.id, mode=mode, approved_by=UUID(by["id"]), approved_by_email=by["email"],
                             account_id=account["id"] if account else None,
                             ig_user_id=account["ig_user_id"] if account else None,
@@ -488,8 +500,16 @@ def create(org_id: UUID, job: Job, *, mode: str, by: dict, account: dict | None,
         c.execute("update jobs set doc = %s where id = %s", (store._json(job), job.id))
         for e in audits:
             extra = {"post": str(post.id), **({"scheduled_at": scheduled_at.isoformat()} if scheduled_at else {}),
-                     **({"replaces_held_post": str(held[0])} if held else {})}
+                     **({"replaces_held_post": held["post"]} if held else {})}
             audit.write(c, org_id, e.model_copy(update={"detail": {**e.detail, **extra}}))
+        about = {"post": str(post.id), "state": post.state, "mode": mode, "account": post.handle,
+                 "deck_version": deck_version, "scheduled_at": scheduled_at.isoformat() if scheduled_at else None}
+        if held:
+            audit.insert(c, org_id, actor, by["email"], "post.cancelled", job.id, {**held, "replaced_by": str(post.id)})
+            audit.insert(c, org_id, actor, by["email"], "post.resumed", job.id,
+                         {**about, "replaces": held["post"], "now": scheduled_at is None})
+        elif scheduled_at:
+            audit.insert(c, org_id, actor, by["email"], "post.scheduled", job.id, about)
     return post
 
 

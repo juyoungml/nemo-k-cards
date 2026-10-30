@@ -8,6 +8,7 @@ import guide from "./scenarios/guide.json";
 import good from "./scenarios/good.json";
 import slideSources from "./scenarios/slide-sources.json";
 import { seedInstagramAccounts, seedBrainstorm, seedPolicyEvents } from "./seed";
+import { MIN_LEAD_MINUTES } from "@/lib/format";
 import type {
   Brainstorm,
   BrainstormUpdate,
@@ -345,12 +346,12 @@ export function listPosts(jobId?: string | null, when?: string | null) {
 
 const jobOfPost = (postId: string) => [...store().jobs.values()].find((j) => postOf(j)?.id === postId);
 
-/** Same bounds as the API's check_time: a timezone, at least 2 minutes ahead, at most 60 days. A number is the time. */
+/** Same bounds as the API's check_time: a timezone, at least MIN_LEAD_MINUTES ahead, at most 60 days. A number is the time. */
 function checkTime(iso: string): number | string {
   if (!/(Z|[+-]\d\d:\d\d)$/.test(iso)) return "scheduled_at needs a timezone, e.g. +09:00 for KST";
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return "scheduled_at isn't a time";
-  if (t < Date.now() + 2 * 60_000) return "schedule it at least 2 minutes from now";
+  if (t < Date.now() + MIN_LEAD_MINUTES * 60_000) return `pick a time at least ${MIN_LEAD_MINUTES} minutes from now (or post now)`;
   if (t > Date.now() + 60 * 86_400_000) return "schedule it at most 60 days ahead";
   return t;
 }

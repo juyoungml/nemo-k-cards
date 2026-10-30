@@ -8,6 +8,10 @@ app/pipeline/publishing.py only drives it. Every state change goes through `tran
   * moves the Job's status with it in the same transaction (PUBLISHING while a Post is open, PUBLISHED once one
     is live, back to READY_FOR_REVIEW when nothing was posted), so the Admin never sees the two disagree.
 
+Lock order (#66): whatever changes a Post and its Job in one transaction locks the Job row first, then the Post
+(`transition`, `publishing.create`, the edit's hold in app/deck_versions.py, Reject in app/main.py). Two writers that
+took them the other way round deadlocked.
+
 Timed Posts (#26): a Post approved for later starts `scheduled` (the Job is SCHEDULED) and the publisher's workflow
 sleeps until `scheduled_at`. Until then an Approver can reschedule or cancel it. Editing the Deck puts it `on_hold`
 (app/deck_versions.py); approving the Deck again replaces the held Post with a new one (app/pipeline/publishing.py).
@@ -34,8 +38,9 @@ _COLS = ("id, job_id, deck_version, instagram_account_id, username, mode, state,
          "permalink, attempts, last_error, progress, approved_by_email, created_at, updated_at, "
          "publishing_started_at, unknown_since, next_check_at, alerted_at, published_at, finished_at, resolved_by, "
          "legacy, scheduled_at, held_reason, held_at, cancelled_by")
-# Timed Posts (#26): how far ahead a Post may be scheduled, and the least lead time.
-MIN_LEAD = timedelta(minutes=2)
+# Timed Posts (#26): how far ahead a Post may be scheduled, and the least lead time. The Admin offers the same lead
+# (MIN_LEAD_MINUTES in apps/web/src/lib/format.ts; a test keeps them equal).
+MIN_LEAD = timedelta(minutes=5)
 MAX_AHEAD = timedelta(days=60)
 UPCOMING = ("scheduled", "on_hold")
 _NAMES = [c.strip() for c in _COLS.split(",")]
@@ -56,12 +61,12 @@ class Taken(Exception):
 
 
 def check_time(when: datetime, now: datetime | None = None) -> datetime:
-    """A schedule time the Admin may pick: timezone-aware, 2 minutes to 60 days ahead. Returned in UTC."""
+    """A schedule time the Admin may pick: timezone-aware, MIN_LEAD (5 minutes) to 60 days ahead. Returned in UTC."""
     now = now or datetime.now(UTC)
     if when.tzinfo is None:
         raise HTTPException(422, "scheduled_at needs a timezone (the Admin sends KST, +09:00)")
     if when < now + MIN_LEAD:
-        raise HTTPException(422, "pick a time at least 2 minutes from now (or post now)")
+        raise HTTPException(422, f"pick a time at least {MIN_LEAD.seconds // 60} minutes from now (or post now)")
     if when > now + MAX_AHEAD:
         raise HTTPException(422, "a Post can be scheduled at most 60 days ahead")
     return when.astimezone(UTC)
@@ -144,11 +149,14 @@ JOB_STATUS = {"scheduled": JobStatus.SCHEDULED, "on_hold": JobStatus.READY_FOR_R
 
 def transition(org_id: UUID, post_id: UUID, expect: set[str], *, actor: UUID | None = None,
                job_status: JobStatus | None = None, job_update=None, audit_action: str | None = None,
-               audit_detail: dict[str, Any] | None = None, **fields: Any) -> Post | None:
+               audit_detail: dict[str, Any] | None = None, due_by: datetime | None = None,
+               **fields: Any) -> Post | None:
     """Set `fields` on the Post if its state is one of `expect`; None if it wasn't (someone else moved it).
-    `state` in `fields` also moves the Job (JOB_STATUS, or `job_status`); `job_update(job)` may change the Job
-    further in the same transaction. An audit event is written as `actor` (default: the Approver) when given; if
-    RLS refuses it (that Member has left the Organization) the change still lands and the miss is logged."""
+    `due_by`: also only if its `scheduled_at` is still at or before then (a reschedule that landed after the caller
+    read the row wins, #66). `state` in `fields` also moves the Job (JOB_STATUS, or `job_status`); `job_update(job)`
+    may change the Job further in the same transaction, which then locks the Job row before the Post (the lock order
+    above). An audit event is written as `actor` (default: the Approver) when given; if RLS refuses it (that Member
+    has left the Organization) the change still lands and the miss is logged."""
     fields = {**fields, "updated_at": datetime.now(UTC)}
     if "progress" in fields and isinstance(fields["progress"], PostProgress):
         fields["progress"] = Jsonb(fields["progress"].model_dump())
@@ -156,19 +164,23 @@ def transition(org_id: UUID, post_id: UUID, expect: set[str], *, actor: UUID | N
         fields["progress"] = Jsonb(fields["progress"])
     sets = ", ".join(f"{k} = %s" for k in fields)
     with store.tenant(org_id) as c:
-        who = c.execute("select approved_by, approved_by_email from posts where id = %s", (post_id,)).fetchone()
+        who = c.execute("select approved_by, approved_by_email, job_id from posts where id = %s",
+                        (post_id,)).fetchone()
         if who is None:
             return None
         actor = actor or who[0]
         c.execute("select set_config('app.user_id', %s, true)", (str(actor),))
-        row = c.execute(f"update posts set {sets} where id = %s and state = any(%s) returning {_COLS}",
-                        (*fields.values(), post_id, list(expect))).fetchone()
+        status = job_status or (JOB_STATUS.get(fields["state"]) if "state" in fields else None)
+        # The Job row first, then the Post: the same order as every other writer of both.
+        jrow = (c.execute("select doc::text from jobs where id = %s for update", (who[2],)).fetchone()
+                if status or job_update else None)
+        due = " and scheduled_at <= %s" if due_by else ""
+        row = c.execute(f"update posts set {sets} where id = %s and state = any(%s){due} returning {_COLS}",
+                        (*fields.values(), post_id, list(expect), *([due_by] if due_by else []))).fetchone()
         if row is None:
             return None
         post = _post(row)
-        status = job_status or (JOB_STATUS.get(fields["state"]) if "state" in fields else None)
         if status or job_update:
-            jrow = c.execute("select doc::text from jobs where id = %s", (post.job_id,)).fetchone()
             job = Job.model_validate_json(jrow[0]) if jrow else None
             if job:
                 if status:
@@ -187,6 +199,22 @@ def transition(org_id: UUID, post_id: UUID, expect: set[str], *, actor: UUID | N
                 log.warning("audit %s for post %s not written: %s is no longer a Member", audit_action, post_id,
                             actor)
     return post
+
+
+def cancel_held(c: Connection, job_id: str, *, why: str, cancelled_by: UUID | None) -> dict[str, Any] | None:
+    """Cancel the Job's Post on hold, if any, on the caller's open transaction (which already holds the Job row).
+    Its workflow already ended when it was held. Returns the detail for its own `post.cancelled` audit event, which
+    the caller writes (it may want to add what replaced it)."""
+    row = c.execute(
+        "update posts set state = 'cancelled', finished_at = now(), updated_at = now(), last_error = %s, "
+        "cancelled_by = %s, progress = %s where job_id = %s and state = 'on_hold' "
+        "returning id, mode, username, scheduled_at",
+        (why[:500], cancelled_by, Jsonb(PostProgress(step="failed", label="Cancelled: nothing was posted")
+                                        .model_dump()), job_id)).fetchone()
+    if row is None:
+        return None
+    return {"post": str(row[0]), "state": "cancelled", "mode": row[1], "account": f"@{row[2]}" if row[2] else None,
+            "reason": why, "scheduled_at": row[3].isoformat() if row[3] else None}
 
 
 # ---------------------------------------------------------------- routes

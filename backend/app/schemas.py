@@ -524,7 +524,9 @@ class ApproveRequest(BaseModel):
     # Required when the Deck has blocking Issues (an Override, GLOSSARY); recorded in the audit log.
     override_reason: str | None = Field(None, max_length=2000)
     # Timed Posts (#26): post at this time instead of now. Must carry a timezone (the Admin sends KST, +09:00), be
-    # at least 2 minutes ahead and at most 60 days ahead.
+    # at least 5 minutes (posts.MIN_LEAD) and at most 60 days ahead. Left out, the Post goes now: also when it
+    # replaces a Post on hold (#66), whose time is not reused unless it is sent again (the Admin does, while it is
+    # still ahead). The audit's `post.resumed` records which it was.
     scheduled_at: datetime | None = None
 
 

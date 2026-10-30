@@ -315,11 +315,20 @@ def _approval_entries(ctx: auth.Ctx, job: Job, mode: str, blocking: list, reason
 
 @app.post("/jobs/{job_id}/reject", response_model=Job)
 def reject(job_id: str, req: RejectRequest, ctx: auth.Approver) -> Job:
-    job = _job_or_404(ctx.org_id, job_id)
-    if job.status not in (JobStatus.READY_FOR_REVIEW, JobStatus.BLOCKED):  # a blocked Deck can still be rejected
-        raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW or BLOCKED")
-    job.status, job.error = JobStatus.REJECTED, req.reason or "rejected by operator"
-    return _out(ctx.org_id, store.save_job(ctx.org_id, job, audit=audit.entry(ctx, "deck.rejected", job.id, reason=job.error)))
+    """A rejected Deck will not be posted, so its Post on hold (#26: edited after approval, or its time was missed)
+    is cancelled in the same transaction, with its own `post.cancelled` event (#66). The Job row is locked first,
+    like every writer of a Job and its Post."""
+    with store.locked_job(ctx.org_id, job_id, user_id=ctx.user.id) as (c, job):
+        if job is None:
+            raise HTTPException(404, "job not found")
+        if job.status not in (JobStatus.READY_FOR_REVIEW, JobStatus.BLOCKED):  # a blocked Deck can still be rejected
+            raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW or BLOCKED")
+        job.status, job.error = JobStatus.REJECTED, req.reason or "rejected by operator"
+        store.write_job(c, job)
+        audit.write(c, ctx.org_id, audit.entry(ctx, "deck.rejected", job.id, reason=job.error))
+        if held := posts.cancel_held(c, job.id, why=f"the Deck was rejected: {job.error}", cancelled_by=ctx.user.id):
+            audit.write(c, ctx.org_id, audit.entry(ctx, "post.cancelled", job.id, **held))
+    return _out(ctx.org_id, job)
 
 
 # ---------------------------------------------------------------- brainstorms

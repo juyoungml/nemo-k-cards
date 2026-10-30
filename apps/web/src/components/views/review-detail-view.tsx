@@ -212,8 +212,8 @@ function ReviewDetail({ job, setData, posts, reloadPosts }: { job: Job; setData:
             </Panel>
           )}
 
-          {/* Keyed by the held Post so its time prefills once the Posts load. */}
-          <ReviewActions key={held?.id ?? "none"} job={job} onChange={setData} held={held} />
+          {/* Keyed by the held Post so its time prefills once the Posts load; Approve waits for them (#66). */}
+          <ReviewActions key={held?.id ?? "none"} job={job} onChange={setData} held={held} postsLoaded={posts !== undefined} />
         </div>
       </div>
     </>

@@ -37,6 +37,8 @@ const ACTION: Record<string, [Tone, string]> = {
   "post.unknown_alert": ["warning", "Post needs a check"],
   "post.settled": ["info", "Post settled by reconciler"],
   "post.resolved": ["info", "Post resolved by hand"],
+  "post.scheduled": ["info", "Post scheduled"],
+  "post.resumed": ["info", "Held Post resumed"],
   "post.started": ["info", "Scheduled Post started"],
   "post.held": ["warning", "Post on hold"],
   "post.cancelled": ["neutral", "Post cancelled"],
@@ -112,6 +114,8 @@ function describe(e: AuditEvent): React.ReactNode {
           {e.action === "post.settled" && d.container ? ` · container ${String(d.container)}` : ""}
         </>
       );
+    case "post.scheduled":
+    case "post.resumed":
     case "post.started":
     case "post.held":
     case "post.cancelled":
@@ -120,6 +124,8 @@ function describe(e: AuditEvent): React.ReactNode {
         <>
           {String(d.account ?? "no account")}
           {d.scheduled_at ? ` · for ${formatDateTime(String(d.scheduled_at))} KST` : ""}
+          {e.action === "post.resumed" && d.now ? " · posting now" : ""}
+          {e.action === "post.cancelled" && d.replaced_by ? " · replaced by a new approval" : ""}
           {d.from && d.to ? ` · ${formatDateTime(String(d.from))} → ${formatDateTime(String(d.to))} KST` : ""}
           {d.reason ? ` · ${String(d.reason)}` : ""}
         </>

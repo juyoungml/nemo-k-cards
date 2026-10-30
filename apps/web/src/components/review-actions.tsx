@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { ROLE_LABEL, atLeast, useMe } from "@/lib/roles";
-import { formatDateTime, fromKstInput, scheduleBounds, toKstInput } from "@/lib/format";
+import { MIN_LEAD_MINUTES, formatDateTime, fromKstInput, scheduleBounds, toKstInput } from "@/lib/format";
 import type { Job, Post } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
@@ -27,9 +27,20 @@ const STATUS_NOTE: Partial<Record<Job["status"], string>> = {
 
 /**
  * Approve / Reject / Regenerate. Approve posts now or at a KST time (#26). `held` is this Deck's Post on hold (edited
- * after approval, or its time was missed): approving again replaces it, so its time is offered again.
+ * after approval, or its time was missed): approving again replaces it, so its time is offered again. Approve waits
+ * for this Deck's Posts (`postsLoaded`): before they load, a held Post is unknown and the API would post now (#66).
  */
-export function ReviewActions({ job, onChange, held }: { job: Job; onChange: (job: Job) => void; held?: Post }) {
+export function ReviewActions({
+  job,
+  onChange,
+  held,
+  postsLoaded = true,
+}: {
+  job: Job;
+  onChange: (job: Job) => void;
+  held?: Post;
+  postsLoaded?: boolean;
+}) {
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string>();
@@ -44,11 +55,13 @@ export function ReviewActions({ job, onChange, held }: { job: Job; onChange: (jo
   const mode = health?.publish_mode;
   const needsAccount = mode !== undefined && mode !== "mock" && live.length === 0;
   const mustPick = live.length > 1 && !accountId;
-  // When (#26): now, or a KST time at least 2 minutes and at most 60 days ahead (the API checks the same).
+  // When (#26): now, or a KST time at least MIN_LEAD_MINUTES and at most 60 days ahead (the API checks the same).
   const [later, setLater] = useState(!!held?.scheduled_at);
   // A held Post's time is offered again while it is still ahead; a missed one needs a new time.
   const [when, setWhen] = useState(() =>
-    held?.scheduled_at && new Date(held.scheduled_at).getTime() > Date.now() + 120_000 ? toKstInput(held.scheduled_at) : "",
+    held?.scheduled_at && new Date(held.scheduled_at).getTime() > Date.now() + MIN_LEAD_MINUTES * 60_000
+      ? toKstInput(held.scheduled_at)
+      : "",
   );
   const [{ min: minWhen, max: maxWhen }] = useState(scheduleBounds);
   const whenMissing = later && !when;
@@ -233,10 +246,12 @@ export function ReviewActions({ job, onChange, held }: { job: Job; onChange: (jo
             </Button>
             <Button
               size="lg"
-              disabled={!canDecide || reasonMissing || needsAccount || mustPick || whenMissing}
+              disabled={!canDecide || reasonMissing || needsAccount || mustPick || whenMissing || !postsLoaded}
               title={
                 blocked
                   ? "The safeguard blocked this deck. No Override can approve it."
+                  : !postsLoaded && mayDecide
+                  ? "Loading this Deck's Posts…"
                   : mustPick && mayDecide
                   ? "Choose the Instagram account to post to"
                   : needsAccount && mayDecide
