@@ -1,0 +1,14 @@
+{
+  "title": "Getting around with a T-money card",
+  "caption": "One card for the subway, buses and taxis.\nBuy it, top it up, tap in and out, and get your change back before you fly.\nSave this for your first day in Seoul.\nDetails & official links in bio.\n#Seoul #KoreaTravel #TMoney #SeoulSubway #TravelTips",
+  "hashtags": ["#Seoul", "#KoreaTravel", "#TMoney", "#SeoulSubway", "#TravelTips"],
+  "slides": [
+    {"index": 0, "layout": "cover", "heading": "One card for every ride", "body": "How to buy, top up and use T-money (티머니) on subways, buses and taxis."},
+    {"index": 1, "layout": "point", "point_id": "buy", "heading": "Buy one at a convenience store", "body": "GS25, CU and 7-Eleven sell T-money cards at the counter. Subway station vending machines do too."},
+    {"index": 2, "layout": "point", "point_id": "topup", "heading": "Top up with cash", "body": "Ask at the counter, or use the recharge machine in any subway station. Most machines take cash only."},
+    {"index": 3, "layout": "point", "point_id": "tap", "heading": "Tap in and tap out", "body": "Tap the reader when you get on and when you get off, on buses too. Tapping out gets you the transfer discount."},
+    {"index": 4, "layout": "point", "point_id": "transfer", "heading": "Transfers within 30 minutes", "body": "Switch between subway and bus within 30 minutes and you only pay for the extra distance."},
+    {"index": 5, "layout": "checklist", "heading": "Before your first ride", "body": "Card from a convenience store\nCash for topping up\nTap out every time\nRefund the balance before you fly"},
+    {"index": 6, "layout": "cta", "heading": "Save this for your first day", "body": "Send it to the friend who always loses their subway ticket."}
+  ]
+}

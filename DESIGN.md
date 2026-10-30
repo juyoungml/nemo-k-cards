@@ -50,7 +50,10 @@ Source of truth: `CATEGORY` in `backend/app/renderer/html.py`, plus `--color-cat
 | Event, no photo | **Poster**: the category color fills the card, with a giant numeral, a big headline, and the info grid pinned to the bottom |
 | Tips | White, red Cabinet numerals, hairline rules |
 | Map | White, metro-colored route line, ink taxi box with the Korean address large |
-| CTA | Ink back cover, "Links checked" stamp, sources |
+| CTA | Ink back cover, "Links checked" stamp, sources. Guide Decks: "Facts checked" stamp and "Official sources" |
+| Guide cover | As Cover, with "Guide" as the kicker, "FACTS CHECKED YYYY.MM.DD" in red, and 안내 (or the named place) as the Hangul |
+| Guide point | White, type-led (no photo): the guide topic as a red tracked label, a 300px red Cabinet numeral, an 84px headline, the detail in ink at 40px, and "✓ Official source: host" in green at the bottom |
+| Guide checklist | White, red rounded tick boxes, one short line each, hairline rules |
 
 Chrome on every slide: taegeuk mark + `WHAT'S ON KOREA` (top left), `01 / 07` (top right), `@whatsonkorea` and `Swipe →` (bottom).
 

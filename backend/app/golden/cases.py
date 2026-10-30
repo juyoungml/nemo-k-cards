@@ -39,13 +39,19 @@ class Expect(BaseModel):
     every_event_mentions_any: list[str] = Field(default_factory=list)  # each event's place fields name one of these
     no_event_mentions: list[str] = Field(default_factory=list)    # no event's place fields name any of these
     window_days: int | None = None  # every event runs within [today, today + window_days]
+    # Guide Decks (#27)
+    min_points: int = 3                                           # verified points on the Deck
+    official_hosts_any: list[str] = Field(default_factory=list)   # a point rests on one of these domains
 
 
 class Case(BaseModel):
     id: str
-    # guide: Guide Decks (#27), not produced by the pipeline yet. safeguard: a fixed Deck (replay only) that checks
-    # the Safeguard's verdict; its prompt says what the Deck is.
+    # guide: a Guide Deck (#27). safeguard: a fixed Deck (replay only) that checks the Safeguard's verdict; its prompt
+    # says what the Deck is.
     kind: Literal["event", "guide", "safeguard"] = "event"
+    # The Deck kind the request asks for (#27). None: event cases ask for an Event Deck; guide cases leave it to the
+    # researcher, so they also check its pick.
+    request_kind: Literal["event", "guide"] | None = None
     prompt: str
     why: str = ""
     expect: Expect = Field(default_factory=Expect)
@@ -73,6 +79,8 @@ class Recording(BaseModel):
     status: JobStatus
     error: str | None = None
     briefs: list[dict] = Field(default_factory=list)
+    kind: str | None = None         # the Deck kind the Job ended with (#27); None on older recordings (event)
+    guide: dict | None = None       # a Guide Deck's GuideBrief, raw
     verification: dict | None = None
     deck: dict | None = None
     issues: list[Issue] = Field(default_factory=list)  # host + QA + reviewer, as shown in Review
@@ -150,6 +158,7 @@ def recording_from_job(job: Job, case: Case, set_version: int, today: date, mode
         case_id=case.id, set_version=set_version, provenance="live", recorded_at=datetime.now().astimezone(),
         today=today, model=max(models, key=models.get, default=""), models=sorted(models),
         cli_version=cli_version, runner=runner, agent_sha=agent_sha(), prompt=job.prompt, status=job.status,
-        error=job.error, briefs=[b.model_dump(mode="json") for b in job.briefs],
+        error=job.error, briefs=[b.model_dump(mode="json") for b in job.briefs], kind=job.kind,
+        guide=job.guide.model_dump(mode="json") if job.guide else None,
         verification=job.verification.model_dump(mode="json") if job.verification else None, deck=deck,
         issues=job.issues, safeguard=job.safeguard.model_dump(mode="json") if job.safeguard else None, log=[f"{line.stage}: {line.message}" for line in job.log])

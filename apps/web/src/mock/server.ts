@@ -4,6 +4,7 @@
 
 import bad from "./scenarios/bad.json";
 import fail from "./scenarios/fail.json";
+import guide from "./scenarios/guide.json";
 import good from "./scenarios/good.json";
 import slideSources from "./scenarios/slide-sources.json";
 import { seedInstagramAccounts, seedBrainstorm, seedPolicyEvents } from "./seed";
@@ -12,9 +13,11 @@ import type {
   BrainstormUpdate,
   CardDeck,
   DeckChange,
+  DeckKind,
   DeckEdit,
   DeckVersion,
   EventBrief,
+  GuideBrief,
   Issue,
   Job,
   JobStatus,
@@ -37,7 +40,9 @@ import type {
 interface ScenarioData {
   description: string;
   prompt: string;
+  kind?: DeckKind;
   briefs: EventBrief[];
+  guide?: GuideBrief;
   verification: VerificationReport;
   deck: Omit<CardDeck, "job_id">;
   issues: Issue[];
@@ -49,7 +54,7 @@ interface ScenarioData {
   error?: string;
 }
 
-export const SCENARIOS = { good, bad, fail } as unknown as Record<Scenario, ScenarioData>;
+export const SCENARIOS = { good, bad, fail, guide } as unknown as Record<Scenario, ScenarioData>;
 
 const STAGES = [
   { key: "research", name: "Research", where: "researcher · sandbox", status: "RESEARCHING", ms: 3000 },
@@ -66,6 +71,7 @@ interface MockJob {
   id: string;
   prompt: string;
   scenario: Scenario;
+  kind?: DeckKind | null; // what was asked for (#27); null/undefined = the researcher picks (the scenario's kind)
   source: "quick" | "brainstorm";
   createdAt: number;
   /** Brainstorm jobs bring their own facts/outline and skip Research. */
@@ -216,8 +222,14 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     status,
     created_at: new Date(job.createdAt).toISOString(),
     source: job.source,
+    // Deck kind (#27): what was asked for; once researched, the scenario's kind (a guide scenario is a Guide Deck).
+    requested_kind: job.kind ?? null,
+    kind: job.kind ?? (reached("research") ? (sc.kind ?? "event") : job.source === "brainstorm" ? "event" : null),
     briefs: reached("research") ? briefs : [],
-    verification: reached("verify") ? sc.verification : null,
+    guide: reached("research") ? (sc.guide ?? null) : null,
+    verification: reached("verify")
+      ? { ...sc.verification, checked_at: new Date(job.createdAt + stages[0].ms + (stages[1]?.ms ?? 0)).toISOString() }
+      : null,
     deck,
     issues: finished ? sc.issues : [],
     safeguard: !finished || checking ? null : last && sc.safeguard ? { ...sc.safeguard, deck_version: last.version } : (sc.safeguard ?? null),
@@ -268,8 +280,8 @@ export function materialRefs(ids: string[]): MaterialRef[] | undefined {
   return found.every(Boolean) ? found.map((m) => refOf(m!)) : undefined;
 }
 
-export function createJob(prompt: string, scenario: Scenario = "good", material: MaterialRef[] = []): Job {
-  const job: MockJob = { id: newId(), prompt, scenario, source: "quick", createdAt: Date.now(), material };
+export function createJob(prompt: string, scenario: Scenario = "good", material: MaterialRef[] = [], kind: DeckKind | null = null): Job {
+  const job: MockJob = { id: newId(), prompt, scenario, source: "quick", createdAt: Date.now(), material, kind };
   store().jobs.set(job.id, job);
   return snapshot(job);
 }

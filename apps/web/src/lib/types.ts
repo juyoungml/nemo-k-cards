@@ -74,6 +74,26 @@ export interface EventBrief {
   conflicts?: Conflict[];
 }
 
+/** What a Deck is about (#27, GLOSSARY "Deck kind"). */
+export type DeckKind = "event" | "guide";
+
+/** One step, rule or fact of a Guide Deck; it stays on the Deck only if a fact traces to an Official source. */
+export interface GuidePoint {
+  id: string;
+  title: string;
+  detail: string;
+  facts: FactSource[];
+}
+
+export interface GuideBrief {
+  topic_en: string;
+  topic_ko: string;
+  summary: string;
+  points: GuidePoint[];
+  sources: Source[];
+  materials?: string[];
+}
+
 export interface LinkCheck {
   url: string;
   status: "ok" | "dead" | "redirect" | "suspicious" | "timeout";
@@ -84,14 +104,17 @@ export interface LinkCheck {
 export interface VerificationReport {
   checks: LinkCheck[];
   excluded_event_ids: string[];
+  excluded_point_ids?: string[]; // Guide Decks: points with no official source, left off
+  checked_at?: string | null; // when the host checked the facts ("Facts checked" on the cards); null on older Jobs
 }
 
 export interface Slide {
   index: number;
-  layout: "cover" | "event" | "tips" | "map" | "cta";
+  layout: "cover" | "event" | "tips" | "map" | "cta" | "point" | "checklist"; // point/checklist: Guide Decks
   heading: string;
   body: string;
   event_id?: string | null;
+  point_id?: string | null;
   stock_id?: string | null;
 }
 
@@ -190,7 +213,10 @@ export interface Job {
   prompt: string;
   status: JobStatus;
   created_at: string;
+  requested_kind?: DeckKind | null; // what was asked for; null = the researcher picked
+  kind?: DeckKind | null; // null until research when it was left open; older Jobs are event Decks
   briefs: EventBrief[];
+  guide?: GuideBrief | null; // Guide Decks (#27)
   verification?: VerificationReport | null;
   deck?: CardDeck | null;
   issues: Issue[]; // QAReport.issues + ReviewVerdict.issues, merged for display
@@ -306,7 +332,7 @@ export interface Post {
   legacy?: boolean;
 }
 
-export type Scenario = "good" | "bad" | "fail";
+export type Scenario = "good" | "bad" | "fail" | "guide";
 
 // Admin-only view models (no backend schema yet).
 

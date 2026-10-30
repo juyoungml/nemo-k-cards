@@ -3,6 +3,7 @@
 import { ChevronDown, ExternalLink } from "lucide-react";
 
 import { DeckBar, SlideWorkspace, useDeckEditor } from "@/components/deck-editor";
+import { GuidePointsPanel } from "@/components/guide-points-panel";
 import { LoadState, PageHeader, Panel } from "@/components/page";
 import { PostsList, PublishProgress } from "@/components/publish-progress";
 import { PublishToast } from "@/components/publish-toast";
@@ -12,6 +13,7 @@ import { SourceMaterialPanel } from "@/components/source-material-panel";
 import { JobStatusBadge, StatusBadge, type Tone } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import type { Issue, Job, LinkCheck, Post } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
@@ -32,7 +34,11 @@ function checkBadge(job: Job, category: Issue["category"], label: string) {
   if (category === "link" && job.verification) {
     // Count only sources of events that made it into the deck; excluded ones are shown in the table.
     const excluded = new Set(job.verification.excluded_event_ids);
-    const kept = new Set(job.briefs.filter((b) => !excluded.has(b.id)).flatMap((b) => b.sources.map((s) => s.url)));
+    const kept = new Set(
+      job.guide
+        ? job.guide.sources.map((s) => s.url) // a Guide Deck's links (#27)
+        : job.briefs.filter((b) => !excluded.has(b.id)).flatMap((b) => b.sources.map((s) => s.url)),
+    );
     const checks = job.verification.checks.filter((c) => kept.has(c.url));
     const ok = checks.filter((c) => c.status === "ok" || c.status === "redirect").length;
     text = `${label} ${ok}/${checks.length} ✓`;
@@ -131,8 +137,17 @@ function ReviewDetail({ job, setData, posts, reloadPosts }: { job: Job; setData:
     <>
       <PageHeader
         title={deck?.title ?? job.prompt}
-        description={`job ${job.id} · ${deck?.slides.length ?? 0} slides · ${reviewSummary(job)}`}
+        description={
+          `job ${job.id} · ${deck?.slides.length ?? 0} slides · ${reviewSummary(job)}` +
+          (job.kind === "guide" && job.verification?.checked_at ? ` · facts checked ${formatDateTime(job.verification.checked_at)} KST` : "")
+        }
       >
+        {job.kind && (
+          <StatusBadge tone="neutral">
+            {job.kind === "guide" ? "Guide Deck" : "Event Deck"}
+            {!job.requested_kind && " · auto"}
+          </StatusBadge>
+        )}
         {live?.permalink && live.mode !== "mock" && (
           <a href={live.permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
             View post <ExternalLink className="size-3.5" />
@@ -158,6 +173,8 @@ function ReviewDetail({ job, setData, posts, reloadPosts }: { job: Job; setData:
             <div className="flex flex-wrap gap-2">{CHECKS.map((c) => checkBadge(job, c.category, c.label))}</div>
             {job.issues.length > 0 && <IssueList issues={job.issues} onJump={setSlide} />}
           </Panel>
+
+          <GuidePointsPanel job={job} />
 
           <SourceMaterialPanel job={job} />
 

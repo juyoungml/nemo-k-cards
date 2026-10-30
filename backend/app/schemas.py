@@ -141,6 +141,53 @@ class EventBrief(BaseModel):
         return self
 
 
+# ---------------------------------------------------------------- Guide Decks (#27)
+
+DeckKind = Literal["event", "guide"]  # GLOSSARY "Deck kind"
+
+
+class GuidePoint(BaseModel):
+    """One step, rule or fact of a Guide Deck: one `point` slide. Every point must trace to an Official source (GLOSSARY):
+    its `facts` say where each claim came from, and the host keeps the point only if one of them checks out."""
+    id: str
+    title: str                     # "Top up at any convenience store"
+    detail: str = ""               # one or two plain sentences: the how / the rule / the number
+    facts: list[FactSource] = Field(default_factory=list)
+
+
+class GuideBrief(BaseModel):
+    """What a Guide Deck is about (GLOSSARY "Deck kind"): practical know-how, a rule or the Organization's own
+    announcement, with no dates to run between. The researcher writes it; Verify decides which points stay."""
+    topic_en: str
+    topic_ko: str = ""
+    summary: str = ""                                          # one line: what a reader will be able to do after
+    points: list[GuidePoint] = Field(min_length=1, max_length=8)
+    sources: list[Source] = Field(default_factory=list)       # pages actually opened; official first
+    materials: list[str] = Field(default_factory=list)        # Source material ids it draws on
+
+    @model_validator(mode="after")
+    def _has_a_source(self) -> "GuideBrief":
+        if not self.sources and not self.materials:
+            raise ValueError("a Guide needs at least one source link or Source material")
+        return self
+
+
+class Research(BaseModel):
+    """The researcher's answer: the Deck kind it researched (the one asked for, or its pick when the request left it
+    open) and either events or a guide."""
+    kind: DeckKind
+    events: list[EventBrief] = Field(default_factory=list)
+    guide: GuideBrief | None = None
+
+    @model_validator(mode="after")
+    def _matches_kind(self) -> "Research":
+        if self.kind == "guide" and self.guide is None:
+            raise ValueError("kind is guide but no guide was returned")
+        if self.kind == "event" and self.guide is not None:
+            raise ValueError("kind is event but a guide was returned")
+        return self
+
+
 # ---------------------------------------------------------------- verification
 
 class LinkCheck(BaseModel):
@@ -154,11 +201,15 @@ class LinkCheck(BaseModel):
 class VerificationReport(BaseModel):
     checks: list[LinkCheck] = Field(default_factory=list)
     excluded_event_ids: list[str] = Field(default_factory=list)
+    # Guide Decks (#27): points without a verified Official source are left off; `checked_at` is when the host checked
+    # the facts (shown as "Facts checked" on the cards and in Review). None on Jobs from before #27.
+    excluded_point_ids: list[str] = Field(default_factory=list)
+    checked_at: datetime | None = None
 
 
 # ---------------------------------------------------------------- deck
 
-Layout = Literal["cover", "event", "tips", "map", "cta"]
+Layout = Literal["cover", "event", "tips", "map", "cta", "point", "checklist"]  # point/checklist: Guide Decks
 
 
 class Slide(BaseModel):
@@ -167,6 +218,7 @@ class Slide(BaseModel):
     heading: str
     body: str = ""
     event_id: str | None = None
+    point_id: str | None = None  # Guide Decks: the GuidePoint a `point` slide shows
     image: ImageAsset | None = None
     stock_id: str | None = None  # copywriter's pick from renderer/stock/catalog.json; the host decides if it's used
     source_urls: list[str] = Field(default_factory=list)
@@ -411,7 +463,12 @@ class Job(BaseModel):
     status: JobStatus = JobStatus.QUEUED
     created_at: datetime
     source: Literal["quick", "brainstorm"] = "quick"
+    # Deck kind (#27): what was asked for (None = let the researcher decide) and what the Deck is. `kind` is None until
+    # research when the request left it open; Jobs from before #27 load as event Decks.
+    requested_kind: DeckKind | None = None
+    kind: DeckKind | None = "event"
     briefs: list[EventBrief] = Field(default_factory=list)
+    guide: GuideBrief | None = None                      # Guide Decks only
     verification: VerificationReport | None = None
     deck: CardDeck | None = None
     issues: list[Issue] = Field(default_factory=list)   # QA + review merged for display
@@ -439,7 +496,7 @@ class Job(BaseModel):
     org_profile: OrgProfile | None = None
 
 
-Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend
+Scenario = Literal["good", "bad", "fail", "guide"]  # demo/scenarios/<name>/, same names as the Admin mock backend
 
 
 MAX_MATERIALS = 10  # pieces of Source material per Job or Brainstorm
@@ -448,6 +505,7 @@ MAX_MATERIALS = 10  # pieces of Source material per Job or Brainstorm
 class CreateJobRequest(BaseModel):
     prompt: str = Field(min_length=3)
     material_ids: list[str] = Field(default_factory=list, max_length=MAX_MATERIALS)  # from POST /materials
+    kind: DeckKind | None = None      # Event or Guide Deck (#27); None = the researcher decides from the prompt
     scenario: Scenario | None = None  # DEMO_MODE=fixture only; ignored in live mode
 
 

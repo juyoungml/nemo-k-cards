@@ -2,9 +2,9 @@
 {# Magazine cover: issue line, huge Hangul place name as graphic, headline + posting-weekend date. #}
 {% block outside %}<div class="hangul" aria-hidden="true">{{ hangul }}</div>{% endblock %}
 {% block content %}
-  <span class="issue" data-qa="cover.kicker">Weekend Issue No. {{ issue_no }}</span>
+  <span class="issue" data-qa="cover.kicker">{% if guide %}Guide{% else %}Weekend Issue No. {{ issue_no }}{% endif %}</span>
   <div class="cover-hd">
-    <span class="date" data-qa="cover.date">{{ weekend | upper }}</span>
+    <span class="date" data-qa="cover.date">{% if guide %}FACTS CHECKED {{ checked }}{% else %}{{ weekend | upper }}{% endif %}</span>
     <div class="title{% if slide.heading | length > 30 %} long{% endif %}" data-qa="cover.heading">{{ slide.heading }}</div>
     {% if slide.body %}<div class="lead" data-qa="cover.body">{{ slide.body }}</div>{% endif %}
   </div>

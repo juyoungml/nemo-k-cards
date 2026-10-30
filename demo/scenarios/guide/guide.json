@@ -1,0 +1,50 @@
+{
+  "topic_en": "Getting around with a T-money card",
+  "topic_ko": "티머니 카드 사용법",
+  "summary": "Buy, top up and use one transit card for subways, buses and taxis across Korea.",
+  "sources": [
+    {"url": "https://www.t-money.co.kr/", "kind": "official"},
+    {"url": "https://www.seoulmetro.co.kr/en/", "kind": "official"},
+    {"url": "https://english.visitkorea.or.kr/", "kind": "public_api"},
+    {"url": "https://blog.naver.com/example-traveler/223000000001", "kind": "other"}
+  ],
+  "materials": [],
+  "points": [
+    {
+      "id": "buy",
+      "title": "Buy one at a convenience store",
+      "detail": "GS25, CU and 7-Eleven sell T-money cards at the counter, and so do vending machines in subway stations.",
+      "facts": [{"field": "other", "value": "sold at convenience stores and station machines", "origin": "link", "url": "https://www.t-money.co.kr/"}]
+    },
+    {
+      "id": "topup",
+      "title": "Top up with cash",
+      "detail": "Ask at the convenience store counter, or use the recharge machine in any subway station. Most machines take cash only.",
+      "facts": [{"field": "other", "value": "top up at stores and station recharge machines", "origin": "link", "url": "https://www.t-money.co.kr/"}]
+    },
+    {
+      "id": "tap",
+      "title": "Tap in and tap out",
+      "detail": "Tap the reader when you get on and when you get off, on buses too. Tapping out is what gets you the transfer discount.",
+      "facts": [{"field": "other", "value": "tap on entry and exit; transfer discount needs tap-out", "origin": "link", "url": "https://www.seoulmetro.co.kr/en/"}]
+    },
+    {
+      "id": "transfer",
+      "title": "Transfers within 30 minutes",
+      "detail": "Switch between subway and bus within 30 minutes of tapping out and you pay only the extra distance.",
+      "facts": [{"field": "other", "value": "transfer window 30 minutes", "origin": "link", "url": "https://english.visitkorea.or.kr/"}]
+    },
+    {
+      "id": "refund",
+      "title": "Get leftover money back",
+      "detail": "Before you fly home, convenience stores can refund the balance left on the card, minus a small fee.",
+      "facts": [{"field": "other", "value": "balance refunded at convenience stores for a fee", "origin": "link", "url": "https://www.t-money.co.kr/"}]
+    },
+    {
+      "id": "souvenir",
+      "title": "Character cards make good souvenirs",
+      "detail": "Limited-edition designs sell out fast.",
+      "facts": [{"field": "other", "value": "limited character cards", "origin": "link", "url": "https://blog.naver.com/example-traveler/223000000001"}]
+    }
+  ]
+}

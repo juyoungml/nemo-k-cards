@@ -12,4 +12,5 @@ export const SCENARIO_LABELS = {
   good: "good — passes review",
   bad: "bad — blocked by safeguard",
   fail: "fail — renderer error",
+  guide: "guide — T-money how-to (Guide Deck)",
 } as const;

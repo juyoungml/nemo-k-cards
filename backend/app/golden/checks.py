@@ -28,6 +28,9 @@ LLM checks (from the recorded agent output):
   safeguard·llm  the safeguard agent's own decision matches the case (not needed for a block the rules already
                  make), it didn't fail, and each finding's excerpt is in the text it points at (warn)
 
+Guide cases (`kind: "guide"`, #27) check outcome, the Deck kind, schema, point slides, that every point rests on an
+Official source, facts against the verified points, hashtags, the reviewer and the Safeguard.
+
 Safeguard cases (`kind: "safeguard"`) check outcome, schema, safeguard and safeguard·llm only: they are about the
 verdict, and a blocked Deck is never posted, so the Deck quality checks don't apply.
 """
@@ -36,11 +39,21 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import ValidationError
 
+from app import official
 from app.golden.cases import Case, Recording
-from app.schemas import CardDeck, EventBrief, JobStatus, SafeguardVerdict, Slide, VerificationReport
+from app.schemas import (
+    CardDeck,
+    EventBrief,
+    GuideBrief,
+    JobStatus,
+    SafeguardVerdict,
+    Slide,
+    VerificationReport,
+)
 from app.services import safeguard
 from app.services.link_checker import suspicious_reason
 from app.services.photos import OVERLAY_LICENSES, stock_catalog
@@ -148,10 +161,16 @@ def _claims_text(b: EventBrief) -> str:
     return "\n".join([b.price or "", b.why_go, *b.foreigner_tips])
 
 
-def unsupported_facts(text: str, briefs: list[EventBrief]) -> tuple[list[str], list[str]]:
-    """Claims in `text` that the briefs don't support → (fails, warns). Pure rules, no model."""
+def unsupported_facts(text: str, briefs: list[EventBrief],
+                      guide: GuideBrief | None = None) -> tuple[list[str], list[str]]:
+    """Claims in `text` that the briefs (or a Guide Deck's verified points, #27) don't support → (fails, warns).
+    Pure rules, no model."""
     full = "\n".join(b.model_dump_json() for b in briefs)
     claims = "\n".join(_claims_text(b) for b in briefs)
+    if guide:
+        full += "\n" + guide.model_dump_json()
+        claims += "\n" + "\n".join(f"{p.title}\n{p.detail}\n" + "\n".join(f.value for f in p.facts)
+                                   for p in guide.points)
     days = _days(briefs) | {md for _, mds in dates_in(full) for md in mds}
     times = {t for _, t in times_in(full)}
     amounts = {n for _, n in money_in(claims)} | {int(x.replace(",", "")) for x in re.findall(r"\d[\d,]*", claims)}
@@ -186,6 +205,13 @@ class Ctx:
     briefs: list[EventBrief]
     deck: CardDeck | None
     report: VerificationReport | None
+    guide: GuideBrief | None = None  # Guide Decks (#27)
+
+    @property
+    def points(self) -> dict:
+        """The Guide's points that passed Verify (as recorded), by id."""
+        excluded = set(self.report.excluded_point_ids) if self.report else set()
+        return {p.id: p for p in self.guide.points if p.id not in excluded} if self.guide else {}
 
     @property
     def ok_urls(self) -> set[str]:
@@ -216,14 +242,14 @@ def check_outcome(c: Ctx) -> CheckResult:
         ok = rec.status == JobStatus.BLOCKED and rec.deck is not None
     else:
         ok = rec.deck is None and rec.status == JobStatus.FAILED and any(
-            s in (rec.error or "") for s in ("found no events", "failed link verification"))
+            s in (rec.error or "") for s in ("found no events", "failed link verification", "official source"))
     got = rec.status.value + (f" ({rec.error})" if rec.error else "")
     return CheckResult("outcome", "pass" if ok else "fail", f"expected {want}, got {got}")
 
 
 def check_schema(c: Ctx, errors: list[str]) -> CheckResult:
-    return _result("schema", errors, ok=f"{len(c.briefs)} briefs" + (f", {len(c.deck.slides)} slides"
-                                                                      if c.deck else ""))
+    what = f"guide with {len(c.guide.points)} points" if c.guide else f"{len(c.briefs)} briefs"
+    return _result("schema", errors, ok=what + (f", {len(c.deck.slides)} slides" if c.deck else ""))
 
 
 def check_slides(c: Ctx) -> CheckResult:
@@ -437,6 +463,87 @@ def check_safeguard_llm(c: Ctx) -> CheckResult:
     return _result("safeguard·llm", fails, warns, ok=ok, judge="llm")
 
 
+# ---------------------------------------------------------------- Guide Decks (#27)
+
+
+def check_kind(c: Ctx) -> CheckResult:
+    got = c.rec.kind or "event"
+    asked = c.case.request_kind
+    return _result("kind", [] if got == "guide" else [f"the Job made a {got} Deck"],
+                   ok="guide" + (" (as asked)" if asked else " (the researcher's pick)"))
+
+
+def check_guide_slides(c: Ctx) -> CheckResult:
+    s, fails = sorted(c.deck.slides, key=lambda x: x.index), []
+    if [x.index for x in s] != list(range(len(s))):
+        fails.append(f"slide indices are {[x.index for x in s]}, not 0..{len(s) - 1}")
+    if s[0].layout != "cover":
+        fails.append(f"first slide is {s[0].layout}, not cover")
+    if s[-1].layout != "cta":
+        fails.append(f"last slide is {s[-1].layout}, not cta")
+    pts = [x for x in s if x.layout == "point"]
+    if not 3 <= len(pts) <= 5:
+        fails.append(f"{len(pts)} point slides (want 3–5)")
+    fails += [f"slide {x.index}: point_id {x.point_id!r} is not a verified point" for x in pts
+              if x.point_id not in c.points]
+    fails += [f"slide {x.index}: {x.layout} slide in a Guide Deck" for x in s if x.layout in ("event", "map", "tips")]
+    return _result("slides", fails, ok=f"{len(s)} slides, {len(pts)} points")
+
+
+def check_official(c: Ctx) -> CheckResult:
+    """Every point on the Deck rests on an Official source: a checked link the host rule calls official (re-checked
+    here), or Source material the host verified at record time."""
+    if c.report is None:
+        return CheckResult("official", "fail", "no verification recorded")
+    if c.report.checked_at is None:
+        return CheckResult("official", "fail", "no facts-checked time recorded")
+    kinds = {str(x.url): x.kind for x in c.guide.sources}
+    fails, claimed = [], []
+    for sl in c.deck.slides:
+        p = c.points.get(sl.point_id or "") if sl.layout == "point" else None
+        if not p:
+            continue
+        backed = [f for f in p.facts if (f.origin == "material" and f.verified) or (
+            f.origin == "link" and f.url in c.ok_urls and f.url in kinds
+            and official.standing(f.url, kinds[f.url]) != "no")]
+        if not backed:
+            fails.append(f"slide {sl.index}: {p.title!r} has no official source")
+        elif all(f.origin == "link" and official.standing(f.url or "", kinds.get(f.url or "")) == "claimed"
+                 for f in backed):
+            claimed.append(f"slide {sl.index}: {p.title!r} rests only on a site the researcher called official")
+    return _result("official", fails, claimed, ok=f"{len(c.points)} points, each on an official source")
+
+
+def check_guide_facts(c: Ctx) -> CheckResult:
+    fails, warns = [], []
+    verified = c.guide.model_copy(update={"points": list(c.points.values())})
+    for sl in c.deck.slides:
+        corpus = verified
+        if sl.layout == "point" and (p := c.points.get(sl.point_id or "")):
+            corpus = verified.model_copy(update={"points": [p]})  # a point slide answers to its own point
+        f, w = unsupported_facts(f"{sl.heading}\n{sl.body}", [], corpus)
+        fails += [f"slide {sl.index}: {x}" for x in f]
+        warns += [f"slide {sl.index}: {x}" for x in w]
+    f, w = unsupported_facts(f"{c.deck.title}\n{c.deck.caption}", [], verified)
+    fails += [f"caption: {x}" for x in f]
+    warns += [f"caption: {x}" for x in w]
+    return _result("facts", fails, warns, ok="every price, date, time and 'free' traces to a verified point")
+
+
+def check_guide_expectations(c: Ctx) -> CheckResult:
+    e, fails = c.case.expect, []
+    if len(c.points) < e.min_points:
+        fails.append(f"{len(c.points)} verified points (want at least {e.min_points})")
+    if e.official_hosts_any:
+        hosts = {urlparse(f.url).hostname or "" for p in c.points.values() for f in p.facts if f.url}
+        if not any(h == d or h.endswith("." + d) for h in hosts for d in e.official_hosts_any):
+            fails.append(f"no point rests on {' / '.join(e.official_hosts_any)} (got {sorted(hosts)})")
+    return _result("expectations", fails, ok=f"{len(c.points)} points match the case")
+
+
+GUIDE_CHECKS = [check_guide_slides, check_hashtags, check_official, check_guide_facts, check_facts_llm,
+                check_safeguard, check_safeguard_llm, check_guide_expectations]
+
 DECK_CHECKS = [check_slides, check_hashtags, check_links, check_facts, check_photos, check_facts_llm,
                check_photos_llm, check_safeguard, check_safeguard_llm]
 SAFEGUARD_CHECKS = [check_safeguard, check_safeguard_llm]
@@ -459,11 +566,24 @@ def run_checks(case: Case, rec: Recording) -> list[CheckResult]:
             errors.append(f"deck: {e.error_count()} schema error(s): {str(e).splitlines()[1]}")
     if rec.verification is not None:
         report = VerificationReport.model_validate(rec.verification)
-    c = Ctx(case, rec, briefs, deck, report)
+    guide = None
+    if rec.guide is not None:
+        try:
+            guide = GuideBrief.model_validate(rec.guide)
+        except ValidationError as e:
+            errors.append(f"guide: {e.error_count()} schema error(s): {str(e).splitlines()[1]}")
+    c = Ctx(case, rec, briefs, deck, report, guide)
 
     results = [check_outcome(c)]
-    if case.kind == "guide":  # Guide Decks (#27): add their checks here once the pipeline produces them
-        return [*results, CheckResult("guide", "skip", "Guide checks arrive with #27")]
+    if case.kind == "guide":
+        results += [check_kind(c), check_schema(c, errors)]
+        checks = GUIDE_CHECKS
+        if deck is None or guide is None:
+            skipped = "no Deck" if rec.deck is None else "no guide" if guide is None else "Deck failed its schema"
+            return results + [CheckResult(f.__name__.removeprefix("check_").replace("_llm", "·llm")
+                                          .replace("guide_", ""), "skip", skipped,
+                                          "llm" if f.__name__.endswith("_llm") else "rule") for f in checks]
+        return results + [f(c) for f in checks]
     results.append(check_schema(c, errors))
     checks = SAFEGUARD_CHECKS if case.kind == "safeguard" else [*DECK_CHECKS, check_expectations]
     if deck is None:

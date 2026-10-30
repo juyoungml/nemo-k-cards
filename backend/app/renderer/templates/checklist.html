@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{# Guide Deck (#27): "what to bring / before you go" — 3 to 6 short ticked lines, each restating a verified point. #}
+{% block content %}
+  <span class="label">Checklist</span>
+  <div class="title" data-qa="checklist.heading">{{ slide.heading }}</div>
+  <ul class="checks" data-qa="checklist.body">
+    {% for line in slide.body.split("\n") if line.strip() %}
+    <li><span class="box" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span>{{ line.strip().lstrip("•-·✓☐0123456789. ") }}</span></li>
+    {% endfor %}
+  </ul>
+{% endblock %}

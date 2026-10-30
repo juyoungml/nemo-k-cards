@@ -127,12 +127,15 @@ def health() -> dict:
 
 @app.post("/jobs", response_model=Job, status_code=201)
 async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
-    job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
+    job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip(), kind=req.kind)
     job.material = await asyncio.to_thread(materials.refs, ctx.org_id, req.material_ids)  # 422 if not the caller's
     job.org_profile = await asyncio.to_thread(org_profile.get, ctx.org_id)  # every stage reads this snapshot (#16)
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
-        ctx, "job.created", job.id, **({"material": [m.id for m in job.material]} if job.material else {}))))
-    await orchestrator.start_job(ctx.org_id, job, scenario=req.scenario or "good", started_by=_member(ctx))
+        ctx, "job.created", job.id, kind=req.kind or "auto",
+        **({"material": [m.id for m in job.material]} if job.material else {}))))
+    # Fixture mode: a Guide Deck request replays the guide scenario unless a scenario was named.
+    scenario = req.scenario or ("guide" if req.kind == "guide" else "good")
+    await orchestrator.start_job(ctx.org_id, job, scenario=scenario, started_by=_member(ctx))
     return _out(ctx.org_id, job)
 
 

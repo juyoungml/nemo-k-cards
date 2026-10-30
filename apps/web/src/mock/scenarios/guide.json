@@ -1,0 +1,258 @@
+{
+  "description": "Guide Deck — a T-money how-to; 5 of 6 points rest on official pages, the blog-only one is left off.",
+  "prompt": "How do I use a T-money card on the subway and buses?",
+  "kind": "guide",
+  "briefs": [],
+  "guide": {
+    "topic_en": "Getting around with a T-money card",
+    "topic_ko": "티머니 카드 사용법",
+    "summary": "Buy, top up and use one transit card for subways, buses and taxis across Korea.",
+    "sources": [
+      {
+        "url": "https://www.t-money.co.kr/",
+        "kind": "official"
+      },
+      {
+        "url": "https://www.seoulmetro.co.kr/en/",
+        "kind": "official"
+      },
+      {
+        "url": "https://english.visitkorea.or.kr/",
+        "kind": "public_api"
+      },
+      {
+        "url": "https://blog.naver.com/example-traveler/223000000001",
+        "kind": "other"
+      }
+    ],
+    "materials": [],
+    "points": [
+      {
+        "id": "buy",
+        "title": "Buy one at a convenience store",
+        "detail": "GS25, CU and 7-Eleven sell T-money cards at the counter, and so do vending machines in subway stations.",
+        "facts": [
+          {
+            "field": "other",
+            "value": "sold at convenience stores and station machines",
+            "origin": "link",
+            "url": "https://www.t-money.co.kr/",
+            "verified": true
+          }
+        ]
+      },
+      {
+        "id": "topup",
+        "title": "Top up with cash",
+        "detail": "Ask at the convenience store counter, or use the recharge machine in any subway station. Most machines take cash only.",
+        "facts": [
+          {
+            "field": "other",
+            "value": "top up at stores and station recharge machines",
+            "origin": "link",
+            "url": "https://www.t-money.co.kr/",
+            "verified": true
+          }
+        ]
+      },
+      {
+        "id": "tap",
+        "title": "Tap in and tap out",
+        "detail": "Tap the reader when you get on and when you get off, on buses too. Tapping out is what gets you the transfer discount.",
+        "facts": [
+          {
+            "field": "other",
+            "value": "tap on entry and exit; transfer discount needs tap-out",
+            "origin": "link",
+            "url": "https://www.seoulmetro.co.kr/en/",
+            "verified": true
+          }
+        ]
+      },
+      {
+        "id": "transfer",
+        "title": "Transfers within 30 minutes",
+        "detail": "Switch between subway and bus within 30 minutes of tapping out and you pay only the extra distance.",
+        "facts": [
+          {
+            "field": "other",
+            "value": "transfer window 30 minutes",
+            "origin": "link",
+            "url": "https://english.visitkorea.or.kr/",
+            "verified": true
+          }
+        ]
+      },
+      {
+        "id": "refund",
+        "title": "Get leftover money back",
+        "detail": "Before you fly home, convenience stores can refund the balance left on the card, minus a small fee.",
+        "facts": [
+          {
+            "field": "other",
+            "value": "balance refunded at convenience stores for a fee",
+            "origin": "link",
+            "url": "https://www.t-money.co.kr/",
+            "verified": true
+          }
+        ]
+      },
+      {
+        "id": "souvenir",
+        "title": "Character cards make good souvenirs",
+        "detail": "Limited-edition designs sell out fast.",
+        "facts": [
+          {
+            "field": "other",
+            "value": "limited character cards",
+            "origin": "link",
+            "url": "https://blog.naver.com/example-traveler/223000000001",
+            "verified": false,
+            "note": "not an official source (news, blogs and resellers can't carry a Guide fact alone)"
+          }
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "checks": [
+      {
+        "url": "https://www.t-money.co.kr/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://www.seoulmetro.co.kr/en/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://english.visitkorea.or.kr/",
+        "status": "ok",
+        "http_code": 200
+      },
+      {
+        "url": "https://blog.naver.com/example-traveler/223000000001",
+        "status": "ok",
+        "http_code": 200
+      }
+    ],
+    "excluded_event_ids": [],
+    "excluded_point_ids": [
+      "souvenir"
+    ]
+  },
+  "deck": {
+    "title": "Getting around with a T-money card",
+    "caption": "One card for the subway, buses and taxis.\nBuy it, top it up, tap in and out, and get your change back before you fly.\nSave this for your first day in Seoul.\nDetails & official links in bio.\n#Seoul #KoreaTravel #TMoney #SeoulSubway #TravelTips",
+    "hashtags": [
+      "#Seoul",
+      "#KoreaTravel",
+      "#TMoney",
+      "#SeoulSubway",
+      "#TravelTips"
+    ],
+    "slides": [
+      {
+        "index": 0,
+        "layout": "cover",
+        "heading": "One card for every ride",
+        "body": "How to buy, top up and use T-money (티머니) on subways, buses and taxis."
+      },
+      {
+        "index": 1,
+        "layout": "point",
+        "point_id": "buy",
+        "heading": "Buy one at a convenience store",
+        "body": "GS25, CU and 7-Eleven sell T-money cards at the counter. Subway station vending machines do too."
+      },
+      {
+        "index": 2,
+        "layout": "point",
+        "point_id": "topup",
+        "heading": "Top up with cash",
+        "body": "Ask at the counter, or use the recharge machine in any subway station. Most machines take cash only."
+      },
+      {
+        "index": 3,
+        "layout": "point",
+        "point_id": "tap",
+        "heading": "Tap in and tap out",
+        "body": "Tap the reader when you get on and when you get off, on buses too. Tapping out gets you the transfer discount."
+      },
+      {
+        "index": 4,
+        "layout": "point",
+        "point_id": "transfer",
+        "heading": "Transfers within 30 minutes",
+        "body": "Switch between subway and bus within 30 minutes and you only pay for the extra distance."
+      },
+      {
+        "index": 5,
+        "layout": "checklist",
+        "heading": "Before your first ride",
+        "body": "Card from a convenience store\nCash for topping up\nTap out every time\nRefund the balance before you fly"
+      },
+      {
+        "index": 6,
+        "layout": "cta",
+        "heading": "Save this for your first day",
+        "body": "Send it to the friend who always loses their subway ticket."
+      }
+    ]
+  },
+  "issues": [],
+  "safeguard": {
+    "decision": "allow",
+    "summary": "Safe to post: practical transit advice with official sources and nothing harmful in the text, hashtags or images.",
+    "findings": [],
+    "checked_by": [
+      "rules",
+      "model"
+    ],
+    "model_decision": "allow",
+    "policy_version": "mock",
+    "content_hash": "mock"
+  },
+  "notes": {
+    "research": "guide · 6 points · 4 sources",
+    "verify": "5/6 points officially sourced · 4/4 links ok",
+    "copy": "7 slides",
+    "render": "7 PNG · 1080×1350",
+    "qa": "0 block · 0 warn",
+    "review": "pass · 0 warn",
+    "safeguard": "allow · 0 warn"
+  },
+  "log": [
+    {
+      "stage": "research",
+      "message": "sandbox created (policy: agent-policy.yaml)"
+    },
+    {
+      "stage": "research",
+      "message": "Guide Deck: 6 point(s) · 4 source(s)"
+    },
+    {
+      "stage": "verify",
+      "message": "souvenir: left off, no official source (not an official source (news, blogs and resellers can't carry a Guide fact alone))",
+      "level": "warn"
+    },
+    {
+      "stage": "copy",
+      "message": "CardDeck 7 slides · caption 5 hashtags"
+    },
+    {
+      "stage": "render",
+      "message": "slide-00.png … slide-06.png"
+    },
+    {
+      "stage": "qa",
+      "message": "overflow/font/PII/secret/hashtag checks → 0 block · 0 warn"
+    },
+    {
+      "stage": "review",
+      "message": "verdict pass · 0 issue(s)"
+    }
+  ],
+  "policy_events": []
+}

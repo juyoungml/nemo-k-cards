@@ -355,6 +355,8 @@ class FakeRunner:
     async def run(self, agent, task, payload, schema, files, job_id, org_id):
         self.calls.append({"agent": agent, "task": task, "payload": payload, "files": files, "org": org_id})
         out = self.outputs[agent]
+        if agent == "researcher" and isinstance(out, list):  # events: the researcher's Research shape (#27)
+            return {"kind": "event", "events": out}
         return {"items": out} if isinstance(out, list) else out
 
 
