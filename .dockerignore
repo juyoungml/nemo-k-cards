@@ -1,0 +1,27 @@
+# Build context for backend/Dockerfile (built from the repo root). The repo is public and images go to a
+# registry, so this is an allow list: only what the API needs at run time is sent to the builder.
+*
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/app/
+!agent/
+!policies/
+!demo/scenarios/
+
+# Never in an image, even inside allowed folders: env files, runtime data, local caches and tool state.
+**/.env
+**/.env.*
+**/.envrc
+**/.data
+**/data
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.DS_Store
+/.claude
+**/.claude/settings.local.json
+**/.claude/worktrees

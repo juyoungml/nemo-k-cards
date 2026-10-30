@@ -1,0 +1,81 @@
+# What's On Korea stack: API + Admin behind one HTTPS front (Caddy). Server-agnostic: every server-specific
+# value lives in ONE env file outside the repo (template: deploy/env.example). See deploy/README.md.
+#
+#   export ENV_FILE=/srv/nemo/stack.env
+#   docker compose -f deploy/compose.yml --env-file "$ENV_FILE" up -d
+#
+# --env-file feeds the ${...} below (image tags, site address, Admin build args); ENV_FILE is the file the API
+# container reads at run time. Pass the same file to both.
+
+name: ${COMPOSE_PROJECT_NAME:-nemo-k-cards}
+
+services:
+  api:
+    image: ${API_IMAGE:-nemo-k-cards-api}:${IMAGE_TAG:-local}
+    # Servers pull the CI image (#59/#61); `up --build` builds it locally.
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: ${ENV_FILE:?set ENV_FILE to the stack env file (template deploy/env.example)}
+        required: true
+    environment:
+      # Fixed by the image layout, not per server.
+      OUTPUT_DIR: /data/out
+      # `claude -p` inside this container. Running OpenShell sandboxes from a container is #58.
+      AGENT_RUNNER: local
+    volumes:
+      - api_data:/data
+    # Loopback only, for checks on the host itself; the public way in is Caddy.
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-18000}:8000"
+    # Jobs and Posts are durable (DBOS): a stop or restart resumes them at the next start.
+    stop_grace_period: 30s
+    restart: unless-stopped
+    init: true
+    shm_size: 512m  # Chromium (renderer, visual QA)
+
+  admin:
+    image: ${ADMIN_IMAGE:-nemo-k-cards-admin}:${IMAGE_TAG:-local}
+    build:
+      context: ../apps/web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/backend}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
+    # No env file: the Admin holds no secrets. Its public settings are built in (see apps/web/Dockerfile).
+    ports:
+      - "127.0.0.1:${ADMIN_HOST_PORT:-13000}:3000"
+    restart: unless-stopped
+    init: true
+
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on: [api, admin]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  # Instead of a domain and open ports: a Cloudflare named tunnel whose public hostname points at
+  # http://caddy:80 (keep SITE_ADDRESS=:80). Start with `--profile tunnel`.
+  cloudflared:
+    profiles: [tunnel]
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on: [caddy]
+    restart: unless-stopped
+
+volumes:
+  api_data:      # rendered slides and local source material (OUTPUT_DIR, MATERIAL_DIR)
+  caddy_data:    # TLS certificates
+  caddy_config:
