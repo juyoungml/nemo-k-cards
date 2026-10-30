@@ -58,6 +58,10 @@ compose)
 		exit $rc
 		;;
 	down) rm -f "$D"/containers/* ;;
+	run)
+		# `compose run --rm --no-deps -T api python -m app.migration_check`: fails while $D/migrations-missing exists
+		[ ! -f "$D/migrations-missing" ] || { echo "migration check: the database lacks 1 of 14 migrations" >&2; exit 1; }
+		;;
 	logs) [ ! -f "$D/quicktunnel.log" ] || cat "$D/quicktunnel.log" ;;
 	config) ;;
 	*) echo "fake docker: compose $sub?" >&2; exit 2 ;;
@@ -282,6 +286,27 @@ check "url says ADMIN_URL is stale" "$(wok url | grep -c 'Set ADMIN_URL=https://
 echo "ADMIN_URL=https://midi-don-dates-university.trycloudflare.com" >>"$T/home/.env"
 check "url quiet when ADMIN_URL matches" "$(wok url | grep -c 'Set ADMIN_URL' || true)" 0
 check "status shows the address" "$(wok status | grep -c 'Address:  https://midi-don-dates-university')" 1
+
+# --- migration check: the new API never starts against a database that lacks its migrations ------------------
+c5=$(commit five)
+touch "$T/d/migrations-missing"
+: >"$T/d/calls.log"
+rc=0
+out=$(wok update-now) || rc=$?
+check "missing migrations: deploy refused, exit 1" "$rc" 1
+check "missing migrations: api not restarted" "$(running api)" "sha256:api-$c1"
+check "missing migrations: no compose up" "$(grep -c 'compose.* up ' "$T/d/calls.log" || true)" 0
+check "missing migrations: old image back under the tag" "$(cat "$T/d/local/$(key "$BA:staging")")" "sha256:api-$c1"
+check "missing migrations: says what to run" "$(printf '%s' "$out" | grep -c 'supabase db push')" 1
+check "missing migrations: recorded" "$(grep -c 'migrations-missing' "$T/home/state/history.log")" 1
+check "missing migrations: not marked bad" "$(grep -cx "sha256:api-$c5" "$T/home/state/bad-images" 2>/dev/null || true)" 0
+wok update-now --skip-migration-check >/dev/null
+check "--skip-migration-check deploys anyway" "$(running api)" "sha256:api-$c5"
+rm -f "$T/d/migrations-missing"
+c6=$(commit six)
+wok update-now >/dev/null
+check "migrations applied: deploys" "$(running api)" "sha256:api-$c6"
+check "check ran from the api service (refused run + this one; skipped once)" "$(grep -c 'compose.* run --rm --no-deps -T api python -m app.migration_check' "$T/d/calls.log")" 2
 
 echo
 if [ "$fails" -ne 0 ]; then

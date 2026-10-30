@@ -47,6 +47,8 @@ COPY backend/app /app/backend/app
 COPY agent /app/agent
 COPY policies /app/policies
 COPY demo/scenarios /app/demo/scenarios
+# Plain SQL, read by `python -m app.migration_check` (wok runs it before a deploy restarts anything).
+COPY supabase/migrations /app/supabase/migrations
 
 USER app
 WORKDIR /app/backend

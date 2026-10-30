@@ -7,6 +7,7 @@
 !agent/
 !policies/
 !demo/scenarios/
+!supabase/migrations/
 
 # Never in an image, even inside allowed folders: env files, runtime data, local caches and tool state.
 **/.env

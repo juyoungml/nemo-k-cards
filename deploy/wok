@@ -3,8 +3,9 @@
 # Installed as /usr/local/bin/wok. Every command runs as the service user (default "wok"); call it with sudo.
 #
 # The updater (wok-update.timer -> `wok update`) follows the image tag the deploy button moves (#60, `staging`):
-# pull it, restart only what changed, wait for the containers' health checks, and roll back to the previous image
-# if they don't pass. Nothing reaches into the server: it pulls.
+# pull it, check that the database has every migration the new API ships with, restart only what changed, wait
+# for the containers' health checks, and roll back to the previous image if they don't pass. Nothing reaches into
+# the server: it pulls.
 #
 # Build mode (WOK_SOURCE=build in the env file): for when the registry pipeline isn't set up. The host clones the
 # repo and builds both images itself, only when someone runs `wok update-now [<git ref>]`; the timer does nothing.
@@ -19,8 +20,8 @@ Usage: sudo wok <command>
   pause [reason...]   Freeze updates (e.g. for a demo). The stack keeps running; the timer keeps checking but
                       changes nothing until `resume`
   resume              Follow the tag again (the next check is within ~2 minutes; or run update-now)
-  update-now [--force] [ref]  Check the tag now (same as the timer). --force runs it even while paused.
-                      Build mode: build WOK_GIT_REF (or <ref>) from the repo and deploy it
+  update-now [--force] [--skip-migration-check] [ref]  Check the tag now (same as the timer). --force runs it
+                      even while paused. Build mode: build WOK_GIT_REF (or <ref>) from the repo and deploy it
   logs [service|updater] [compose logs args...]   Container logs (default: all, last 200 lines, follow);
                       `logs updater` shows the updater's journal
   up                  Pull the current tag and start the whole stack (waits until healthy)
@@ -203,11 +204,12 @@ paused_line() { [ -f "$STATE/paused" ] && tr '\n' ' ' <"$STATE/paused"; }
 
 # --- commands ---------------------------------------------------------------------------------------------------
 cmd_update() {
-	local trigger=$1 force="" git_ref=""
+	local trigger=$1 force="" git_ref="" check_migrations=1
 	shift
 	while [ $# -gt 0 ]; do
 		case $1 in
 		--force) force=--force ;;
+		--skip-migration-check) check_migrations=0 ;;
 		-*) die "unknown option $1" ;;
 		*) git_ref=$1 ;;
 		esac
@@ -255,6 +257,21 @@ cmd_update() {
 		log "up to date ($IMAGE_TAG: api $(revision "$old_api"), admin $(revision "$old_admin"))"
 		return 0
 	fi
+
+	# The new API must not start against a database that lacks its migrations (columns it reads would be missing).
+	# It runs from the new image, so it knows exactly the migrations that image ships with. Put the old image back
+	# under the tag so nothing starts it by accident; the next check tries again once the migrations are applied.
+	case " $changed " in *" api "*)
+		if [ "$check_migrations" = 1 ] && ! compose run --rm --no-deps -T api python -m app.migration_check; then
+			log "not deploying: the database is missing migrations the new API needs (see above)." \
+				"Run \`supabase db push\` for this project, then \`wok update-now\`. The stack is untouched."
+			[ -z "$old_api" ] || docker tag "$old_api" "$(ref_of api)"
+			[ -z "$old_admin" ] || docker tag "$old_admin" "$(ref_of admin)"
+			history_add "migrations-missing api $(revision "$new_api")"
+			return 1
+		fi
+		;;
+	esac
 
 	local summary=""
 	for svc in $changed; do
