@@ -148,3 +148,19 @@
   background: #00A84D; color: #fff; font-size: 30px; font-weight: 700; }
 .src { margin-top: auto; display: flex; flex-direction: column; gap: 10px; font-size: 30px; line-height: 1.45; color: var(--sub);
   border-top: 3px solid var(--rule); padding-top: 28px; }
+
+/* ---------- Guide · point (#27): type-led on Paper, one Seoul Red numeral ---------- */
+.layout-point .pad { gap: 28px; }
+.layout-point .num { font: 800 300px/0.8 var(--display); letter-spacing: -0.06em; color: var(--red); margin: 12px 0 8px; }
+.layout-point .title { font-size: 84px; }
+.layout-point .lead { font-size: 40px; color: var(--fg); }
+.layout-point .src { margin-top: auto; }
+.src.official { color: #00A84D; font-weight: 700; }
+
+/* ---------- Guide · checklist ---------- */
+.checks { padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; }
+.checks li { list-style: none; display: grid; grid-template-columns: 64px 1fr; gap: 28px; align-items: center;
+  padding: 26px 0; border-top: 3px solid var(--rule); font-size: 40px; line-height: 1.3; font-weight: 700; color: var(--fg); }
+.checks li:last-child { border-bottom: 3px solid var(--rule); }
+.checks .box { width: 64px; height: 64px; border: 5px solid var(--red); border-radius: 12px; display: grid; place-items: center; }
+.checks .box svg { width: 42px; height: 42px; fill: none; stroke: var(--red); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }

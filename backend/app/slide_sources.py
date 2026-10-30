@@ -22,6 +22,7 @@ Computed on the way out of the API, never stored: it always matches the Deck's c
 check, and Jobs stored before #20 or #25 get it too.
 """
 
+from app import guides
 from app.golden.checks import unsupported_facts
 from app.renderer.html import access_badges, daterange
 from app.schemas import (
@@ -112,16 +113,28 @@ def for_job(job: Job) -> list[SlideSources]:
     if not job.deck:
         return []
     look = _Lookup(job)
+    guide = guides.verified(job)  # a Guide Deck's verified points (#27)
+    all_points = {p.id: p for p in job.guide.points} if job.guide else {}
+    kept_points = {p.id for p in guide.points} if guide else set()
     excluded = set(job.verification.excluded_event_ids) if job.verification else set()
     briefs = {b.id: b for b in job.briefs}
     included = [b for b in job.briefs if b.id not in excluded]
     out = []
     for slide in sorted(job.deck.slides, key=lambda s: s.index):
         b = briefs.get(slide.event_id or "")
+        point = all_points.get(slide.point_id or "")
         s = SlideSources(slide_index=slide.index, layout=slide.layout, event_id=slide.event_id,
-                         event_title=b.title_en if b else None,
+                         event_title=b.title_en if b else (point.title if point else None),
                          links=[look.link(u) for u in dict.fromkeys(slide.source_urls)],
-                         general=slide.layout == "tips")
+                         general=slide.layout in ("tips", "checklist"))
+        if slide.layout == "point":
+            if not point:
+                s.note = "This slide names a guide point that is not in the research."
+            elif point.id not in kept_points:
+                s.note = "This slide's point was left off at Verify: it has no official source."
+            else:
+                s.facts = [SlideFact(field="other", value=point.title, recorded=True,
+                                     sources=[look.recorded(f) for f in point.facts])]
         if slide.event_id and not b:
             s.note = "This slide names an event that is not in the research."
         elif b and b.id in excluded:
@@ -135,7 +148,7 @@ def for_job(job: Job) -> list[SlideSources]:
                        else f for f in s.facts]
         # The same corpus the golden set uses: an event slide answers to its own event, others to every event kept.
         corpus = [b] if b and slide.layout == "event" else included
-        fails, _ = unsupported_facts(f"{slide.heading}\n{slide.body}", corpus)
+        fails, _ = unsupported_facts(f"{slide.heading}\n{slide.body}", corpus, guide)
         s.unsourced = fails
         out.append(s)
     return out

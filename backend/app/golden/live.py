@@ -62,8 +62,6 @@ async def run_case(case: Case, set_version: int) -> Recording:
 
     if case.kind == "safeguard":
         raise ValueError(f"{case.id}: Safeguard cases replay a fixed Deck; there is no request to run live")
-    if case.kind != "event":
-        raise ValueError(f"{case.id}: the pipeline only makes Event Decks so far (#27)")
     if problem := isolation_problem(settings):
         raise RuntimeError(f"refusing a live golden run: {problem}")
 
@@ -83,7 +81,8 @@ async def run_case(case: Case, set_version: int) -> Recording:
     try:
         # Each case runs as its own Organization in the scratch database, like any other Job.
         org = orgs.create_org(uuid.uuid4(), f"Golden {case.id}"[:100]).org_id
-        job = store.save_job(org, orchestrator.new_job(f"golden-{secrets.token_hex(3)}", case.prompt))
+        kind = case.request_kind if case.kind == "guide" else (case.request_kind or "event")
+        job = store.save_job(org, orchestrator.new_job(f"golden-{secrets.token_hex(3)}", case.prompt, kind=kind))
         today = datetime.now(orchestrator.KST).date()
         await orchestrator.run_job(org, job.id)
     finally:

@@ -242,7 +242,7 @@ async def render_changed(job: Job, deck: CardDeck) -> tuple[list[str], list[Rend
     token = secrets.token_hex(4)  # this save's files never overwrite another save's
     files, pages = [], []
     for s in sorted(deck.slides, key=lambda s: s.index):
-        html = renderer.html(deck, s, briefs)
+        html = renderer.html(deck, s, briefs, orchestrator._guide(job), orchestrator._checked(job))
         if html in before:
             files.append(before[html])
         else:
@@ -356,7 +356,8 @@ async def fit(job_id: str, req: FitCheck, ctx: auth.Editor) -> FitResult:
     deck, _, _ = apply_edit(job.deck, DeckEdit(base_version=req.base_version, slides=req.slides))
     slide = deck.slides[req.position]
     renderer = HtmlRenderer(theme=settings.theme)
-    html = renderer.html(deck, slide, {b.id: b for b in orchestrator._included(job)})
+    html = renderer.html(deck, slide, {b.id: b for b in orchestrator._included(job)}, orchestrator._guide(job),
+                         orchestrator._checked(job))
     with tempfile.TemporaryDirectory(prefix="wok-fit-") as tmp:
         [measured] = await renderer.render_pages([(slide.index, "fit", html)], Path(tmp), screenshot=False)
     blocks = [FitBlock(selector=m.selector, lines=m.lines, font_px=m.font_px, overflow=m.overflow)

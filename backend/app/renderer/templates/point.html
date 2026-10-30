@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{# Guide Deck (#27): one step / rule / fact. Type-led on Paper: Seoul Red numeral, heading, the detail, and the
+   official page it rests on (every Guide fact traces to an Official source). #}
+{% block content %}
+  <span class="label" data-qa="point.label">{{ (guide.topic_en if guide else deck.title) | truncate(40, True, "…") }}</span>
+  <div class="num" aria-hidden="true">{{ "%02d" | format(point_no) }}</div>
+  <div class="title" data-qa="point.heading">{{ slide.heading }}</div>
+  {% if slide.body %}<div class="lead" data-qa="point.body">{{ slide.body }}</div>{% endif %}
+  <div class="src official" data-qa="point.source">
+    <span>✓ {% if point_hosts %}Official source: {{ point_hosts | join(" · ") }}{% elif from_material %}From the organizer's own notice{% else %}Official source on the last slide{% endif %}</span>
+  </div>
+{% endblock %}

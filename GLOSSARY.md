@@ -117,7 +117,7 @@ Practical, undated information a foreigner in Korea needs (how to use T-money, t
 _Avoid_: topic, article, explainer, notice
 
 **Official source**:
-A government or agency site, an operator's own site, or the Organization's Source material. Every fact in a Guide Deck must trace to one; blogs and news can lead to a fact but cannot be its only source.
+A government or agency site, an operator's own site, or the Organization's Source material. Every fact in a Guide Deck must trace to one; blogs and news can lead to a fact but cannot be its only source. A site the researcher calls official but the host doesn't know counts only after a person confirms it (ADR 0005).
 _Avoid_: trusted source, primary source
 
 **Deck language**:

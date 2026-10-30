@@ -7,7 +7,7 @@ import { EventSource } from "eventsource";
 import { orgHeader, setActiveOrgId } from "./org";
 import { accessToken, isAuthPath, reloadTo } from "./supabase";
 import type {
-  AuditEvent, Brainstorm, DeckEdit, DeckVersion, FitResult, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job,
+  AuditEvent, Brainstorm, DeckEdit, DeckKind, DeckVersion, FitResult, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job,
   Material, MaterialRef, Me, Member, Metric, Org, OrgProfile, OrgProfileState, PolicyEvent, Post, PublishMode, Role, Scenario,
 } from "./types";
 
@@ -80,8 +80,9 @@ export const api = {
   listJobs: () => req<Job[]>("/jobs"),
   getJob: (id: string) => req<Job>(`/jobs/${id}`),
   // `scenario` is honored by the mock backend only (QA); FastAPI ignores it.
-  createJob: (prompt: string, scenario?: Scenario, materialIds: string[] = []) =>
-    req<Job>("/jobs", { method: "POST", json: { prompt, scenario, material_ids: materialIds } }),
+  /** `kind` (#27): an Event or Guide Deck; omitted, the researcher picks from the request. */
+  createJob: (prompt: string, scenario?: Scenario, materialIds: string[] = [], kind?: DeckKind) =>
+    req<Job>("/jobs", { method: "POST", json: { prompt, scenario, material_ids: materialIds, kind } }),
   /** Approve → a Post to the chosen Instagram account (#21) of exactly the Deck version the Approver saw (#19); the
    * API refuses it if the Deck has been edited since. Its outcome is on the Post, not this response. */
   /** `scheduledAt` (#26, an ISO time with its offset) makes a Timed Post: the Job becomes SCHEDULED until then. */

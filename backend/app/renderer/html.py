@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from app.renderer.base import RenderedSlide, TextMeasure
-from app.schemas import CardDeck, EventBrief, Slide
+from app.schemas import CardDeck, EventBrief, GuideBrief, Slide
 
 HERE = Path(__file__).parent
 FONT_DIR = HERE / "fonts"
@@ -41,7 +41,7 @@ HANGUL = {"seongsu": "성수", "hongdae": "홍대", "itaewon": "이태원", "mye
 FIT_JS = """
 () => {
   const pad = document.querySelector('.pad');
-  const blocks = [...pad.querySelectorAll('.title, .lead, .facts, ul.tips, .why, .src, .taxi, .route, .ko, .row, .num')];
+  const blocks = [...pad.querySelectorAll('.title, .lead, .facts, ul.tips, ul.checks, .why, .src, .taxi, .route, .ko, .row, .num')];
   const floor = el => el.classList.contains('title') ? 56 : el.classList.contains('num') ? 120 : 30;
   const overflowing = () => pad.scrollHeight > pad.clientHeight + 1;
   let steps = 0;
@@ -123,6 +123,11 @@ def access_badges(event: EventBrief | None) -> list[dict]:
     return out
 
 
+def _bare(url: str) -> str:
+    """Host as a reader would type it: "t-money.co.kr", not "www.t-money.co.kr"."""
+    return (urlparse(url).hostname or "").removeprefix("www.")
+
+
 def slide_image(slide: Slide) -> dict | None:
     """Supports the frozen `Slide.image: ImageAsset` and the legacy `image_url` field."""
     img = getattr(slide, "image", None)
@@ -151,13 +156,27 @@ class HtmlRenderer:
                                autoescape=select_autoescape(["html"]), undefined=StrictUndefined)
         self.env.filters["daterange"] = daterange
 
-    def context(self, deck: CardDeck, slide: Slide, briefs: dict[str, EventBrief]) -> dict:
+    def context(self, deck: CardDeck, slide: Slide, briefs: dict[str, EventBrief],
+                guide: GuideBrief | None = None, checked: datetime | None = None) -> dict:
+        """`guide`: a Guide Deck's verified points (#27); `checked`: when the host checked the facts (Verify)."""
         event = briefs.get(slide.event_id) if slide.event_id else None
         event_slides = [s for s in deck.slides if s.layout == "event"]
         event_ids = [s.event_id for s in event_slides]
         # Sources = only events that made it into the deck (excluded/lookalike links never appear on a card).
         in_deck = [briefs[i] for i in dict.fromkeys(s.event_id for s in deck.slides if s.event_id) if i in briefs]
         hosts = sorted({urlparse(str(src.url)).hostname or "" for b in in_deck for src in b.sources} - {""})
+        point, point_no = None, 1
+        if guide:
+            # A Guide's sources: the official pages its kept points rest on (never a page that only led to a fact).
+            used = {f.url for p in guide.points for f in p.facts if f.verified and f.url}
+            hosts = sorted({_bare(u) for u in used} - {""})
+            pts = {p.id: p for p in guide.points}
+            point = pts.get(slide.point_id or "")
+            ids = [s.point_id for s in deck.slides if s.layout == "point"]
+            point_no = ids.index(slide.point_id) + 1 if slide.point_id in ids else 1
+        from_material = bool(guide and any(f.verified and f.origin == "material" for p in guide.points for f in p.facts))
+        point_hosts = sorted({_bare(f.url) for f in point.facts if f.verified and f.url} - {""}) \
+            if point else []
         credits = sorted({c for s in deck.slides if (c := (slide_image(s) or {}).get("credit"))})
         img = slide_image(slide)
         sat = self.today + timedelta(days=(5 - self.today.weekday()) % 7) if self.today.weekday() < 5 else (
@@ -172,6 +191,8 @@ class HtmlRenderer:
             return next((ko for en, ko in HANGUL.items() if en in text.lower()), None)
         venues = {place(b.venue_en or "") for b in in_deck}
         hangul = place(deck.slides[0].heading) or (venues.pop() if len(venues) == 1 and None not in venues else "서울")
+        if guide:
+            hangul = place(deck.slides[0].heading) or "안내"  # "guide / notice"
         if slide.layout in ("cover", "cta"):
             slide_class = "dark" + (" has-photo" if photo else "")
         elif slide.layout == "event" and event:
@@ -192,15 +213,21 @@ class HtmlRenderer:
             "until": f"{event.end_date:%b} {event.end_date.day}" if ends_soon else None,
             "badges": access_badges(event),
             "source_hosts": hosts, "credits": credits,
+            # Guide Decks (#27)
+            "guide": guide, "point": point, "point_no": point_no, "point_hosts": point_hosts,
+            "from_material": from_material,
+            "checked": (checked.astimezone(ZoneInfo("Asia/Seoul")).date() if checked else self.today)
+            .strftime("%Y.%m.%d"),
         }
 
-    def html(self, deck: CardDeck, slide: Slide, briefs: dict[str, EventBrief]) -> str:
-        return self.env.get_template(f"{slide.layout}.html").render(**self.context(deck, slide, briefs))
+    def html(self, deck: CardDeck, slide: Slide, briefs: dict[str, EventBrief],
+             guide: GuideBrief | None = None, checked: datetime | None = None) -> str:
+        return self.env.get_template(f"{slide.layout}.html").render(**self.context(deck, slide, briefs, guide, checked))
 
-    async def render(self, deck: CardDeck, out_dir: Path,
-                     briefs: list[EventBrief] | None = None) -> list[RenderedSlide]:
+    async def render(self, deck: CardDeck, out_dir: Path, briefs: list[EventBrief] | None = None,
+                     guide: GuideBrief | None = None, checked: datetime | None = None) -> list[RenderedSlide]:
         by_id = {b.id: b for b in (briefs or [])}
-        pages = [(s.index, f"slide-{s.index:02d}", self.html(deck, s, by_id))
+        pages = [(s.index, f"slide-{s.index:02d}", self.html(deck, s, by_id, guide, checked))
                  for s in sorted(deck.slides, key=lambda s: s.index)]
         return await self.render_pages(pages, out_dir)
 

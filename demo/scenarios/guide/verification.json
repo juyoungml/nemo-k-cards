@@ -1,0 +1,8 @@
+{
+  "checks": [
+    {"url": "https://www.t-money.co.kr/", "status": "ok", "http_code": 200},
+    {"url": "https://www.seoulmetro.co.kr/en/", "status": "ok", "http_code": 200},
+    {"url": "https://english.visitkorea.or.kr/", "status": "ok", "http_code": 200},
+    {"url": "https://blog.naver.com/example-traveler/223000000001", "status": "ok", "http_code": 200}
+  ]
+}

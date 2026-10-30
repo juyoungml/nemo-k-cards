@@ -11,9 +11,16 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { API_URL, IS_MOCK, api } from "@/lib/api";
 import { SCENARIO_LABELS, presets } from "@/lib/constants";
-import type { Job, MaterialRef, PipelineStep, Scenario } from "@/lib/types";
+import type { DeckKind, Job, MaterialRef, PipelineStep, Scenario } from "@/lib/types";
 import { TERMINAL_STATUSES as TERMINAL, useApi, useLiveJob } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
+
+// Deck kind (#27): Auto lets the researcher pick from the request; the review page says which it chose.
+const KINDS: { value: DeckKind | "auto"; label: string; hint: string }[] = [
+  { value: "auto", label: "Auto", hint: "The researcher decides from your request" },
+  { value: "event", label: "Event Deck", hint: "What's on: festivals, pop-ups, exhibitions, shows" },
+  { value: "guide", label: "Guide Deck", hint: "How-to, rules or your announcement; every fact from an official source" },
+];
 
 function StepDot({ step, n }: { step: PipelineStep; n: number }) {
   return (
@@ -35,6 +42,7 @@ export function NewJobView() {
   // Starts empty (the placeholder shows an example); presets fill it on click.
   const [prompt, setPrompt] = useState("");
   const [scenario, setScenario] = useState<Scenario>("good");
+  const [kind, setKind] = useState<DeckKind | "auto">("auto");
   const [material, setMaterial] = useState<MaterialRef[]>([]);
   const [job, setJob] = useState<Job>();
   const [error, setError] = useState<string>();
@@ -60,7 +68,10 @@ export function NewJobView() {
       started.current = true;
       try {
         setError(undefined);
-        setJob(await api.createJob(text, IS_MOCK ? scenario : undefined, attached.map((m) => m.id)));
+        const k = kind === "auto" ? undefined : kind;
+        // Mock QA: a Guide Deck request replays the guide scenario, like the API in fixture mode.
+        const sc = IS_MOCK ? (k === "guide" && scenario === "good" ? "guide" : scenario) : undefined;
+        setJob(await api.createJob(text, sc, attached.map((m) => m.id), k));
       } catch (e) {
         setError((e as Error).message);
       }
@@ -90,6 +101,24 @@ export function NewJobView() {
           className="min-h-24 bg-muted text-[15px]"
           placeholder="예: 이번 주말 서울 팝업 5개 조사해서 카드뉴스 만들어줘"
         />
+        <div className="space-y-1.5">
+          <div role="radiogroup" aria-label="Deck kind" className="flex flex-wrap gap-2">
+            {KINDS.map((k) => (
+              <label
+                key={k.value}
+                className={cn(
+                  "inline-flex h-9 cursor-pointer items-center rounded-lg border px-3 text-[13px] font-medium",
+                  kind === k.value ? "border-2 border-primary bg-brand-soft" : "hover:bg-muted",
+                  busy && "pointer-events-none opacity-60",
+                )}
+              >
+                <input type="radio" name="deck-kind" value={k.value} checked={kind === k.value} onChange={() => setKind(k.value)} className="sr-only" />
+                {k.label}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">{KINDS.find((k) => k.value === kind)?.hint}</p>
+        </div>
         <SourceMaterialPicker value={material} onChange={setMaterial} disabled={busy} />
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">Presets</span>
