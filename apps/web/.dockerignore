@@ -1,0 +1,18 @@
+# Build context for apps/web/Dockerfile. NEXT_PUBLIC_* values come in as build args, never from a file here.
+**/.env
+**/.env.*
+**/.envrc
+**/.data
+**/data
+**/node_modules
+**/.next
+**/.venv
+**/.claude
+**/.DS_Store
+**/*.tsbuildinfo
+next-env.d.ts
+Dockerfile
+.dockerignore
+railway.json
+README.md
+AGENTS.md

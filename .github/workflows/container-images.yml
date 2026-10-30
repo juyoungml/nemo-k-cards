@@ -1,0 +1,112 @@
+name: Container images
+# Builds the API and Admin images (backend/Dockerfile, apps/web/Dockerfile) and validates deploy/compose.yml.
+# Nothing is pushed: this is the build half of #59. Pushing to GHCR, and deploying, come with #59/#60.
+# Images are built here rather than on a laptop, so a Dockerfile change is proven on every pull request.
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'apps/web/**'
+      - 'agent/**'
+      - 'policies/**'
+      - 'demo/scenarios/**'
+      - 'deploy/**'
+      - '.dockerignore'
+      - '.github/workflows/container-images.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: container-images-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compose:
+    name: compose config
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # The env template stands in for a server's stack env file: every name it lists must parse.
+      - name: docker compose config
+        env:
+          ENV_FILE: ${{ github.workspace }}/deploy/env.example
+        run: |
+          docker compose version
+          docker compose -f deploy/compose.yml --env-file deploy/env.example config --quiet
+          docker compose -f deploy/compose.yml --env-file deploy/env.example --profile tunnel config --quiet
+
+  api:
+    name: build api image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          load: true
+          tags: nemo-k-cards-api:ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      # Not a smoke test of the running API (that needs Postgres and Supabase: deploy/README.md's checklist).
+      # It checks the image holds what the API reads at run time, and nothing it must not.
+      - name: inspect image
+        run: |
+          run() { docker run --rm --entrypoint "" nemo-k-cards-api:ci "$@"; }
+          run id
+          run claude --version
+          run python -c "import app.main; print('app.main imports')"
+          run python -c "from playwright.sync_api import sync_playwright as p; b = p().start().chromium.launch(); print('chromium', b.version); b.close()"
+          run sh -ec '
+            for f in /app/agent/CLAUDE.md /app/agent/.claude/agents/researcher.md /app/agent/.claude/skills \
+                     /app/policies/content/safeguard_policy.md /app/policies/content/sensitive_topics.yaml \
+                     /app/policies/openshell/agent-policy.yaml /app/demo/scenarios/good/deck.json \
+                     /app/backend/app/renderer/templates; do
+              test -e "$f" || { echo "missing $f"; exit 1; }
+            done
+            leaks=$(find / -xdev \( -name ".env" -o -name ".env.*" -o -name "settings.local.json" \) \
+                    -not -path "/proc/*" -not -path "/app/backend/.venv/*" -not -path "/usr/*" 2>/dev/null)
+            test -z "$leaks" || { echo "env or local settings file in image: $leaks"; exit 1; }
+            test ! -e /app/backend/tests && test ! -e /app/backend/.data && test ! -e /app/apps
+            echo "image contents ok"'
+
+  admin:
+    name: build admin image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      # Public build args only (they ship to every browser). Per-environment values come from the GitHub
+      # environment's variables in #59; a pull request build uses placeholders, which is enough to compile.
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          push: false
+          load: true
+          tags: nemo-k-cards-admin:ci
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder
+          cache-from: type=gha,scope=admin
+          cache-to: type=gha,scope=admin,mode=max
+      # The Admin holds no secrets and needs no backend to serve its sign-in page, so it can start here.
+      - name: start image and load /sign-in
+        run: |
+          docker run -d --name admin -p 3000:3000 nemo-k-cards-admin:ci
+          for i in $(seq 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/sign-in || true)
+            [ "$code" = 200 ] && break; sleep 1
+          done
+          docker logs admin
+          test "$code" = 200 || { echo "/sign-in answered $code"; exit 1; }
+          docker exec admin id

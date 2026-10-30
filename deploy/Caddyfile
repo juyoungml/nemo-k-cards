@@ -1,0 +1,23 @@
+# The stack's only public entry. One origin for both apps:
+#   /backend/*      → the API (prefix stripped), so the Admin calls it same-origin (NEXT_PUBLIC_API_URL=/backend)
+#   everything else → the Admin
+# SITE_ADDRESS: a domain (e.g. staging.example.com) gets a Let's Encrypt certificate automatically;
+# ":80" serves plain HTTP, for a tunnel (cloudflared terminates TLS) or a local test.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	handle_path /backend/* {
+		# Job events are SSE: Caddy flushes text/event-stream responses as they come.
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy admin:3000
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
