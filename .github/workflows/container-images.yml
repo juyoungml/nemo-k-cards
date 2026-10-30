@@ -71,11 +71,15 @@ jobs:
                      /app/backend/app/renderer/templates; do
               test -e "$f" || { echo "missing $f"; exit 1; }
             done
-            leaks=$(find / -xdev \( -name ".env" -o -name ".env.*" -o -name "settings.local.json" \) \
-                    -not -path "/proc/*" -not -path "/app/backend/.venv/*" -not -path "/usr/*" 2>/dev/null)
-            test -z "$leaks" || { echo "env or local settings file in image: $leaks"; exit 1; }
-            test ! -e /app/backend/tests && test ! -e /app/backend/.data && test ! -e /app/apps
-            echo "image contents ok"'
+            for f in /app/backend/tests /app/backend/golden /app/backend/.data /app/apps /app/.git; do
+              test ! -e "$f" || { echo "should not be in the image: $f"; exit 1; }
+            done'
+          # As root, so the search can read every directory. Package internals under .venv and /usr are skipped.
+          leaks=$(docker run --rm --entrypoint "" --user 0 nemo-k-cards-api:ci \
+            find / -xdev \( -name ".env" -o -name ".env.*" -o -name ".envrc" -o -name "settings.local.json" \) \
+              -not -path "/proc/*" -not -path "/app/backend/.venv/*" -not -path "/usr/*" -print)
+          test -z "$leaks" || { echo "env or local settings file in image: $leaks"; exit 1; }
+          echo "image contents ok"
 
   admin:
     name: build admin image
