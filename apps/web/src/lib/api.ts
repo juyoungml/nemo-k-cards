@@ -8,7 +8,7 @@ import { orgHeader, setActiveOrgId } from "./org";
 import { accessToken, isAuthPath, reloadTo } from "./supabase";
 import type {
   AuditEvent, Brainstorm, DeckEdit, DeckVersion, FitResult, Invitation, InvitationCreated, InstagramAccount, InstagramConnection, Job,
-  Material, MaterialRef, Me, Member, Metric, Org, PolicyEvent, Post, PublishMode, Role, Scenario,
+  Material, MaterialRef, Me, Member, Metric, Org, OrgProfile, OrgProfileState, PolicyEvent, Post, PublishMode, Role, Scenario,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/mock";
@@ -127,6 +127,9 @@ export const api = {
   removeMember: (userId: string) => req<void>(`/orgs/current/members/${userId}`, { method: "DELETE" }),
   listInvitations: () => req<Invitation[]>("/orgs/current/invitations"),
   revokeInvitation: (id: string) => req<void>(`/orgs/current/invitations/${id}`, { method: "DELETE" }),
+  // Organization profile (#16): any Member reads it, Admins save it. Every new Job takes a snapshot of it.
+  getOrgProfile: () => req<OrgProfileState>("/orgs/current/profile"),
+  saveOrgProfile: (profile: OrgProfile) => req<OrgProfileState>("/orgs/current/profile", { method: "PUT", json: profile }),
   getAudit: (before?: number) => req<AuditEvent[]>(`/audit?limit=100${before ? `&before=${before}` : ""}`),
 
   getMetrics: () => req<Metric[]>("/metrics"),

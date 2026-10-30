@@ -20,6 +20,7 @@ from app import (
     instagram_accounts,
     materials,
     members,
+    org_profile,
     orgs,
     posts,
     seed,
@@ -80,6 +81,7 @@ settings.output_dir.mkdir(parents=True, exist_ok=True)
 app.include_router(assets.router)
 app.include_router(orgs.router)
 app.include_router(members.router)
+app.include_router(org_profile.router)
 app.include_router(instagram_accounts.router)
 app.include_router(materials.router)
 app.include_router(posts.router)
@@ -127,6 +129,7 @@ def health() -> dict:
 async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
     job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
     job.material = await asyncio.to_thread(materials.refs, ctx.org_id, req.material_ids)  # 422 if not the caller's
+    job.org_profile = await asyncio.to_thread(org_profile.get, ctx.org_id)  # every stage reads this snapshot (#16)
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
         ctx, "job.created", job.id, **({"material": [m.id for m in job.material]} if job.material else {}))))
     await orchestrator.start_job(ctx.org_id, job, scenario=req.scenario or "good", started_by=_member(ctx))
@@ -340,6 +343,7 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
         raise HTTPException(422, "pick an angle first")
     job = orchestrator.new_job(secrets.token_hex(8), f"Brainstorm: {angle.title}", "brainstorm", d.id)
     job.material = d.material  # the Brainstorm's Source material carries over to its Job
+    job.org_profile = await asyncio.to_thread(org_profile.get, ctx.org_id)  # every stage reads this snapshot (#16)
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
         ctx, "job.created", job.id, brainstorm=d.id)))
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))

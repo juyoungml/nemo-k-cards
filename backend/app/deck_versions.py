@@ -43,7 +43,7 @@ from fastapi import APIRouter, HTTPException
 from psycopg import Connection
 from pydantic import BaseModel, Field
 
-from app import assets, audit, auth, slide_sources, store
+from app import assets, audit, auth, org_profile, slide_sources, store
 from app.config import settings
 from app.pipeline import durable, orchestrator
 from app.renderer.base import RenderedSlide
@@ -199,13 +199,16 @@ def apply_edit(deck: CardDeck, edit: DeckEdit) -> tuple[CardDeck, list[int], lis
 
 
 def remap_issues(issues: list[Issue], order: list[int], rerendered: set[int]) -> list[Issue]:
-    """The Issues of the base version that still apply to the new one, at the slides' new positions. Host QA
-    recomputes PII, credentials and the hashtag count for every edit, and overflow for each re-rendered slide, so
-    those are dropped here. The reviewer's Issues (facts, tone, sensitive, links) stay: a person decides on them."""
+    """The Issues of the base version that still apply to the new one, at the slides' new positions. The host
+    recomputes PII, credentials, the hashtag count and "never say" matches (#16) for every edit, and overflow for
+    each re-rendered slide, so those are dropped here. The reviewer's Issues (facts, tone, sensitive, links) stay:
+    a person decides on them."""
     at = {old: new for new, old in enumerate(order)}
     out = []
     for i in issues:
         if i.category == "pii" or (i.category == "tone" and i.slide_index is None and "hashtags" in i.message):
+            continue
+        if i.message.startswith(org_profile.NEVER_SAY):  # recomputed for every edit, like PII
             continue
         idx = i.slide_index if i.slide_index is None else at.get(i.slide_index)
         if i.slide_index is not None and idx is None:
@@ -303,7 +306,8 @@ async def save_version(job_id: str, edit: DeckEdit, ctx: auth.Editor) -> Job:
                                   ". Shorten it, or save anyway (it stays a blocking Issue).",
                                   "issues": [i.model_dump() for i in overflow]})
     rerendered = {r.index for r in rendered}
-    issues = remap_issues(job.issues, order, rerendered) + qa.issues
+    issues = remap_issues(job.issues, order, rerendered) + qa.issues + org_profile.never_say_issues(
+        deck, job.org_profile)
     edited_text = edited_fields(job.edited_text, order, changes)
 
     def commit() -> Job:
@@ -389,7 +393,7 @@ async def _check_step(org: str, job_id: str, version: int, by: dict | None) -> s
     paths = assets.slide_files(job)
     try:
         verdict = await orchestrator.run_safeguard(org_id, job_id, job.deck, paths,
-                                                   use_model=settings.demo_mode == "live")
+                                                   use_model=settings.demo_mode == "live", profile=job.org_profile)
     except Exception as e:  # noqa: BLE001 — fail closed
         verdict = SafeguardVerdict(decision="block", summary="Blocked because the safety check could not run.",
                                    model_error=str(e)[:300], content_hash=safeguard.content_hash(job.deck, paths))

@@ -6,6 +6,7 @@ import { LoadState, Panel, StatRow } from "@/components/page";
 import { JobStatusBadge, StatusBadge } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { atLeast, useMe } from "@/lib/roles";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
 
@@ -13,11 +14,24 @@ export function DashboardView() {
   const metrics = useApi(api.getMetrics, [], 5000);
   const accounts = useApi(api.getInstagramAccounts);
   const jobs = useApi(api.listJobs, [], 3000);
+  const { role } = useMe();
+  const profile = useApi(api.getOrgProfile);
 
   if (!metrics.data || !accounts.data || !jobs.data) return <LoadState error={metrics.error ?? accounts.error ?? jobs.error} />;
 
   return (
     <>
+      {atLeast(role, "admin") && profile.data && !profile.data.complete && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4 text-sm">
+          <span className="flex-1">
+            <span className="font-semibold">Fill in your Organization profile.</span>{" "}
+            <span className="text-muted-foreground">Until you do, the agents write as a neutral guide, not as you.</span>
+          </span>
+          <Link href="/profile" className="text-[13px] font-medium text-primary hover:underline">
+            Open profile →
+          </Link>
+        </div>
+      )}
       <StatRow metrics={metrics.data} />
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
