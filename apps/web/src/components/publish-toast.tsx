@@ -15,7 +15,8 @@ import { cn } from "@/lib/utils";
 export function PublishToast({ post }: { post?: Post }) {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [openedAt] = useState(() => Date.now());
-  if (!post) return null;
+  // A Timed Post that hasn't started (#26) has its own card; a cancelled one posted nothing and needs no toast.
+  if (!post || ["scheduled", "on_hold", "cancelled"].includes(post.state)) return null;
   const dryrun = isDryRunDone(post);
   const failed = post.state === "failed";
   const unknown = post.state === "unknown";

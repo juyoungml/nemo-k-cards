@@ -84,12 +84,26 @@ export const api = {
     req<Job>("/jobs", { method: "POST", json: { prompt, scenario, material_ids: materialIds } }),
   /** Approve → a Post to the chosen Instagram account (#21) of exactly the Deck version the Approver saw (#19); the
    * API refuses it if the Deck has been edited since. Its outcome is on the Post, not this response. */
-  approveJob: (id: string, deckVersion: number, overrideReason?: string, accountId?: string) =>
+  /** `scheduledAt` (#26, an ISO time with its offset) makes a Timed Post: the Job becomes SCHEDULED until then. */
+  approveJob: (id: string, deckVersion: number, overrideReason?: string, accountId?: string, scheduledAt?: string) =>
     req<Job>(`/jobs/${id}/approve`, {
       method: "POST",
-      json: { deck_version: deckVersion, override_reason: overrideReason || undefined, account_id: accountId || undefined },
+      json: {
+        deck_version: deckVersion,
+        override_reason: overrideReason || undefined,
+        account_id: accountId || undefined,
+        scheduled_at: scheduledAt || undefined,
+      },
     }),
-  listPosts: (jobId?: string) => req<Post[]>(`/posts${jobId ? `?job_id=${encodeURIComponent(jobId)}` : ""}`),
+  /** `when`: "upcoming" = scheduled and on-hold Posts, soonest first; "recent" = every other Post, newest first. */
+  listPosts: (jobId?: string, when?: "upcoming" | "recent") => {
+    const q = new URLSearchParams({ ...(jobId ? { job_id: jobId } : {}), ...(when ? { when } : {}) }).toString();
+    return req<Post[]>(`/posts${q ? `?${q}` : ""}`);
+  },
+  /** A scheduled or on-hold Post (#26): Approver only, until publishing starts. */
+  cancelPost: (id: string) => req<Post>(`/posts/${id}/cancel`, { method: "POST" }),
+  reschedulePost: (id: string, scheduledAt: string) =>
+    req<Post>(`/posts/${id}/reschedule`, { method: "POST", json: { scheduled_at: scheduledAt } }),
   getPost: (id: string) => req<Post>(`/posts/${id}`),
   /** For an unknown Post: "I checked Instagram: it is posted / not posted" (logged under your name). */
   resolvePost: (id: string, posted: boolean, permalink?: string) =>

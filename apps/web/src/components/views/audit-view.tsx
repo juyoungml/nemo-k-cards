@@ -37,6 +37,10 @@ const ACTION: Record<string, [Tone, string]> = {
   "post.unknown_alert": ["warning", "Post needs a check"],
   "post.settled": ["info", "Post settled by reconciler"],
   "post.resolved": ["info", "Post resolved by hand"],
+  "post.started": ["info", "Scheduled Post started"],
+  "post.held": ["warning", "Post on hold"],
+  "post.cancelled": ["neutral", "Post cancelled"],
+  "post.rescheduled": ["info", "Post rescheduled"],
 };
 
 const role = (r: unknown) => (typeof r === "string" && r in ROLE_LABEL ? ROLE_LABEL[r as Role] : String(r ?? ""));
@@ -106,6 +110,18 @@ function describe(e: AuditEvent): React.ReactNode {
           {d.error ? ` · ${String(d.error)}` : ""}
           {e.action === "post.resolved" ? ` · ${d.posted ? "posted" : "not posted"}` : ""}
           {e.action === "post.settled" && d.container ? ` · container ${String(d.container)}` : ""}
+        </>
+      );
+    case "post.started":
+    case "post.held":
+    case "post.cancelled":
+    case "post.rescheduled":
+      return (
+        <>
+          {String(d.account ?? "no account")}
+          {d.scheduled_at ? ` · for ${formatDateTime(String(d.scheduled_at))} KST` : ""}
+          {d.from && d.to ? ` · ${formatDateTime(String(d.from))} → ${formatDateTime(String(d.to))} KST` : ""}
+          {d.reason ? ` · ${String(d.reason)}` : ""}
         </>
       );
     case "material.added":

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
-import { AtSign, ChevronsUpDown, FileCheck2, LayoutDashboard, LogOut, RotateCcw, ScrollText, ShieldAlert, Sparkles, Users } from "lucide-react";
+import { AtSign, CalendarClock, ChevronsUpDown, FileCheck2, LayoutDashboard, LogOut, RotateCcw, ScrollText, ShieldAlert, Sparkles, Users } from "lucide-react";
 
 import { IS_MOCK, api } from "@/lib/api";
 import { setActiveOrgId } from "@/lib/org";
@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/jobs/new", label: "New deck", icon: Sparkles, min: "editor" },
   { href: "/review", label: "Review", icon: FileCheck2 },
+  { href: "/posts", label: "Posts", icon: CalendarClock, desktopOnly: true },
   { href: "/policy", label: "Policy Log", icon: ShieldAlert },
   { href: "/team", label: "Team", icon: Users, desktopOnly: true },
   { href: "/instagram", label: "Instagram", icon: AtSign, desktopOnly: true },

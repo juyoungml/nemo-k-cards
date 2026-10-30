@@ -171,7 +171,8 @@ async def job_events(job_id: str, request: Request, ctx: auth.Viewer) -> Streami
 async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
     """The ONLY publish path: a person approves in the Admin → a Post (#21) the host publishes (the sandbox has no
     token). The Approver picks one of the Organization's connected Instagram accounts (preselected when there is
-    only one; a mock post may go without). Approval creates a `queued` Post and starts its durable workflow
+    only one; a mock post may go without), and posts now or at `scheduled_at` (#26: the Post waits `scheduled`;
+    approving a Deck whose Post is on hold replaces that Post). Approval creates the Post and starts its durable workflow
     (app/pipeline/publishing.py); the Post's state, not this response, says what happened on Instagram.
     A Deck the Safeguard blocked can't be approved by anyone, with or without an Override reason (ADR 0004); the
     refusal is audited. Approving a Deck with blocking Issues is an Override and needs a written reason (GLOSSARY).
@@ -192,6 +193,10 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
         # Approve is locked while a Post is open, unknown included: approving again could post twice.
         raise HTTPException(409, "a Post of this Deck is still in progress or being checked on Instagram; wait "
                                  "until it settles")
+    if job.status == JobStatus.SCHEDULED:
+        raise HTTPException(409, "this Deck is already scheduled: reschedule or cancel its Post instead")
+    # Timed Posts (#26): checked before anything else is decided, so a bad time is a plain 422.
+    scheduled_at = posts.check_time(req.scheduled_at) if req.scheduled_at else None
     if job.status != JobStatus.READY_FOR_REVIEW:
         raise HTTPException(409, f"job is {job.status}, not READY_FOR_REVIEW")
     pinned = deck_versions.pin(job, req.deck_version)  # 409 if edited since the Approver loaded it (#19)
@@ -231,7 +236,8 @@ async def approve(job_id: str, req: ApproveRequest, ctx: auth.Approver) -> Job:
     try:
         # The Post records the pinned version and posts exactly it; the publisher stops if the Deck moves on (#19).
         post = await asyncio.to_thread(lambda: publishing.create(
-            ctx.org_id, job, mode=mode, by=_member(ctx), account=account, deck_version=pinned, audits=entries))
+            ctx.org_id, job, mode=mode, by=_member(ctx), account=account, deck_version=pinned, audits=entries,
+            scheduled_at=scheduled_at))
     except posts.Taken as t:
         raise HTTPException(409, "a Post of this Deck is already in progress; wait until it settles" if t.open
                                  else f"this Deck is already posted to {account['handle'] if account else 'it'}; "

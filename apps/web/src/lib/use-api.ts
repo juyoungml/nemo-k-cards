@@ -31,7 +31,7 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = [], pollMs?: n
   return { data, error, reload, setData };
 }
 
-export const TERMINAL_STATUSES = ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "PUBLISHED", "FAILED"];
+export const TERMINAL_STATUSES = ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "SCHEDULED", "PUBLISHED", "FAILED"];
 
 /** The part of EventSource useLiveJob needs (api.openJobEvents returns a fetch-based one that sends the session). */
 export interface LiveStream {

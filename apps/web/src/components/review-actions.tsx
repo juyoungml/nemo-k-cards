@@ -11,11 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { ROLE_LABEL, atLeast, useMe } from "@/lib/roles";
-import type { Job } from "@/lib/types";
+import { formatDateTime, fromKstInput, scheduleBounds, toKstInput } from "@/lib/format";
+import type { Job, Post } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 
 const STATUS_NOTE: Partial<Record<Job["status"], string>> = {
+  SCHEDULED: "Scheduled: its Post waits for its time. Reschedule or cancel it above; editing the Deck puts it on hold.",
   PUBLISHING: "Approved: a Post is in progress or being checked on Instagram. Approve is locked until it settles.",
   PUBLISHED: "Published. A correction needs a new Post of an edited Deck.",
   REJECTED: "Rejected — this deck will not be posted.",
@@ -23,7 +25,11 @@ const STATUS_NOTE: Partial<Record<Job["status"], string>> = {
   FAILED: "The pipeline failed before review.",
 };
 
-export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job) => void }) {
+/**
+ * Approve / Reject / Regenerate. Approve posts now or at a KST time (#26). `held` is this Deck's Post on hold (edited
+ * after approval, or its time was missed): approving again replaces it, so its time is offered again.
+ */
+export function ReviewActions({ job, onChange, held }: { job: Job; onChange: (job: Job) => void; held?: Post }) {
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string>();
@@ -38,6 +44,14 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
   const mode = health?.publish_mode;
   const needsAccount = mode !== undefined && mode !== "mock" && live.length === 0;
   const mustPick = live.length > 1 && !accountId;
+  // When (#26): now, or a KST time at least 2 minutes and at most 60 days ahead (the API checks the same).
+  const [later, setLater] = useState(!!held?.scheduled_at);
+  // A held Post's time is offered again while it is still ahead; a missed one needs a new time.
+  const [when, setWhen] = useState(() =>
+    held?.scheduled_at && new Date(held.scheduled_at).getTime() > Date.now() + 120_000 ? toKstInput(held.scheduled_at) : "",
+  );
+  const [{ min: minWhen, max: maxWhen }] = useState(scheduleBounds);
+  const whenMissing = later && !when;
   // Approve/Reject need the Approver Role, Regenerate (a new Job) the Editor Role; the API enforces both.
   const mayDecide = atLeast(role, "approver");
   const mayStart = atLeast(role, "editor");
@@ -51,7 +65,7 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
   const canDecide = job.status === "READY_FOR_REVIEW" && !blocked && !unchecked && !checking && !pending && mayDecide;
   const version = job.deck_version ?? 1;
   const canReject = reviewable && !pending && mayDecide;
-  const publishing = job.status === "PUBLISHING" || (pending && !error);
+  const publishing = job.status === "PUBLISHING" || (pending && !error && !later);
   const blocks = job.issues.filter((i) => i.severity === "block").length;
   // Approving despite blocking Issues is an Override: it needs a written reason, kept in the audit log.
   const override = blocks > 0 && !blocked && !unchecked && !checking;
@@ -135,6 +149,52 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
         </section>
       )}
 
+      {mayDecide && job.status === "READY_FOR_REVIEW" && !blocked && !unchecked && (
+        <section className="space-y-2 rounded-xl border bg-card p-5" aria-labelledby="post-when">
+          <h2 id="post-when" className="text-[13px] font-medium text-muted-foreground">
+            When
+          </h2>
+          {held && (
+            <p className="rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
+              A Post of version {held.deck_version ?? 1}
+              {held.scheduled_at ? ` for ${formatDateTime(held.scheduled_at)} KST` : ""} is on hold. Approving replaces it
+              with version {version}.
+            </p>
+          )}
+          <div role="radiogroup" aria-label="When to post" className="flex flex-wrap gap-2">
+            {[
+              { v: false, label: "Post now" },
+              { v: true, label: "Schedule" },
+            ].map((o) => (
+              <label
+                key={o.label}
+                className={cn(
+                  "inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 text-[13px] font-medium",
+                  later === o.v ? "border-2 border-primary bg-brand-soft" : "hover:bg-muted",
+                )}
+              >
+                <input type="radio" name="when" checked={later === o.v} onChange={() => setLater(o.v)} className="sr-only" />
+                {o.label}
+              </label>
+            ))}
+          </div>
+          {later && (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="datetime-local"
+                aria-label="Post at (Korea time)"
+                value={when}
+                min={minWhen}
+                max={maxWhen}
+                onChange={(e) => setWhen(e.target.value)}
+                className="h-9 rounded-lg border bg-background px-3 text-[13px] tabular-nums"
+              />
+              <span className="text-xs text-muted-foreground">KST (Korea time) · up to 60 days ahead</span>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Decision bar stays reachable at the bottom of the viewport; publish progress shows in the toast + top line. */}
       <div className="sticky bottom-20 z-10 rounded-xl md:bottom-4 border bg-card/95 p-4 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] backdrop-blur supports-[backdrop-filter]:bg-card/80">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -173,7 +233,7 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
             </Button>
             <Button
               size="lg"
-              disabled={!canDecide || reasonMissing || needsAccount || mustPick}
+              disabled={!canDecide || reasonMissing || needsAccount || mustPick || whenMissing}
               title={
                 blocked
                   ? "The safeguard blocked this deck. No Override can approve it."
@@ -183,10 +243,14 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                   ? "Connect an Instagram account first"
                   : reasonMissing && mayDecide
                   ? "Write an Override reason first"
+                  : whenMissing && mayDecide
+                  ? "Pick a time to post, or choose Post now"
                   : undefined
               }
               onClick={() => {
-                act(() => api.approveJob(job.id, version, override ? reason.trim() : undefined, accountId));
+                act(() =>
+                  api.approveJob(job.id, version, override ? reason.trim() : undefined, accountId, later && when ? fromKstInput(when) : undefined),
+                );
               }}
             >
               {publishing ? (
@@ -201,10 +265,8 @@ export function ReviewActions({ job, onChange }: { job: Job; onChange: (job: Job
                 </>
               ) : unchecked ? (
                 "Needs safeguard check"
-              ) : blocks > 0 ? (
-                `Override & Publish${version > 1 ? ` v${version}` : ""}`
               ) : (
-                `Approve & Publish${version > 1 ? ` v${version}` : ""}`
+                `${blocks > 0 ? "Override" : "Approve"} & ${later ? "Schedule" : "Publish"}${version > 1 ? ` v${version}` : ""}`
               )}
             </Button>
           </div>
