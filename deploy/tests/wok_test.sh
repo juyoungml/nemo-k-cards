@@ -17,7 +17,8 @@ set -euo pipefail
 D=$FAKE_DOCKER
 key() { printf '%s' "$1" | tr '/:' '__'; }
 echo "docker $*" >>"$D/calls.log"
-ids_known() { grep -qxsF "$1" "$D/images"; } # every image ever pulled stays until pruned
+# Like Docker's containerd image store: an image ID resolves only while some tag points at it.
+ids_known() { cat "$D"/local/* 2>/dev/null | grep -qxF "$1"; }
 resolve() { # ref or id -> id
 	if [ -f "$D/local/$(key "$1")" ]; then cat "$D/local/$(key "$1")"; return 0; fi
 	if ids_known "$1"; then printf '%s\n' "$1"; return 0; fi
@@ -75,6 +76,7 @@ image)
 		case $4 in *revision*) echo "rev-${id#sha256:}" ;; *) echo "$id" ;; esac
 		;;
 	prune) ;;
+	rm) [ -f "$D/local/$(key "$3")" ] || { echo "No such image: $3" >&2; exit 1; }; rm -f "$D/local/$(key "$3")" ;;
 	esac
 	;;
 build)
@@ -95,6 +97,7 @@ build)
 	echo "$id" >>"$D/images"
 	;;
 builder) ;;
+rmi) rm -f "$D/local/$(key "$2")" ;;
 tag)
 	id=$(resolve "$2")
 	echo "$id" >"$D/local/$(key "$3")"

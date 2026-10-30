@@ -122,6 +122,13 @@ sync_api_env() {
 	mv -f "$tmp" "$API_ENV"
 }
 
+# With Docker's containerd image store (the default on new installs), an image whose last tag moves away can no
+# longer be referred to by its ID, even while a container runs it. So the image we may go back to is always kept
+# under a tag: wok-leaving while an update is decided, then wok-previous.
+leaving_of() { printf '%s:wok-leaving' "$(repo_of "$1")"; }
+# Put the image we were leaving back under the stack's tag. Fails when there is none (first start).
+restore() { [ -n "$(image_id "$(leaving_of "$1")")" ] && docker tag "$(leaving_of "$1")" "$(ref_of "$1")"; }
+
 repo_of() { if [ "$1" = api ]; then printf '%s' "$API_IMAGE"; else printf '%s' "$ADMIN_IMAGE"; fi; }
 ref_of() { printf '%s:%s' "$(repo_of "$1")" "$IMAGE_TAG"; }
 image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
@@ -234,6 +241,10 @@ cmd_update() {
 		old=$(running_id "$svc")
 		[ -n "$old" ] || old=$(image_id "$ref")
 		printf -v "old_$svc" '%s' "$old"
+		docker image rm "$(leaving_of "$svc")" >/dev/null 2>&1 || true
+		# Pin what runs before the fetch moves the tag. If the tag already points elsewhere (a refused or failed
+		# update earlier), what runs has no tag left and there is nothing to pin.
+		if [ -n "$old" ] && [ "$(image_id "$ref")" = "$old" ]; then docker tag "$ref" "$(leaving_of "$svc")"; fi
 	done
 
 	fetch_images ${git_ref:+"$git_ref"} || return 1
@@ -247,7 +258,7 @@ cmd_update() {
 		if [ -n "$new" ] && [ "$new" != "$old" ] && is_bad "$new"; then
 			# Rolled back before: keep the old image until the tag moves to something else.
 			log "$svc: $ref is $(short "$new"), which failed its health check before; staying on $(short "$old")"
-			[ -z "$old" ] || docker tag "$old" "$ref"
+			restore "$svc" || true
 			continue
 		fi
 		[ "$new" = "$old" ] || changed="$changed $svc"
@@ -265,8 +276,8 @@ cmd_update() {
 		if [ "$check_migrations" = 1 ] && ! compose run --rm --no-deps -T api python -m app.migration_check; then
 			log "not deploying: the database is missing migrations the new API needs (see above)." \
 				"Run \`supabase db push\` for this project, then \`wok update-now\`. The stack is untouched."
-			[ -z "$old_api" ] || docker tag "$old_api" "$(ref_of api)"
-			[ -z "$old_admin" ] || docker tag "$old_admin" "$(ref_of admin)"
+			restore api || true
+			restore admin || true
 			history_add "migrations-missing api $(revision "$new_api")"
 			return 1
 		fi
@@ -280,7 +291,11 @@ cmd_update() {
 		var=new_$svc
 		new=${!var}
 		# Keep the image we are leaving under a tag, so it is never pruned and `wok rollback` can return to it.
-		[ -z "$old" ] || docker tag "$old" "$(repo_of "$svc"):wok-previous"
+		if [ -n "$(image_id "$(leaving_of "$svc")")" ]; then
+			docker tag "$(leaving_of "$svc")" "$(repo_of "$svc"):wok-previous"
+		elif [ -n "$old" ]; then
+			log "$svc: the running image $(short "$old") has no tag left, so there is no rollback point for this update"
+		fi
 		summary="$summary $svc $(revision "$old")->$(revision "$new")"
 	done
 	log "updating:$summary"
@@ -289,6 +304,7 @@ cmd_update() {
 	if compose up -d --no-build --wait --wait-timeout "$HEALTH_TIMEOUT" $changed; then
 		log "updated:$summary"
 		history_add "updated$summary"
+		for svc in $SERVICES; do docker image rm "$(leaving_of "$svc")" >/dev/null 2>&1 || true; done
 		docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true
 		[ "$SOURCE" != build ] || docker builder prune -f --filter "until=168h" >/dev/null 2>&1 || true
 		return 0
@@ -301,9 +317,7 @@ cmd_update() {
 	for svc in $changed; do
 		var=new_$svc
 		mark_bad "${!var}"
-		var=old_$svc
-		old=${!var}
-		if [ -n "$old" ]; then docker tag "$old" "$(ref_of "$svc")"; else missing="$missing $svc"; fi
+		restore "$svc" || missing="$missing $svc"
 	done
 	if [ -n "$missing" ]; then
 		log "no previous image for:$missing (first start?). Left as is; see \`wok logs\`"
@@ -357,7 +371,7 @@ cmd_rollback() {
 		cur=$(running_id "$svc")
 		if [ -n "$prev" ] && [ "$prev" != "$cur" ]; then
 			mark_bad "$cur"
-			docker tag "$prev" "$(ref_of "$svc")"
+			docker tag "$(repo_of "$svc"):wok-previous" "$(ref_of "$svc")"
 			did="$did $svc $(revision "$cur")->$(revision "$prev")"
 		fi
 	done
