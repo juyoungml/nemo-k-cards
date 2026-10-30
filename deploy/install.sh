@@ -302,12 +302,36 @@ check_ports() {
 	fi
 }
 
+# Build mode builds the images here from a git checkout, so it needs git (and no registry login).
+build_mode() { [ "${ENV_READABLE:-0}" = 1 ] && [ "$(env_get WOK_SOURCE)" = build ]; }
+ensure_git() {
+	build_mode || return 0
+	if have git; then
+		say "build mode: git $(git --version | cut -d' ' -f3)"
+	elif [ -n "$OS_ID" ]; then
+		say "build mode: installing git"
+		run apt-get install -y -qq git
+	else
+		die "WOK_SOURCE=build needs git; install it and re-run"
+	fi
+	local cpus mem
+	cpus=$(nproc 2>/dev/null || echo 0)
+	mem=$(awk '/MemTotal/ {print int($2/1048576)}' /proc/meminfo 2>/dev/null || echo 0)
+	if [ "$cpus" -lt 4 ] || [ "$mem" -lt 7 ]; then
+		warn "build mode on ${cpus} vCPU / ${mem} GB: building the images may be slow or run out of memory (4 / 8 is comfortable)"
+	fi
+}
+
 # --- 6. registry login ------------------------------------------------------------------------------------------
 registry_login() {
 	[ "${ENV_READABLE:-0}" = 1 ] || {
 		say "registry login: skipped (env file not readable in this dry run)"
 		return 0
 	}
+	if build_mode; then
+		say "registry login: skipped (build mode builds the images on this host)"
+		return 0
+	fi
 	local image host user token
 	image=$(env_get API_IMAGE)
 	image=${image:-ghcr.io/juyoungml/nemo-k-cards-api}
@@ -350,7 +374,11 @@ start_stack() {
 		say "not starting (--no-start). Start with: sudo wok up"
 		return 0
 	fi
-	say "starting the stack (pulls the images, waits until healthy)"
+	if build_mode; then
+		say "starting the stack (builds the images on the first run, ~10 minutes; waits until healthy)"
+	else
+		say "starting the stack (pulls the images, waits until healthy)"
+	fi
 	run /usr/local/bin/wok config
 	run /usr/local/bin/wok up
 }
@@ -363,6 +391,7 @@ main() {
 	install_files
 	ensure_env_file
 	[ "${ENV_READABLE:-0}" != 1 ] || check_ports
+	ensure_git
 	registry_login
 	enable_updater
 	start_stack

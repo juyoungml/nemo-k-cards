@@ -12,7 +12,7 @@ specific to one server: every server-specific value lives in one env file kept o
 | `Caddyfile` | The only public entry: `/backend/*` goes to the API (prefix stripped), everything else to the Admin. |
 | `env.example` | Template for the stack env file: names and comments, never values. |
 | `install.sh` | Bootstraps a host: Docker + Compose, service user, `/opt/wok`, registry login, updater, start. Idempotent. |
-| `wok` | The host's command (`/usr/local/bin/wok`): `status`, `pause`, `resume`, `update-now`, `logs`, `rollback`, … |
+| `wok` | The host's command (`/usr/local/bin/wok`): `status`, `pause`, `resume`, `update-now`, `logs`, `rollback`, … Pulls the CI images, or builds them on the host in [build mode](#build-mode-no-registry-yet). |
 | `systemd/` | `wok-update.timer` runs `wok update` every 2 minutes. |
 | `tests/wok_test.sh` | Tests the updater's logic (update, rollback, skip, pause) against a fake `docker`. |
 
@@ -25,7 +25,8 @@ specific to one server: every server-specific value lives in one env file kept o
 - **Images**: CI builds them and pushes them to private GHCR packages tagged by commit (#59):
   `ghcr.io/juyoungml/nemo-k-cards-api` and `ghcr.io/juyoungml/nemo-k-cards-admin`. The "Deploy to staging" button
   (#60) runs the migrations and then moves the `staging` tag on both. The server **pulls** that tag. GitHub never
-  reaches the server, and nobody builds images on a laptop or on the server.
+  reaches the server, and nobody builds images on a laptop. (Until the registry settings exist, a host can build
+  them itself: [build mode](#build-mode-no-registry-yet).)
 - **Secrets and server settings**: one env file, `/opt/wok/.env` (template `env.example`), mode 600, owned by the
   service user `wok`. `wok` passes the API container a copy without the host-only lines (`GHCR_*`, `WOK_*`,
   `TUNNEL_TOKEN`). Images contain no `.env` and no Claude login. CI fails the build if one turns up.
@@ -103,6 +104,31 @@ rollback. Its maintained forks (e.g. `nicholas-fedor/watchtower`, Apache-2.0) fi
 points, and they need the Docker socket in one more long-running container. Diun (MIT) only notifies. A systemd
 timer around `docker compose pull && up --wait` uses only tools that are already on the host. It is about 300 lines
 of shellchecked bash with a test (`tests/wok_test.sh`).
+
+## Build mode: no registry yet
+
+The registry path needs one-time repository settings that only a repo admin can make: the Admin's build values as
+repository variables (#59) and the protected `staging` environment for the deploy button (#60). Until those exist,
+set `WOK_SOURCE=build` in `/opt/wok/.env`. The host then clones the public repo (`WOK_GIT_URL`, default this repo,
+no token) into `/opt/wok/src` and builds both images itself:
+
+```bash
+# 1. on a laptop with the Supabase CLI linked to the project: migrations first, as the deploy button would
+supabase db push --linked
+# 2. on the host: build main (or any branch, tag or commit) and deploy it
+sudo wok update-now            # WOK_GIT_REF, default main
+sudo wok update-now <commit>
+```
+
+- The same health check, rollback and skip-bad-image rules apply. A failed build leaves the stack as it is.
+- The timer does nothing in build mode: a deploy only happens when someone runs `update-now`, so nothing goes out
+  without its migrations. `GHCR_*` aren't needed.
+- The Admin's `NEXT_PUBLIC_SUPABASE_*` come from the env file as build args (public values).
+- A build takes about 10 minutes on 8 vCPU (Chromium and Playwright in the API image) and needs ~4 vCPU / 8 GB;
+  Docker's build cache keeps later builds shorter, and cache older than 7 days is pruned after a deploy.
+
+Switching to the registry later: remove `WOK_SOURCE` (or set `registry`), fill `GHCR_*`, re-run `install.sh` (it
+logs in), then `sudo wok update-now`. The host's env file is the only thing that changes.
 
 ## Pause updates
 

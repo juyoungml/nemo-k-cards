@@ -1,5 +1,6 @@
 # Server override for compose.yml, used by `wok` (deploy/wok) on a host set up by deploy/install.sh.
-# Servers never build: they pull the CI images (#59) at the tag the deploy button moves (#60).
+# Compose never builds on a server: `wok` pulls the CI images (#59) at the tag the deploy button moves (#60),
+# or, in build mode (WOK_SOURCE=build), builds them with `docker build` from a checkout before starting.
 #   docker compose -f compose.yml -f compose.server.yml ...
 # Needs Docker Compose >= 2.24.4 (`!reset`; install.sh checks it).
 

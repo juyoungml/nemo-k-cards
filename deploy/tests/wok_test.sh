@@ -38,6 +38,7 @@ compose)
 	case $sub in
 	pull)
 		for s in "${svcs[@]}"; do
+			case $s in caddy | cloudflared) continue ;; esac
 			ref=$(svc_ref "$s")
 			[ -f "$D/registry/$(key "$ref")" ] || { echo "manifest unknown" >&2; exit 1; }
 			cp "$D/registry/$(key "$ref")" "$D/local/$(key "$ref")"
@@ -71,6 +72,24 @@ image)
 	prune) ;;
 	esac
 	;;
+build)
+	# docker build ... -t <ref> --label org.opencontainers.image.revision=<sha> ... -> id sha256:<api|admin>-<sha12>
+	shift
+	ref="" sha=""
+	while [ $# -gt 0 ]; do
+		case $1 in
+		-t) ref=$2; shift ;;
+		--label) sha=${2#*revision=}; shift ;;
+		esac
+		shift
+	done
+	case $ref in *admin*) kind=admin ;; *) kind=api ;; esac
+	id=sha256:$kind-$(printf '%s' "$sha" | cut -c1-12)
+	[ ! -f "$D/build-fails" ] || { echo "build failed" >&2; exit 1; }
+	echo "$id" >"$D/local/$(key "$ref")"
+	echo "$id" >>"$D/images"
+	;;
+builder) ;;
 tag)
 	id=$(resolve "$2")
 	echo "$id" >"$D/local/$(key "$3")"
@@ -182,6 +201,67 @@ rc=0
 wok update >/dev/null || rc=$?
 check "pull failure exits 1" "$rc" 1
 check "pull failure leaves api running" "$(running api)" sha256:a2
+
+# --- build mode (WOK_SOURCE=build): the host builds from a git repo, only on `update-now` ---------------------
+command -v git >/dev/null || { echo "git missing"; exit 1; }
+R=$T/repo
+git init -q -b main "$R"
+commit() { git -C "$R" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "$1" && git -C "$R" rev-parse HEAD | cut -c1-12; }
+c1=$(commit one)
+wok down >/dev/null
+rm -f "$T/home/state/paused" "$T/home/state/bad-images"
+cat >>"$T/home/.env" <<EOF
+WOK_SOURCE=build
+WOK_GIT_URL=$R
+NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co
+EOF
+BA=nemo-k-cards-api
+
+# 11. the timer changes nothing in build mode
+: >"$T/d/calls.log"
+out=$(wok update)
+check "build mode: timer does nothing" "$(grep -c 'docker build\|compose.* up ' "$T/d/calls.log" || true)" 0
+check "build mode: timer says how to deploy" "$(printf '%s' "$out" | grep -c 'update-now')" 1
+
+# 12. `up` on a fresh host builds the default ref and starts it
+wok up >/dev/null
+check "up builds api from main" "$(running api)" "sha256:api-$c1"
+check "up builds admin from main" "$(running admin)" "sha256:admin-$c1"
+check "admin gets the public Supabase URL as a build arg" "$(grep -c 'NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co' "$T/d/calls.log")" 1
+check "no registry pull for api/admin in build mode" "$(grep -c "pull.* api\|pull.* admin" "$T/d/calls.log" || true)" 0
+
+# 13. update-now builds the new commit, keeps the old one as wok-previous
+c2=$(commit two)
+wok update-now >/dev/null
+check "update-now builds the new commit" "$(running api)" "sha256:api-$c2"
+check "previous build kept" "$(cat "$T/d/local/$(key "$BA:wok-previous")")" "sha256:api-$c1"
+
+# 14. a broken build: rolled back to the last good one
+c3=$(commit three)
+touch "$T/d/bad/$(key "sha256:api-$c3")"
+rc=0
+wok update-now >/dev/null || rc=$?
+check "unhealthy build exits 1" "$rc" 1
+check "rolled back to c2" "$(running api)" "sha256:api-$c2"
+
+# 15. a failing build leaves the stack as is
+touch "$T/d/build-fails"
+commit four >/dev/null
+rc=0
+wok update-now >/dev/null || rc=$?
+rm -f "$T/d/build-fails"
+check "build failure exits 1" "$rc" 1
+check "build failure leaves api running" "$(running api)" "sha256:api-$c2"
+
+# 16. update-now <ref> deploys that commit; an unknown ref fails without touching anything
+wok update-now "$c2" >/dev/null || true
+wok update-now "$c1" >/dev/null
+check "update-now <commit> deploys it" "$(running admin)" "sha256:admin-$c1"
+rc=0
+wok update-now no-such-branch >/dev/null || rc=$?
+check "unknown ref exits 1" "$rc" 1
+check "unknown ref leaves admin" "$(running admin)" "sha256:admin-$c1"
+check "status names build mode" "$(wok status | grep -c 'build mode')" 1
 
 echo
 if [ "$fails" -ne 0 ]; then
