@@ -8,6 +8,9 @@ business-login and .../get-started):
               The docs show the answer wrapped in {"data": [{...}]}; older answers were flat. Both are read.
   long-lived  GET  https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret&access_token
               → {access_token, token_type, expires_in} (60 days)
+  refresh     GET  https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token
+              → {access_token, token_type, expires_in} (another 60 days). The token must be at least 24 hours old
+              and still valid; an expired or revoked one fails with error code 190 (#22).
   me          GET  https://graph.instagram.com/<version>/me?fields=user_id,username,account_type
               `account_type` is documented as "Business" or "Media_Creator" (upper-cased elsewhere); compared
               case-insensitively. Also read flat or wrapped in "data".
@@ -30,6 +33,7 @@ TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 GRAPH = "https://graph.instagram.com"
 SCOPES = ("instagram_business_basic", "instagram_business_content_publish")
 PROFESSIONAL = {"BUSINESS", "MEDIA_CREATOR"}
+RATE_LIMIT_CODES = {"4", "17", "32", "613"}
 
 # Tests swap in an httpx.MockTransport here; nothing in the test suite ever reaches Meta.
 transport: httpx.BaseTransport | None = None
@@ -65,7 +69,14 @@ install_log_redaction()
 
 
 class InstagramError(Exception):
-    """A failed call to Instagram. The message is safe to log and show: no token, secret or URL."""
+    """A failed call to Instagram. The message is safe to log and show: no token, secret or URL.
+    `token_invalid`: Instagram says the token is expired or revoked (error code 190): only reconnecting helps.
+    `rate_limited`: codes 4, 17, 32, 613: try again later."""
+
+    def __init__(self, message: str, *, token_invalid: bool = False, rate_limited: bool = False):
+        super().__init__(message)
+        self.token_invalid = token_invalid
+        self.rate_limited = rate_limited
 
 
 @dataclass(frozen=True)
@@ -133,7 +144,8 @@ def _call(step: str, send) -> dict:
         else:
             kind = code = None
         raise InstagramError(f"{step}: Instagram answered HTTP {r.status_code}"
-                             + (f" ({kind} {code})" if kind or code else ""))
+                             + (f" ({kind} {code})" if kind or code else ""),
+                             token_invalid=str(code) == "190", rate_limited=str(code) in RATE_LIMIT_CODES)
     try:
         return _first(body)
     except TypeError:
@@ -157,6 +169,19 @@ def exchange_long_lived(short: Token) -> Token:
         "access_token": short.access_token}))
     if not isinstance(body.get("access_token"), str):
         raise InstagramError("long-lived token: no access token in Instagram's answer")
+    try:
+        expires_in = int(body["expires_in"]) if body.get("expires_in") is not None else None
+    except (TypeError, ValueError):
+        expires_in = None
+    return Token(body["access_token"], expires_in)
+
+
+def refresh(token: Token) -> Token:
+    """A long-lived token (≥ 24 hours old, unexpired) → a new one valid for another 60 days (#22)."""
+    body = _call("token refresh", lambda c: c.get(f"{GRAPH}/refresh_access_token", params={
+        "grant_type": "ig_refresh_token", "access_token": token.access_token}))
+    if not isinstance(body.get("access_token"), str):
+        raise InstagramError("token refresh: no access token in Instagram's answer")
     try:
         expires_in = int(body["expires_in"]) if body.get("expires_in") is not None else None
     except (TypeError, ValueError):

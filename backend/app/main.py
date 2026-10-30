@@ -20,6 +20,7 @@ from app import (
     instagram_accounts,
     materials,
     members,
+    org_profile,
     orgs,
     posts,
     seed,
@@ -80,6 +81,7 @@ settings.output_dir.mkdir(parents=True, exist_ok=True)
 app.include_router(assets.router)
 app.include_router(orgs.router)
 app.include_router(members.router)
+app.include_router(org_profile.router)
 app.include_router(instagram_accounts.router)
 app.include_router(materials.router)
 app.include_router(posts.router)
@@ -127,6 +129,7 @@ def health() -> dict:
 async def create_job(req: CreateJobRequest, ctx: auth.Editor) -> Job:
     job = orchestrator.new_job(secrets.token_hex(8), req.prompt.strip())
     job.material = await asyncio.to_thread(materials.refs, ctx.org_id, req.material_ids)  # 422 if not the caller's
+    job.org_profile = await asyncio.to_thread(org_profile.get, ctx.org_id)  # every stage reads this snapshot (#16)
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
         ctx, "job.created", job.id, **({"material": [m.id for m in job.material]} if job.material else {}))))
     await orchestrator.start_job(ctx.org_id, job, scenario=req.scenario or "good", started_by=_member(ctx))
@@ -250,11 +253,15 @@ def _pick_account(ctx: auth.Ctx, account_id: UUID | None, mode: str) -> dict | N
     """The Instagram account the Post goes to: one of this Organization's live (connected or expiring) accounts,
     read under RLS. Preselected when there is exactly one; a mock post may go without any."""
     with store.tenant(ctx.org_id) as c:
-        rows = c.execute("select id, ig_user_id, username from instagram_accounts where org_id = %s "
-                         "and status in ('connected', 'expiring') order by connected_at, id",
+        rows = c.execute("select id, ig_user_id, username, status from instagram_accounts where org_id = %s "
+                         "and status in ('connected', 'expiring', 'revoked') order by connected_at, id",
                          (ctx.org_id,)).fetchall()
-    live = [{"id": r[0], "ig_user_id": r[1], "username": r[2], "handle": f"@{r[2]}"} for r in rows]
+    live = [{"id": r[0], "ig_user_id": r[1], "username": r[2], "handle": f"@{r[2]}"} for r in rows if r[3] != "revoked"]
+    revoked = {r[0]: f"@{r[2]}" for r in rows if r[3] == "revoked"}
     if account_id is not None:
+        if account_id in revoked:  # its token was revoked or expired (#22): say what to do
+            raise HTTPException(409, f"{revoked[account_id]} needs reconnecting: an Admin can reconnect it on the "
+                                     "Instagram page, then approve again")
         if not (match := [a for a in live if a["id"] == account_id]):
             raise HTTPException(422, "pick one of this Organization's connected Instagram accounts")
         return match[0]
@@ -264,6 +271,9 @@ def _pick_account(ctx: auth.Ctx, account_id: UUID | None, mode: str) -> dict | N
         raise HTTPException(422, "this Organization has several Instagram accounts: choose one (account_id)")
     if mode == "mock":
         return None
+    if revoked:
+        raise HTTPException(409, f"{', '.join(revoked.values())} needs reconnecting: an Admin can reconnect it on the "
+                                 "Instagram page, then approve again")
     raise HTTPException(422, "connect an Instagram account first: a dry run or a real post goes to the "
                              "Organization's own account")
 
@@ -346,6 +356,7 @@ async def generate(brainstorm_id: str, ctx: auth.Editor) -> Job:
         raise HTTPException(422, "pick an angle first")
     job = orchestrator.new_job(secrets.token_hex(8), f"Brainstorm: {angle.title}", "brainstorm", d.id)
     job.material = d.material  # the Brainstorm's Source material carries over to its Job
+    job.org_profile = await asyncio.to_thread(org_profile.get, ctx.org_id)  # every stage reads this snapshot (#16)
     await asyncio.to_thread(lambda: store.save_job(ctx.org_id, job, audit=audit.entry(
         ctx, "job.created", job.id, brainstorm=d.id)))
     await asyncio.to_thread(store.save_brainstorm, ctx.org_id, d.model_copy(update={"job_id": job.id}))

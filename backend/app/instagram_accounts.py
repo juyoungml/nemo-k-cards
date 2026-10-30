@@ -218,7 +218,8 @@ def save(org_id: UUID, user_id: UUID, profile: instagram_api.Profile, token: ins
             "on conflict (org_id, ig_user_id) do update set username = excluded.username, "
             "account_type = excluded.account_type, token_ref = excluded.token_ref, "
             "token_expires_at = excluded.token_expires_at, status = 'connected', "
-            "connected_by = excluded.connected_by, connected_at = now(), disconnected_at = null returning id",
+            "connected_by = excluded.connected_by, connected_at = now(), disconnected_at = null, "
+            "revoked_at = null, revoked_reason = null, token_alerted_at = null, token_refreshed_at = null returning id",
             (org_id, profile.user_id, profile.username, profile.account_type, ref, expires, user_id)).fetchone()
         audit.insert(c, org_id, user_id, member[1] or "", "instagram.connected", f"@{profile.username}",
                      {"account": str(account_id), "ig_user_id": profile.user_id,
@@ -263,7 +264,7 @@ def callback(code: str | None, state: str | None, error: str | None) -> Redirect
 
 # ---------------------------------------------------------------- list, disconnect
 
-_COLS = "id, username, account_type, status, token_expires_at, connected_at"
+_COLS = "id, username, account_type, status, token_expires_at, connected_at, token_refreshed_at, revoked_reason"
 
 
 def list_accounts(ctx: Ctx) -> list[InstagramAccount]:
@@ -271,7 +272,8 @@ def list_accounts(ctx: Ctx) -> list[InstagramAccount]:
         rows = c.execute(f"select {_COLS} from instagram_accounts where org_id = %s and status <> 'disconnected' "
                          "order by connected_at, id", (ctx.org_id,)).fetchall()
     return [InstagramAccount(id=r[0], handle=f"@{r[1]}", account_type=r[2], status=r[3], token_expires_at=r[4],
-                             connected_at=r[5], live=r[3] == "connected") for r in rows]
+                             connected_at=r[5], token_refreshed_at=r[6], revoked_reason=r[7],
+                             live=r[3] == "connected") for r in rows]
 
 
 def disconnect(ctx: Ctx, account_id: UUID) -> None:

@@ -358,6 +358,53 @@ class Post(BaseModel):
         return self.finished_at is None
 
 
+# ---------------------------------------------------------------- Organization profile (#16)
+
+def _line(v: str) -> str:
+    return " ".join(str(v).split())
+
+
+def _items(v: list[str]) -> list[str]:
+    """Trim each entry, drop blanks and repeats (case-insensitive), keep the order given."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in v or []:
+        if (x := _line(x)) and x.lower() not in seen:
+            seen.add(x.lower())
+            out.append(x)
+    return out
+
+
+class OrgProfile(BaseModel):
+    """What the agents know about an Organization (GLOSSARY "Organization profile"). Every field is optional: an
+    empty profile means the agents write as a neutral guide for foreign visitors in Korea."""
+    model_config = ConfigDict(extra="forbid")
+
+    what_it_does: str = Field("", max_length=500)      # "A Seoul tourism office promoting the city's festivals"
+    audience: str = Field("", max_length=300)          # "Western travellers in their 20s and 30s, first visit"
+    home_region: str = Field("", max_length=100)       # "Seoul" / "Jeju" / "Busan"
+    usual_subjects: list[str] = Field(default_factory=list, max_length=12)  # "pop-ups", "night markets"
+    never_say: list[str] = Field(default_factory=list, max_length=30)       # "competitor brand names", "Black Friday"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clean(cls, v):
+        if isinstance(v, dict):
+            v = dict(v)
+            for k in ("what_it_does", "audience", "home_region"):
+                if isinstance(v.get(k), str):
+                    v[k] = v[k].strip() if k == "what_it_does" else _line(v[k])
+            for k, n in (("usual_subjects", 80), ("never_say", 200)):
+                if isinstance(v.get(k), list):
+                    v[k] = _items(v[k])
+                    if any(len(x) > n for x in v[k]):
+                        raise ValueError(f"each entry of {k} must be at most {n} characters")
+        return v
+
+    def is_empty(self) -> bool:
+        return not (self.what_it_does or self.audience or self.home_region or self.usual_subjects or self.never_say)
+
+
 class Job(BaseModel):
     id: str
     prompt: str
@@ -387,6 +434,9 @@ class Job(BaseModel):
     # Which text a person has changed on each slide (current index → "heading" / "body"), so fact sources (#25) say
     # "edited, re-check sources" instead of vouching for words the research never saw.
     edited_text: dict[int, list[Literal["heading", "body"]]] = Field(default_factory=dict)
+    # The Organization profile (#16) as it was when the Job started: every stage of this Job gives the agents the
+    # same one, even if an Admin edits the profile meanwhile. None on Jobs from before profiles.
+    org_profile: OrgProfile | None = None
 
 
 Scenario = Literal["good", "bad", "fail"]  # demo/scenarios/<name>/, same names as the Admin mock backend
@@ -489,6 +539,8 @@ class InstagramAccount(BaseModel):
     account_type: Literal["BUSINESS", "MEDIA_CREATOR"]
     status: Literal["connected", "expiring", "revoked"]
     token_expires_at: datetime | None
+    token_refreshed_at: datetime | None = None  # last automatic refresh (#22)
+    revoked_reason: str | None = None           # why it needs reconnecting (status revoked)
     connected_at: datetime
     followers: int | None = None    # not read yet: insights per Organization come later
     live: bool                      # status is connected (publishing can use it)

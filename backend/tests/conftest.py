@@ -53,7 +53,7 @@ for key, value in {
     "INSTAGRAM_ACCOUNTS_PER_ORG": "1",
     # Sign-in is checked against a fake Supabase whose signing key exists only in this process (see `auth_keys`).
     "SUPABASE_URL": "http://supabase.test", "SUPABASE_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": "",
-    "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_OAUTH_TOKEN": "",
+    "ANTHROPIC_API_KEY": "", "CLAUDE_CODE_OAUTH_TOKEN": "", "SMTP_URL": "",
 }.items():
     os.environ[key] = value
 

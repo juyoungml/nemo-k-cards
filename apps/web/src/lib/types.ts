@@ -318,6 +318,8 @@ export interface InstagramAccount {
   account_type: "BUSINESS" | "MEDIA_CREATOR";
   status: "connected" | "expiring" | "revoked";
   token_expires_at: string | null;
+  token_refreshed_at?: string | null; // last automatic refresh (#22: daily, within 14 days of expiry)
+  revoked_reason?: string | null; // why it needs reconnecting (status "revoked")
   connected_at: string;
   followers: number | null; // not read per Organization yet
   live: boolean; // connected and usable
@@ -459,4 +461,19 @@ export interface AuditEvent {
   target: string | null;
   detail: Record<string, unknown>;
   at: string;
+}
+
+// Organization profile (#16): what the agents know about the Organization. Admins edit it; every Member reads it.
+export interface OrgProfile {
+  what_it_does: string;
+  audience: string;
+  home_region: string;
+  usual_subjects: string[];
+  never_say: string[];
+}
+
+export interface OrgProfileState {
+  profile: OrgProfile;
+  complete: boolean; // false until an Admin saved something
+  updated_at?: string | null;
 }

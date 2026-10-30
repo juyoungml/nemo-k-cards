@@ -1,12 +1,14 @@
-# Safeguard policy: what @whatsonkorea must never post
+# Safeguard policy: what an Organization's account must never post
 
 The safeguard is the hard gate before publishing. A **block** finding means the deck can't be approved, and
 the only ways forward are to regenerate it or reject it. A **warn** finding is shown to the operator and does
 not stop publishing. Korea-specific dates, phrases and topics are in `sensitive_topics.yaml`, which is part of
 this policy.
 
-The audience is foreign visitors and residents of every nationality. The account is a neutral travel guide,
-so anything that would embarrass it in front of Korean or international readers counts.
+The audience is foreign visitors and residents of every nationality. Each Deck goes to the Organization's own public
+account (`org_profile` says who it is). Whatever the Organization does, the Deck is a guide for foreign readers,
+so anything that would embarrass it in front of Korean or international readers counts. The profile never relaxes
+this policy.
 
 ## Block
 
