@@ -127,7 +127,8 @@ def _run_stage_payloads(path: Path) -> list[tuple[str, ast.Dict]]:
 def test_every_agent_stage_gets_the_profile():
     """Every `run_stage` call (researcher, copywriter, reviewer, safeguard, planner) passes `org_profile`."""
     calls = (_run_stage_payloads(REPO / "backend/app/pipeline/orchestrator.py")
-             + _run_stage_payloads(REPO / "backend/app/brainstorms.py"))
+             + _run_stage_payloads(REPO / "backend/app/brainstorms.py")
+             + _run_stage_payloads(REPO / "backend/app/slide_actions.py"))
     agents = {agent for agent, _ in calls}
     assert agents == {"researcher", "copywriter", "reviewer", "safeguard", "planner"}
     for agent, payload in calls:

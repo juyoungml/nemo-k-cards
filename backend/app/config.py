@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Durable Jobs (#17, ADR 0002): DBOS keeps its checkpoints in the `dbos` schema of this same database.
     # Empty = DATABASE_URL. Set it only to give DBOS a different connection (e.g. Supabase's session pooler).
     dbos_database_url: str = ""
+    regenerations_per_deck: int = 10  # fair-use cap on "regenerate one slide" (#23): agent rewrites per Deck
     jobs_per_org: int = 2         # Jobs of one Organization running at once; the rest wait as QUEUED
     jobs_per_worker: int = 4      # Jobs one API/worker process runs at once (Chromium, agent CLIs)
     # Bump when the pipeline's stage list or order changes: a Job started under another version is not resumed

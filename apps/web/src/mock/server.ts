@@ -29,9 +29,13 @@ import type {
   OrgProfileState,
   PipelineStep,
   PolicyEvent,
+  PhotoChoice,
+  PhotoOption,
+  PhotoOptions,
   Post,
   PostState,
   SafeguardVerdict,
+  Slide,
   Scenario,
   SlideSources,
   VerificationReport,
@@ -90,7 +94,7 @@ interface MockJob {
     cancelledAt?: number;
   };
   /** Saved edits (#19): version 2, 3, … The safeguard "checks" each for CHECK_MS after it is saved. */
-  versions?: { version: number; deck: Omit<CardDeck, "job_id">; at: number; changes: DeckChange[] }[];
+  versions?: { version: number; deck: Omit<CardDeck, "job_id">; at: number; changes: DeckChange[]; action?: "edit" | "photo" | "regenerate" }[];
 }
 
 const CHECK_MS = 1500;
@@ -223,7 +227,7 @@ export function snapshot(job: MockJob, now = Date.now()): Job {
     created_at: new Date(job.createdAt).toISOString(),
     source: job.source,
     // Deck kind (#27): what was asked for; once researched, the scenario's kind (a guide scenario is a Guide Deck).
-    requested_kind: job.kind ?? null,
+    requested_kind: job.kind === undefined ? "event" : job.kind, // seeded Jobs predate the choice: Event Decks
     kind: job.kind ?? (reached("research") ? (sc.kind ?? "event") : job.source === "brainstorm" ? "event" : null),
     briefs: reached("research") ? briefs : [],
     guide: reached("research") ? (sc.guide ?? null) : null,
@@ -441,7 +445,8 @@ export function listVersions(id: string): DeckVersion[] | undefined {
   const first = { version: 1, deck: { ...(j.override?.deck ?? SCENARIOS[j.scenario].deck), job_id: j.id }, at: j.createdAt, changes: [] };
   return [first, ...(j.versions ?? []).map((v) => ({ ...v, deck: { ...v.deck, job_id: j.id } }))]
     .map((v) => ({
-      version: v.version, deck: v.deck, changes: v.changes, created_at: new Date(v.at).toISOString(), current: v.version === snap.deck_version,
+      version: v.version, deck: v.deck, changes: v.changes, action: "action" in v ? v.action : "edit",
+      created_at: new Date(v.at).toISOString(), current: v.version === snap.deck_version,
       edited_by: v.version === 1 ? null : "mock-user", edited_by_email: v.version === 1 ? null : "you@example.com",
       rerendered: v.changes.flatMap((c) => (c.slide != null ? [c.slide] : [])),
     }))
@@ -502,6 +507,87 @@ export function saveVersion(id: string, edit: Partial<DeckEdit>) {
   if (snap.status === "SCHEDULED")
     j.decision = { ...j.decision!, held: `the Deck was edited after approval (now version ${snap.deck_version! + 1}); approve it again to post it` };
   return { job: snapshot(j) } as const;
+}
+
+// ---------------------------------------------------------------- swap a photo, regenerate one slide (#23)
+
+const STOCK = [
+  { id: "popup-paper-goods", category: "popup", shows: "Bright minimal shop interior with paper goods and ceramics" },
+  { id: "gallery-white-room", category: "exhibition", shows: "White gallery room with framed works" },
+  { id: "hanji-lanterns-dusk", category: "festival", shows: "Hanji lanterns over a stream at dusk" },
+  { id: "theater-curtain", category: "performance", shows: "Red theater curtain and stage lights" },
+  { id: "tea-table-tteok", category: "experience", shows: "Tea table with tteok and cups" },
+  { id: "hanok-window-lattice", category: "other", shows: "Hanok window lattice in soft light" },
+];
+const REGEN_CAP = 10;
+// The mock scenarios' events (their briefs carry no category): what the API reads from EventBrief.category.
+const MOCK_CATEGORY: Record<string, string> = { "evt-1": "popup", "evt-2": "festival", "evt-3": "exhibition", "evt-b1": "other", "evt-b2": "other" };
+
+/** Same rules as the API: event slides only; stock of the event's category, once per Deck; or none. */
+type Ctx = { j: MockJob; snap: Job; slide: Slide; category: string };
+type Fail = { error: string; code: number };
+
+function photoContext(id: string, n: number): Ctx | Fail {
+  const j = store().jobs.get(id);
+  if (!j) return { error: "job not found", code: 404 };
+  const snap = snapshot(j);
+  const slide = snap.deck?.slides.find((s) => s.index === n);
+  if (!snap.deck || !slide) return { error: `slide ${n} is not in the Deck`, code: 404 };
+  if (slide.layout !== "event") return { error: "only event slides carry a photo", code: 409 };
+  const category = MOCK_CATEGORY[slide.event_id ?? ""] ?? "other";
+  return { j, snap, slide, category };
+}
+
+export function slidePhotos(id: string, n: number): PhotoOptions | Fail {
+  const c = photoContext(id, n);
+  if ("error" in c) return c;
+  const used = new Map(c.snap.deck!.slides.filter((s) => s.stock_id && s.index !== n).map((s) => [s.stock_id!, s.index]));
+  const options: PhotoOption[] = STOCK.map((e) => {
+    const why = e.category !== c.category ? `a ${e.category} photo on a ${c.category} event` : used.has(e.id) ? `already on slide ${used.get(e.id)! + 1}` : null;
+    return { source: "stock", stock_id: e.id, url: null, label: e.shows, credit: "Image · AI-generated", license: "ai_generated",
+      current: c.slide.stock_id === e.id, allowed: !why, why_not: why };
+  });
+  options.push({ source: "none", label: "No photo: a color poster", credit: "", license: "", current: !c.slide.stock_id, allowed: true });
+  return { slide_index: n, event_id: c.slide.event_id ?? "", event_title: c.slide.heading, options };
+}
+
+function nextVersion(j: MockJob, snap: Job, deck: Omit<CardDeck, "job_id">, changes: DeckChange[], action: "photo" | "regenerate") {
+  j.versions = [...(j.versions ?? []), { version: snap.deck_version! + 1, deck, at: Date.now(), changes, action }];
+  if (snap.status === "SCHEDULED") j.decision = { ...j.decision!, held: `the Deck was edited after approval (now version ${snap.deck_version! + 1}); approve it again to post it` };
+  return { job: snapshot(j) } as const;
+}
+
+export function swapPhoto(id: string, n: number, req: { base_version: number } & PhotoChoice) {
+  const c = photoContext(id, n);
+  if ("error" in c) return c;
+  if (!["READY_FOR_REVIEW", "SCHEDULED"].includes(c.snap.status)) return { error: `only a Deck in review or scheduled can be edited; this one is ${c.snap.status}`, code: 409 } as const;
+  if (req.base_version !== c.snap.deck_version) return { error: { code: "stale", message: `Not saved: someone saved version ${c.snap.deck_version}.` }, code: 409 } as const;
+  const opt = slidePhotos(id, n) as PhotoOptions;
+  const stockId = req.source === "stock" ? req.stock_id : null;
+  const o = opt.options.find((x) => x.source === req.source && (req.source !== "stock" || x.stock_id === stockId));
+  if (!o || !o.allowed) return { error: o?.why_not ?? "pick one of the photos offered", code: 422 } as const;
+  if (o.current) return { error: "that is already the slide's photo", code: 422 } as const;
+  const deck = { ...c.snap.deck!, slides: c.snap.deck!.slides.map((s) => (s.index === n ? { ...s, stock_id: stockId } : s)) };
+  const desc = (sid: string | null | undefined) => (sid ? `stock photo ${sid} (AI-generated)` : "no photo (poster)");
+  return nextVersion(c.j, c.snap, deck, [{ field: "slide.photo", slide: n, before: desc(c.slide.stock_id), after: desc(stockId) }], "photo");
+}
+
+export function regenerateSlide(id: string, n: number, req: { base_version: number; instruction?: string }) {
+  const j = store().jobs.get(id);
+  if (!j) return { error: "job not found", code: 404 } as const;
+  const snap = snapshot(j);
+  const slide = snap.deck?.slides.find((s) => s.index === n);
+  if (!snap.deck || !slide) return { error: `slide ${n} is not in the Deck`, code: 404 } as const;
+  if (!["READY_FOR_REVIEW", "SCHEDULED"].includes(snap.status)) return { error: `only a Deck in review or scheduled can be edited; this one is ${snap.status}`, code: 409 } as const;
+  if (req.base_version !== snap.deck_version) return { error: { code: "stale", message: `Not saved: someone saved version ${snap.deck_version}.` }, code: 409 } as const;
+  if ((j.versions ?? []).filter((v) => v.action === "regenerate").length >= REGEN_CAP)
+    return { error: `fair use: this Deck has had ${REGEN_CAP} slide rewrites, the most one Deck gets.`, code: 429 } as const;
+  // Mock rewrite: the first sentence, or a short line about the slide (the API asks the copywriter).
+  const first = slide.body.split(/(?<=\.)\s/)[0];
+  const body = first && first !== slide.body ? first : `${slide.heading}: worth a look this week.`;
+  const changes: DeckChange[] = [{ field: "slide.body", slide: n, from_slide: n, before: slide.body, after: body, by: "agent", ...(req.instruction ? { instruction: req.instruction } : {}) }];
+  const deck = { ...snap.deck, slides: snap.deck.slides.map((s) => (s.index === n ? { ...s, body } : s)) };
+  return nextVersion(j, snap, deck, changes, "regenerate");
 }
 
 export const isTerminal = (s: JobStatus) => ["READY_FOR_REVIEW", "REJECTED", "BLOCKED", "SCHEDULED", "PUBLISHED", "FAILED"].includes(s);

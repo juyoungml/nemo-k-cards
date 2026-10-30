@@ -24,6 +24,7 @@ from app import (
     orgs,
     posts,
     seed,
+    slide_actions,
     slide_sources,
     store,
 )
@@ -86,6 +87,7 @@ app.include_router(instagram_accounts.router)
 app.include_router(materials.router)
 app.include_router(posts.router)
 app.include_router(deck_versions.router)
+app.include_router(slide_actions.router)
 
 
 # Every Organization-owned read and write below goes through the store with the caller's Organization

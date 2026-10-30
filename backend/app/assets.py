@@ -27,6 +27,8 @@ import re
 import secrets
 import time
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -43,6 +45,10 @@ router = APIRouter()
 SLIDE = re.compile(r"slide-\d{1,3}(?:\.[0-9a-f]{8})?\.jpg")
 PIPELINE_SLIDE = re.compile(r"slide-\d{1,3}\.jpg")
 JOB_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+# A photo the host vetted for an event (#23, `photos/<event id>-<n>.<ext>`): shown to the Admin as a swap candidate,
+# never to Instagram (a slide is rendered from it instead).
+PHOTO = re.compile(r"[A-Za-z0-9_.-]{1,96}-\d\.(?:jpg|png|webp)")
+PHOTO_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
 ADMIN_TTL_S = 15 * 60
 # Admin links are rounded to this window so an <img> src stays the same between polls (the browser caches it)
 # and a link is valid for ADMIN_TTL_S to ADMIN_TTL_S + WINDOW_S.
@@ -99,6 +105,29 @@ def slide_files(job: Job) -> list[Path]:
     if job.slide_urls:
         return [folder / u.rsplit("/", 1)[-1] for u in job.slide_urls]
     return sorted(p for p in folder.glob("slide-*.jpg") if PIPELINE_SLIDE.fullmatch(p.name))
+
+
+def photo_link(org_id: UUID, job_id: str, file_url: str, now: float | None = None) -> str | None:
+    """An Admin link to one of the Job's vetted photos (a `file://` path under its `photos/` folder), or None."""
+    path = Path(url2pathname(urlparse(file_url).path)).resolve()
+    if path.parent != (settings.output_dir / job_id / "photos").resolve() or not PHOTO.fullmatch(path.name):
+        return None
+    return sign(org_id, job_id, f"photos/{path.name}", admin_exp(now))
+
+
+@router.get("/assets/{org_id}/{job_id}/photos/{name}", include_in_schema=False)
+async def photo(org_id: UUID, job_id: str, name: str, exp: int = 0, sig: str = "") -> FileResponse:
+    """A vetted photo for the Admin's swap picker (#23). Admin links only (no `use=ig`); same single 404 as slides."""
+    if not (PHOTO.fullmatch(name) and JOB_ID.fullmatch(job_id) and valid(org_id, job_id, f"photos/{name}", exp, sig)):
+        raise HTTPException(404, "not found")
+    if await asyncio.to_thread(store.get_job, org_id, job_id) is None:
+        raise HTTPException(404, "not found")
+    path = settings.output_dir / job_id / "photos" / name
+    if not path.is_file():
+        raise HTTPException(404, "not found")
+    return FileResponse(path, media_type=PHOTO_TYPES[name.rsplit(".", 1)[1]],
+                        headers={"cache-control": f"private, max-age={max(0, min(exp - int(time.time()), ADMIN_TTL_S))}",
+                                 "x-content-type-options": "nosniff", "referrer-policy": "no-referrer"})
 
 
 @router.get("/assets/{org_id}/{job_id}/{name}", include_in_schema=False)

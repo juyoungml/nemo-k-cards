@@ -83,7 +83,7 @@ async def test_collect_downloads_first_good_photo(tmp_path: Path, monkeypatch):
 
 # ---------------------------------------------------------------- stock (Mix policy)
 
-from app.schemas import CardDeck  # noqa: E402
+from app.schemas import CardDeck
 
 CAT = [{"id": "popup-paper-goods", "file": "popup.jpg"}, {"id": "hanji-lanterns-dusk", "file": "festival.jpg"}]
 

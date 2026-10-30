@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Check, ChevronDown, GripVertical, Loader2, ShieldAlert, ShieldCheck, TriangleAlert, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, GripVertical, Loader2, ShieldAlert, ShieldCheck, Sparkles, TriangleAlert, Undo2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Finding } from "@/components/safeguard-panel";
@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, assetUrl } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { ROLE_LABEL, atLeast, useMe } from "@/lib/roles";
-import type { DeckChange, DeckEdit, DeckVersion, FitResult, Issue, Job, SafeguardFinding, Slide } from "@/lib/types";
+import type { DeckChange, DeckEdit, DeckVersion, FitResult, Issue, Job, PhotoChoice, PhotoOption, PhotoOptions, SafeguardFinding, Slide } from "@/lib/types";
+import { useApi } from "@/lib/use-api";
 import { cn } from "@/lib/utils";
 
 // The Deck editor (#19), laid out as a slide inspector (DESIGN.md, design choice 05b "B"): a filmstrip to pick and
@@ -150,6 +151,23 @@ export function useDeckEditor(job: Job, onChange: (job: Job) => void) {
       setSaving(false);
     }
   };
+  /** A one-click change made on the server (#23: swap a photo, regenerate a slide): it becomes the next version. Only
+   * without unsaved text changes, so nothing typed is lost or mixed in. */
+  const act = async (fn: () => Promise<Job>, done: string) => {
+    setSaving(true);
+    setProblem(undefined);
+    try {
+      const saved = await fn();
+      onChange(saved);
+      const fresh = draftOf(saved);
+      setState({ draft: fresh, saved: fresh, jobId: saved.id });
+      setAnnounce(done);
+    } catch (e) {
+      setProblem(problemOf(e));
+    } finally {
+      setSaving(false);
+    }
+  };
   /** Jump to the slide that was at `baseIndex` in the saved version (Issues and findings point there). */
   const selectBase = (baseIndex: number) => {
     const at = draft?.slides.findIndex((s) => s.from_index === baseIndex) ?? -1;
@@ -158,7 +176,7 @@ export function useDeckEditor(job: Job, onChange: (job: Job) => void) {
 
   return {
     job, role, version, draft, dirty, editable, mayEdit, tags, current, saving, problem, announce,
-    select: setSelected, selectBase, setSlide, move, update, save, discard, reload,
+    select: setSelected, selectBase, setSlide, move, update, save, discard, reload, act,
   };
 }
 export type DeckEditorState = ReturnType<typeof useDeckEditor>;
@@ -216,13 +234,21 @@ function SafeguardChip({ job }: { job: Job }) {
   );
 }
 
-const FIELD: Record<DeckChange["field"], string> = { order: "order", "slide.heading": "heading", "slide.body": "body", caption: "caption", hashtags: "hashtags" };
+const FIELD: Record<DeckChange["field"], string> = {
+  order: "order",
+  "slide.heading": "heading",
+  "slide.body": "body",
+  "slide.photo": "photo",
+  caption: "caption",
+  hashtags: "hashtags",
+};
 
 function changeLine(c: DeckChange) {
   if (c.field === "order") return "Slides reordered";
   if (c.field === "caption") return "Caption";
   if (c.field === "hashtags") return `Hashtags: ${(c.before as string[]).join(" ") || "—"} → ${(c.after as string[]).join(" ") || "—"}`;
-  return `Slide ${(c.slide ?? 0) + 1} ${FIELD[c.field]}`;
+  if (c.field === "slide.photo") return `Slide ${(c.slide ?? 0) + 1} photo: ${String(c.before)} → ${String(c.after)}`;
+  return `Slide ${(c.slide ?? 0) + 1} ${FIELD[c.field]}${c.by === "agent" ? " (agent rewrite)" : ""}`;
 }
 
 /** "v3 ▾": every saved version, newest first, with who saved it, when, and what changed (before → after). */
@@ -443,7 +469,7 @@ function Filmstrip({ editor, slides, images }: { editor: DeckEditorState; slides
   );
 }
 
-type Tab = "text" | "sources" | "issues" | "caption";
+type Tab = "text" | "photo" | "sources" | "issues" | "caption";
 
 function Inspector({ editor, editable }: { editor: DeckEditorState; editable: boolean }) {
   const { job, draft, current, tags } = editor;
@@ -458,6 +484,7 @@ function Inspector({ editor, editable }: { editor: DeckEditorState; editable: bo
   const nSources = src ? src.facts.length + src.links.length : 0;
   const tabs: { key: Tab; label: string; count?: number; alert?: boolean }[] = [
     { key: "text", label: "Text" },
+    ...(d.layout === "event" ? [{ key: "photo" as const, label: "Photo" }] : []),
     { key: "sources", label: "Sources", count: nSources },
     { key: "issues", label: "Issues", count: issues.length + findings.length, alert: issues.some((i) => i.severity === "block") || findings.some((f) => f.severity === "block") },
     { key: "caption", label: "Caption" },
@@ -515,6 +542,7 @@ function Inspector({ editor, editable }: { editor: DeckEditorState; editable: bo
 
       <div role="tabpanel" id={`${tabsId}-${tab}-panel`} aria-labelledby={`${tabsId}-${tab}`}>
         {tab === "text" && <TextTab editor={editor} editable={editable} />}
+        {tab === "photo" && d.layout === "event" && <PhotoTab editor={editor} editable={editable} />}
         {tab === "sources" && <SlideSourcesPanel job={job} slide={job.deck!.slides.findIndex((s) => s.index === base)} embedded />}
         {tab === "sources" && !src && <p className="text-xs text-muted-foreground">No sources recorded for this slide.</p>}
         {tab === "issues" && (
@@ -621,6 +649,116 @@ function TextTab({ editor, editable }: { editor: DeckEditorState; editable: bool
         )}
       </div>
       {editable && job.status === "READY_FOR_REVIEW" && <FitIndicator editor={editor} />}
+      {editable && <RegenerateBox editor={editor} />}
+    </div>
+  );
+}
+
+/** "Unsaved text changes" blocks the one-click actions: they save on the server, from the saved version. */
+function OneClickNote({ editor }: { editor: DeckEditorState }) {
+  if (!editor.dirty) return null;
+  return <p className="text-[11px] text-warning">Save or discard your text changes first.</p>;
+}
+
+/** Regenerate one slide (#23): the copywriter rewrites this slide's text from the research; nothing else changes. */
+function RegenerateBox({ editor }: { editor: DeckEditorState }) {
+  const { job, current, draft, dirty, saving } = editor;
+  const [instruction, setInstruction] = useState("");
+  const n = draft!.slides[current].from_index;
+  const run = () =>
+    void editor
+      .act(() => api.regenerateSlide(job.id, n, draft!.base, instruction), `Slide ${current + 1} rewritten. The safeguard is checking the new version.`)
+      .then(() => setInstruction(""));
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <label htmlFor="regen-instruction" className="block text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+        Rewrite with the agent
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <input
+          id="regen-instruction"
+          className={cn(inputCls, "min-w-0 flex-1")}
+          value={instruction}
+          maxLength={300}
+          placeholder="Optional: shorter, lead with the price, friendlier…"
+          disabled={dirty || saving}
+          onChange={(e) => setInstruction(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && !dirty && !saving && run()}
+        />
+        <Button variant="outline" size="sm" disabled={dirty || saving} onClick={run}>
+          {saving ? <Loader2 className="motion-safe:animate-spin" /> : <Sparkles />} Regenerate slide
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Rewrites only this slide from the same research and saves it as a new version. Other slides stay as they are.
+      </p>
+      <OneClickNote editor={editor} />
+    </div>
+  );
+}
+
+/** Swap a photo (#23): the event's other vetted photos, the stock set, or none (a color poster). */
+function PhotoTab({ editor, editable }: { editor: DeckEditorState; editable: boolean }) {
+  const { job, current, draft, dirty, saving } = editor;
+  const n = draft!.slides[current].from_index;
+  const version = job.deck_version ?? 1;
+  const { data: opts, error } = useApi<PhotoOptions>(() => api.slidePhotoOptions(job.id, n), [job.id, n, version]);
+  if (error) return <p className="text-xs text-destructive">{error.message}</p>;
+  if (!opts) return <p className="text-xs text-muted-foreground">Loading photos…</p>;
+  const pick = (o: PhotoOption) => {
+    const choice: PhotoChoice =
+      o.source === "candidate" ? { source: "candidate", candidate: o.candidate ?? 0 } : o.source === "stock" ? { source: "stock", stock_id: o.stock_id ?? "" } : { source: "none" };
+    void editor.act(() => api.swapPhoto(job.id, n, draft!.base, choice), `Photo on slide ${current + 1} changed. The safeguard is checking the new version.`);
+  };
+  const official = opts.options.filter((o) => o.source === "candidate");
+  const stock = opts.options.filter((o) => o.source === "stock");
+  const none = opts.options.find((o) => o.source === "none")!;
+  const card = (o: PhotoOption) => (
+    <li key={`${o.source}-${o.candidate ?? o.stock_id ?? "none"}`} className={cn("overflow-hidden rounded-lg border", o.current && "border-2 border-primary")}>
+      {o.url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={assetUrl(o.url)} alt={o.label} className={cn("aspect-[4/5] w-full object-cover", !o.allowed && "opacity-40")} />
+      ) : (
+        <div className="grid aspect-[4/5] w-full place-items-center bg-muted text-xs text-muted-foreground">Poster</div>
+      )}
+      <div className="space-y-1 p-2">
+        <p className="line-clamp-2 text-[11px] text-muted-foreground" title={o.label}>
+          {o.source === "stock" ? o.label : o.credit || o.label}
+        </p>
+        {o.current ? (
+          <StatusBadge tone="info">On the slide</StatusBadge>
+        ) : o.allowed ? (
+          <Button size="sm" variant="outline" className="w-full" disabled={!editable || dirty || saving} onClick={() => pick(o)}>
+            Use this
+          </Button>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">{o.why_not}</p>
+        )}
+      </div>
+    </li>
+  );
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        {opts.event_title}. Official photos were vetted for this event at research time. Stock photos are AI-generated and labeled on the card.
+      </p>
+      <OneClickNote editor={editor} />
+      <section className="space-y-1.5">
+        <h3 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Official photos</h3>
+        {official.length ? (
+          <ul className="grid grid-cols-3 gap-2">{official.map(card)}</ul>
+        ) : (
+          <p className="text-xs text-muted-foreground">None usable were found for this event.</p>
+        )}
+      </section>
+      <section className="space-y-1.5">
+        <h3 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Stock</h3>
+        <ul className="grid grid-cols-3 gap-2">{stock.map(card)}</ul>
+      </section>
+      <section className="space-y-1.5">
+        <h3 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">No photo</h3>
+        <ul className="grid grid-cols-3 gap-2">{card(none)}</ul>
+      </section>
     </div>
   );
 }

@@ -141,15 +141,20 @@ async def _download(img: ImageAsset, dest: Path, client: httpx.AsyncClient) -> s
     return None
 
 
-async def collect(briefs: list[EventBrief], ok_urls: set[str], out_dir: Path) -> tuple[dict[str, Vetted], list[str]]:
-    """First usable photo per event → {event_id: Vetted}, plus human-readable log lines."""
+MAX_CANDIDATES = 3  # photos vetted per event: the first goes on the slide, the rest can be swapped in (#23)
+
+
+async def collect_all(briefs: list[EventBrief], ok_urls: set[str], out_dir: Path
+                      ) -> tuple[dict[str, list[Vetted]], list[str]]:
+    """Every usable photo per event (up to MAX_CANDIDATES, in the researcher's order) → {event_id: [Vetted]}, plus
+    human-readable log lines. Each is a local copy under `out_dir/photos`, so a swap in Review needs no network."""
     photo_dir = out_dir / "photos"
     photo_dir.mkdir(parents=True, exist_ok=True)
-    found: dict[str, Vetted] = {}
+    found: dict[str, list[Vetted]] = {}
     log: list[str] = []
 
     async def one(brief: EventBrief, client: httpx.AsyncClient) -> None:
-        for n, img in enumerate(brief.images[:3]):
+        for n, img in enumerate(brief.images[:MAX_CANDIDATES]):
             if reason := reject_reason(img, brief, ok_urls):
                 log.append(f"{brief.id}: photo skipped, {reason}")
                 continue
@@ -158,13 +163,19 @@ async def collect(briefs: list[EventBrief], ok_urls: set[str], out_dir: Path) ->
                 log.append(f"{brief.id}: photo skipped, {reason}")
                 continue
             local = next(photo_dir.glob(f"{brief.id}-{n}.*"))
-            found[brief.id] = Vetted(brief.id, img.model_copy(update={"url": local.as_uri()}), img.url)
+            found.setdefault(brief.id, []).append(
+                Vetted(brief.id, img.model_copy(update={"url": local.as_uri()}), img.url))
             log.append(f"{brief.id}: photo ok ({img.license}, {img.credit})")
-            return
 
     async with safe_fetch.client(timeout=8) as client:
         await asyncio.gather(*(one(b, client) for b in briefs))
     return found, log
+
+
+async def collect(briefs: list[EventBrief], ok_urls: set[str], out_dir: Path) -> tuple[dict[str, Vetted], list[str]]:
+    """First usable photo per event → {event_id: Vetted}, plus human-readable log lines."""
+    found, log = await collect_all(briefs, ok_urls, out_dir)
+    return {k: v[0] for k, v in found.items()}, log
 
 
 def attach_vetted(deck: CardDeck, vetted: dict[str, Vetted]) -> list[str]:
@@ -187,6 +198,12 @@ STOCK_DIR = Path(__file__).resolve().parents[1] / "renderer" / "stock"
 def stock_catalog() -> list[dict]:
     """What each stock image shows and what it may / may not be used for. The copywriter reads this."""
     return json.loads((STOCK_DIR / "catalog.json").read_text())
+
+
+def stock_asset(entry: dict) -> ImageAsset:
+    """A stock catalog entry as a slide image: a local file, labeled AI-generated on the card."""
+    return ImageAsset(url=(STOCK_DIR / entry["file"]).as_uri(), license="ai_generated",
+                      credit="Image · AI-generated", allow_overlay=True)
 
 
 def attach_stock(deck: CardDeck, catalog: list[dict] | None = None) -> list[str]:
@@ -215,7 +232,6 @@ def attach_stock(deck: CardDeck, catalog: list[dict] | None = None) -> list[str]
             sl.stock_id = None
             continue
         used.add(pick)
-        sl.image = ImageAsset(url=(STOCK_DIR / by_id[pick]["file"]).as_uri(), license="ai_generated",
-                              credit="Image · AI-generated", allow_overlay=True)
+        sl.image = stock_asset(by_id[pick])
         log.append(f"slide {sl.index + 1}: stock photo '{pick}' (AI-generated, labeled)")
     return log

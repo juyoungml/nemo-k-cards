@@ -401,7 +401,9 @@ async def _photos(s: Stage) -> None:
     included = _included(job)
     vetted: dict[str, photos.Vetted] = {}
     if any(b.images for b in included):
-        vetted, photo_log = await photos.collect(included, _ok_urls(job), settings.output_dir / job.id)
+        every, photo_log = await photos.collect_all(included, _ok_urls(job), settings.output_dir / job.id)
+        vetted = {k: v[0] for k, v in every.items()}
+        job.photo_candidates = {k: [x.asset for x in v] for k, v in every.items()}  # for swaps in Review (#23)
         for line in photo_log:
             r.log("verify", line, "info" if "photo ok" in line else "warn")
     r.log("verify", f"photos: {len(vetted)}/{len(included)} events have a usable photo"

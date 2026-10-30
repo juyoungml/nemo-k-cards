@@ -170,7 +170,7 @@ async def test_older_jobs_load_as_event_decks():
     raw = job.model_dump(mode="json")
     raw.pop("kind"), raw.pop("requested_kind")
     loaded = type(job).model_validate(raw)
-    assert loaded.kind == "event" and loaded.requested_kind is None
+    assert loaded.kind == "event" and loaded.requested_kind == "event"  # not shown as the researcher's pick
 
 
 # ---------------------------------------------------------------- live research (fake agent)
