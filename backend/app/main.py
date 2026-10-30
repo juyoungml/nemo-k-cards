@@ -244,11 +244,15 @@ def _pick_account(ctx: auth.Ctx, account_id: UUID | None, mode: str) -> dict | N
     """The Instagram account the Post goes to: one of this Organization's live (connected or expiring) accounts,
     read under RLS. Preselected when there is exactly one; a mock post may go without any."""
     with store.tenant(ctx.org_id) as c:
-        rows = c.execute("select id, ig_user_id, username from instagram_accounts where org_id = %s "
-                         "and status in ('connected', 'expiring') order by connected_at, id",
+        rows = c.execute("select id, ig_user_id, username, status from instagram_accounts where org_id = %s "
+                         "and status in ('connected', 'expiring', 'revoked') order by connected_at, id",
                          (ctx.org_id,)).fetchall()
-    live = [{"id": r[0], "ig_user_id": r[1], "username": r[2], "handle": f"@{r[2]}"} for r in rows]
+    live = [{"id": r[0], "ig_user_id": r[1], "username": r[2], "handle": f"@{r[2]}"} for r in rows if r[3] != "revoked"]
+    revoked = {r[0]: f"@{r[2]}" for r in rows if r[3] == "revoked"}
     if account_id is not None:
+        if account_id in revoked:  # its token was revoked or expired (#22): say what to do
+            raise HTTPException(409, f"{revoked[account_id]} needs reconnecting: an Admin can reconnect it on the "
+                                     "Instagram page, then approve again")
         if not (match := [a for a in live if a["id"] == account_id]):
             raise HTTPException(422, "pick one of this Organization's connected Instagram accounts")
         return match[0]
@@ -258,6 +262,9 @@ def _pick_account(ctx: auth.Ctx, account_id: UUID | None, mode: str) -> dict | N
         raise HTTPException(422, "this Organization has several Instagram accounts: choose one (account_id)")
     if mode == "mock":
         return None
+    if revoked:
+        raise HTTPException(409, f"{', '.join(revoked.values())} needs reconnecting: an Admin can reconnect it on the "
+                                 "Instagram page, then approve again")
     raise HTTPException(422, "connect an Instagram account first: a dry run or a real post goes to the "
                              "Organization's own account")
 

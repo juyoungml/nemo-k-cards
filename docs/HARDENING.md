@@ -92,6 +92,8 @@ not), restart mid-publish (DBOS), double Approve, 24 h container expiry, revoked
 
 **Done when:** the token's expiry is visible, refreshes automatically, and an expired token raises an alert, not a silent failure.
 
+**Status (#22):** done. A daily DBOS schedule refreshes tokens within 14 days of expiry; a revoked or expired token marks the account "Reconnect needed" and emails the Admins (`SMTP_URL`); the Instagram page shows the expiry and the last refresh.
+
 ### PUB-4 Rate-limit-blind Instagram API usage
 **P1** *(verified)*
 

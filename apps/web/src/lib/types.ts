@@ -302,6 +302,8 @@ export interface InstagramAccount {
   account_type: "BUSINESS" | "MEDIA_CREATOR";
   status: "connected" | "expiring" | "revoked";
   token_expires_at: string | null;
+  token_refreshed_at?: string | null; // last automatic refresh (#22: daily, within 14 days of expiry)
+  revoked_reason?: string | null; // why it needs reconnecting (status "revoked")
   connected_at: string;
   followers: number | null; // not read per Organization yet
   live: boolean; // connected and usable
